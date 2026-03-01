@@ -154,6 +154,57 @@ def start(
 
 
 # ---------------------------------------------------------------------------
+# vanguard sse
+# ---------------------------------------------------------------------------
+
+@app.command()
+def sse(
+    server: str = typer.Option(
+        ...,
+        "--server", "-s",
+        help='The MCP server command to wrap. e.g. "npx @modelcontextprotocol/server-filesystem ."',
+    ),
+    host: str = typer.Option("0.0.0.0", "--host", help="Binding host for the SSE server."),
+    port: int = typer.Option(
+        int(os.getenv("PORT", "8080")),
+        "--port", "-p",
+        help="Port to listen on. Defaults to $PORT or 8080.",
+    ),
+    rules_dir: str = typer.Option("rules", "--rules-dir", "-r"),
+    log_file: str = typer.Option("audit.log", "--log-file", "-l"),
+    semantic: bool = typer.Option(False, "--semantic/--no-semantic"),
+    behavioral: bool = typer.Option(True, "--behavioral/--no-behavioral"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """
+    Start the Vanguard proxy in SSE (Network) mode.
+    Exposes a public HTTP endpoint for remote MCP agents.
+    """
+    # Configure logging
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
+
+    # Load config
+    config = ProxyConfig()
+    config.rules_dir = rules_dir
+    config.log_file = log_file
+    config.semantic_enabled = semantic
+    config.behavioral_enabled = behavioral
+
+    import shlex
+    server_cmd = shlex.split(server)
+
+    from core.sse_server import run_sse_server
+    import asyncio
+    asyncio.run(run_sse_server(
+        server_command=server_cmd,
+        host=host,
+        port=port,
+        config=config
+    ))
+
+
+# ---------------------------------------------------------------------------
 # vanguard info
 # ---------------------------------------------------------------------------
 

@@ -16,8 +16,8 @@ logger = logging.getLogger("vanguard.vex")
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
 
-VEX_API_URL = os.getenv("VANGUARD_VEX_API_URL", "http://localhost:8000/api/v1")
-VEX_JWT = os.getenv("VANGUARD_VEX_JWT", "")
+VEX_API_URL = os.getenv("VANGUARD_VEX_URL", os.getenv("VANGUARD_VEX_API_URL", "http://localhost:8000/api/v1"))
+VEX_JWT = os.getenv("VANGUARD_VEX_KEY", os.getenv("VANGUARD_VEX_JWT", ""))
 _agent_id: Optional[str] = os.getenv("VANGUARD_VEX_AGENT_ID", None)
 
 # ─── Agent Management ────────────────────────────────────────────────────────

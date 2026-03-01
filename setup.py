@@ -20,6 +20,8 @@ setup(
         "rich>=13.0.0",
         "pydantic>=2.0.0",
         "python-dotenv>=1.0.0",
+        "starlette>=0.30.0",
+        "uvicorn>=0.23.0",
     ],
     extras_require={
         "semantic": ["llama-cpp-python>=0.2.0"],

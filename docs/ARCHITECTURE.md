@@ -6,15 +6,15 @@ McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communicatio
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        AI AGENT (Claude, GPT, etc.)              │
+│              AGENT (Local CLI or Remote via SSE)                 │
 └────────────────────────────┬─────────────────────────────────────┘
-                             │  JSON-RPC over stdin/stdout
+                             │  JSON-RPC (stdio or HTTP/SSE)
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                    McpVanguard Proxy (core/proxy.py)             │
+│                    McpVanguard Proxy Engine                      │
 │                                                                  │
-│  stdin ──► [INTERCEPTOR] ──► [RULES ENGINE] ──► [FORWARDER]     │
-│                                    │                             │
+│  [Transport Layer] ──► [RULES ENGINE] ──► [SUBPROCESS PUMP]      │
+│  (Stdio/SSE Bridge)                │                             │
 │                         ┌──────────┼──────────┐                 │
 │                         ▼          ▼           ▼                 │
 │                     [Layer 1]  [Layer 2]   [Layer 3]            │
@@ -35,7 +35,7 @@ McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communicatio
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                  Real MCP Server (any MCP-compatible tool)       │
+│                  Real MCP Server Subprocess                      │
 │             (filesystem, browser, database, APIs, etc.)          │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -56,12 +56,14 @@ McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communicatio
 
 **Async Architecture:**
 ```
-Main Event Loop (uvloop)
-├── read_from_agent()     → infinite async reader on agent stdin
-│   └── on_message()      → runs rule checks, then writes to server stdin
-├── read_from_server()    → infinite async reader on server stdout
-│   └── on_response()     → runs response filter, then writes to agent stdout
-└── session_tracker()     → periodic behavioral analysis tick (1s)
+Main Event Loop
+├── [Transport] ──────────┐
+│   ├── read_agent()      │ → asyncio.StreamReader (stdio or sse_bridge)
+│   └── write_agent()     │ → asyncio.StreamWriter (stdio or sse_bridge)
+├── [Subprocess]          │
+│   ├── read_server()     │ → server stdout pump
+│   └── write_server()    │ → server stdin pump
+└── [Rules Engine]        │ → L1/L2/L3 sequential inspection
 ```
 
 **Latency Budget:**
@@ -178,3 +180,17 @@ Tracks patterns across an entire session using a **sliding window** counter.
  ```
  
  This cryptographically guarantees that all intercepted malicious intents are mathematically verifiable by Enterprise Auditors, achieving absolute non-repudiation.
+
+---
+
+### `core/sse_server.py` — The Cloud Gateway
+
+The `SSE Bridge` transforms Vanguard into an internet-reachable server. It uses **Starlette** as the ASGI web server and the **MCP Python SDK's `SseServerTransport`** to bridge HTTP traffic into Vanguard's JSON-RPC inspection pipeline.
+
+**Data Flow:**
+1.  **Agent** connects to `GET /sse/`.
+2.  **Starlette** establishes a persistent SSE stream.
+3.  **Vanguard** spawns the target MCP server subprocess.
+4.  **Agent** sends tool calls via `POST /messages`.
+5.  **SSE Bridge** pipes the POST body into `VanguardProxy` for rules inspection.
+6.  **Vanguard** proxies the "Allowed" call to the server and reels the response back via the SSE stream.

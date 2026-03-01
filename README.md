@@ -21,16 +21,17 @@ Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Buil
 # 1. Install
 pip install mcp-vanguard
 
-# 2. Wrap any MCP server (e.g., filesystem server)
-vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
+# 2. Start as a Cloud Security Gateway (SSE)
+# This allows remote agents to connect over HTTP
+vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 
-# 3. Enable advanced intelligence (Layer 2 + 3)
-vanguard start --server "..." --semantic --behavioral
+# 3. Traditional Stdio Wrap
+vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 
 # 4. Enable VEX Flight Recorder (Immutable Audit)
 export VANGUARD_VEX_URL="https://api.vexprotocol.com"
 export VANGUARD_VEX_KEY="your-agent-jwt"
-vanguard start --server "..." --behavioral
+vanguard sse --server "..." --behavioral
 ```
 
 ---
@@ -43,6 +44,7 @@ McpVanguard sits at the **Interception Layer** of the Provnai stack. It prevents
 
 | Layer | Component | Defense Mechanism | Performance |
 |-------|-----------|-------------------|-------------|
+| **L0** | **Cloud Gateway** | SSE/Network Bridge for remote agent access | <5ms |
 | **L1** | **Static Rules** | 60+ security signatures across 5 categories | <1ms |
 | **L2** | **Semantic Intelligence** | Local Ollama LLM intent classification | Async |
 | **L3** | **Behavioral Analysis** | Sliding-window anomaly detection (Scraping/Enum) | Stateful |

@@ -6,24 +6,32 @@ By sitting perfectly in the middle of standard `stdio` communication, Vanguard a
 
 This guide outlines how a CISO or Infrastructure Team can deploy McpVanguard into a production environment.
 
-## 1. The Wedge Architecture
+Vanguard is transport-agnostic and supports two main deployment modes:
+1.  **Local Stdio Mode**: For CLI-based agents running on the same machine.
+2.  **Cloud SSE Mode**: For remote agents connecting over the internet (Railway/Docker).
 
-Vanguard acts as a literal "wedge" in your subprocess calls.
-
-**Standard MCP Execution:**
-`Agent Process` ↔ (`stdio`) ↔ `MCP Server Process`
-
-**Vanguard Interception:**
+### Interception Flow (Stdio):
 `Agent Process` ↔ (`stdio`) ↔ **`McpVanguard`** ↔ (`stdio`) ↔ `MCP Server Process`
+
+### Interception Flow (SSE):
+`Remote Agent` ↔ (`HTTPS/SSE`) ↔ **`McpVanguard (SSE Bridge)`** ↔ (`stdio`) ↔ `MCP Server Process`
 
 Because Vanguard communicates via JSON-RPC 2.0 over `stdin`/`stdout`, your agent believes it is talking directly to the server.
 
-### Starting the Proxy
+### 1. Local Stdio Mode
 
-To start Vanguard, simply pass your original MCP server execution command as arguments:
+To wrap a local MCP server, use the `start` command:
 
 ```bash
-vanguard -- npx -y @modelcontextprotocol/server-filesystem /var/data
+vanguard start --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
+```
+
+### 2. Cloud SSE Mode (Gateway)
+
+To expose Vanguard as an internet-reachable security gateway (e.g., on Railway), use the `sse` command:
+
+```bash
+vanguard sse --server "npx -y @modelcontextprotocol/server-filesystem /var/data" --port 8080
 ```
 
 ## 2. L2 Semantic Scalability (OpenAI Integration)

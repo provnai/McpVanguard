@@ -105,7 +105,13 @@ class VanguardProxy:
     all JSON-RPC traffic between the agent and the server.
     """
 
-    def __init__(self, server_command: list[str], config: Optional[ProxyConfig] = None):
+    def __init__(
+        self,
+        server_command: list[str],
+        config: Optional[ProxyConfig] = None,
+        agent_reader: Optional[asyncio.StreamReader] = None,
+        agent_writer: Optional[asyncio.StreamWriter] = None,
+    ):
         self.server_command = server_command
         self.config = config or ProxyConfig()
         self.session_manager = SessionManager()
@@ -114,6 +120,10 @@ class VanguardProxy:
         self._server_process: Optional[asyncio.subprocess.Process] = None
         self._session: Optional[SessionState] = None
         self._stats = {"allowed": 0, "blocked": 0, "warned": 0, "total": 0}
+
+        # Transport Injection
+        self.agent_reader = agent_reader
+        self.agent_writer = agent_writer
 
         logger.info(
             f"[Vanguard] Loaded {self.rules_engine.rule_count} rules from '{self.config.rules_dir}'"
@@ -163,18 +173,20 @@ class VanguardProxy:
 
     async def _pump_agent_to_server(self):
         """
-        Read JSON-RPC messages from agent (our stdin),
-        inspect them, then forward or block.
+        Read JSON-RPC messages from agent, inspect them, then forward or block.
         """
         loop = asyncio.get_event_loop()
 
         while True:
             try:
-                # Use run_in_executor to read from stdin to avoid epoll() EPERM issues
-                # when stdin is not a pipe/TTY (e.g., /dev/null in Docker/Railway)
-                line = await loop.run_in_executor(None, sys.stdin.buffer.readline)
+                if self.agent_reader:
+                    # Generic reader (e.g. SSE)
+                    line = await self.agent_reader.readline()
+                else:
+                    # Default: Stdio with EPERM fix
+                    line = await loop.run_in_executor(None, sys.stdin.buffer.readline)
             except Exception as e:
-                logger.error(f"[Vanguard] Error reading stdin: {e}")
+                logger.error(f"[Vanguard] Error reading from agent: {e}")
                 break
 
             if not line:
@@ -284,13 +296,8 @@ class VanguardProxy:
                 except Exception as e:
                     logger.error(f"[Vanguard] Error in response inspection: {e}")
 
-            # Forward response directly to agent (stdout)
-            sys.stdout.buffer.write(line)
-            sys.stdout.buffer.flush()
-
-            # Forward response directly to agent (stdout)
-            sys.stdout.buffer.write(line)
-            sys.stdout.buffer.flush()
+            # Forward response to agent
+            await self._write_to_agent(line.decode("utf-8", errors="replace"))
 
     async def _pump_server_stderr(self):
         """Forward server's stderr to our stderr (for debugging)."""
@@ -360,11 +367,19 @@ class VanguardProxy:
                 logger.error(f"[Vanguard] Failed to write to server: {e}")
 
     async def _write_to_agent(self, data: str):
-        """Write a line back to the agent (our stdout)."""
-        # ⚠️ Windows Fix: Use binary buffer to avoid encoding issues
+        """Write a line back to the agent (stdout or network transport)."""
+        if not data.endswith("\n"):
+            data += "\n"
+
         try:
-            sys.stdout.buffer.write((data + "\n").encode("utf-8"))
-            sys.stdout.buffer.flush()
+            if self.agent_writer:
+                # Generic writer
+                self.agent_writer.write(data.encode("utf-8"))
+                await self.agent_writer.drain()
+            else:
+                # Default: Stdio
+                sys.stdout.buffer.write(data.encode("utf-8"))
+                sys.stdout.buffer.flush()
         except Exception as e:
             logger.error(f"[Vanguard] Failed to write to agent: {e}")
 

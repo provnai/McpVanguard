@@ -1,14 +1,18 @@
 {
     "name": "McpVanguard Proxy",
-    "description": "The Interception & Verification Layer for MCP Agents.",
+    "description": "Cloud-Native Security Gateway for MCP Agents (SSE Bridge).",
     "repository": "https://github.com/provnai/McpVanguard",
     "env": {
         "MCP_SERVER_COMMAND": {
             "description": "The command to run your target MCP server. e.g. 'npx @modelcontextprotocol/server-filesystem /app'",
             "required": true
         },
-        "VEX_API_URL": {
+        "VANGUARD_VEX_URL": {
             "description": "The endpoint for the VEX Protocol Flight Recorder (e.g., https://vex-api.up.railway.app/api/v1)",
+            "required": false
+        },
+        "VANGUARD_VEX_KEY": {
+            "description": "The JWT Key for your VEX Auditor agent",
             "required": false
         },
         "OLLAMA_API_BASE": {
