@@ -59,20 +59,27 @@ async def test_sse_bridge_e2e():
                 try:
                     async with client.stream("GET", f"http://{host}:{port}/sse", follow_redirects=True) as response:
                         print(f"SSE Connected: {response.status_code}")
+                        current_event = None
                         async for line in response.aiter_lines():
-                            if not line.strip(): continue
+                            line = line.strip()
+                            if not line: continue
                             print(f"SSE Recv: {line}")
                             
-                            if line.startswith("data:"):
+                            if line.startswith("event:"):
+                                current_event = line[6:].strip()
+                            elif line.startswith("data:"):
                                 data = line[5:].strip()
-                                # Is this the endpoint assignment?
-                                if "session" in data and "messages" in data:
+                                if current_event == "endpoint":
                                     post_url = data
+                                    print(f"Captured POST URL: {post_url}")
                                     connection_established.set()
+                                    current_event = None
                                 else:
                                     # It might be a JSON-RPC response
                                     try:
-                                        sse_responses.append(json.loads(data))
+                                        msg = json.loads(data)
+                                        sse_responses.append(msg)
+                                        print(f"Captured SSE Message: {msg}")
                                     except:
                                         pass
                 except asyncio.CancelledError:
@@ -103,9 +110,13 @@ async def test_sse_bridge_e2e():
             
             full_post_url = f"http://{host}:{port}{post_url}" if post_url.startswith("/") else post_url
             
-            # POST the message with a newline to satisfy the line-based reader
+            # POST the message with a newline and explicit Content-Type
             print(f"POSTing payload to {full_post_url}")
-            post_resp = await client.post(full_post_url, content=json.dumps(payload) + "\n")
+            post_resp = await client.post(
+                full_post_url, 
+                content=json.dumps(payload) + "\n",
+                headers={"Content-Type": "application/json"}
+            )
             print(f"POST Resp: {post_resp.status_code}")
             assert post_resp.status_code in (200, 202)
             
