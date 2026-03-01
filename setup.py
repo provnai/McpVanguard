@@ -9,7 +9,7 @@ setup(
     author="Provnai Development Team",
     author_email="research@provnai.com",
     url="https://github.com/provnai/McpVanguard",
-    packages=find_packages(exclude=["tests*", "arena*", "mcp_servers*"]),
+    packages=find_packages(exclude=["tests*"]),
     install_requires=[
         "mcp>=1.0.0",
         "fastmcp>=0.9.0",

@@ -4,17 +4,6 @@ First off — thanks for taking the time to contribute! McpVanguard is a communi
 
 ## Ways to Contribute
 
-### 🏹 Hunt Exploits (The Gauntlet)
-The best way to contribute is to find real security gaps:
-
-1. Clone the repo and `pip install -r requirements.txt`
-2. Run a challenge: `python arena/hunter.py 1 --handle your-github`
-3. Find a bypass, collect your Proof of Exploit bundle
-4. Submit via GitHub issue with the `exploit-submission` label
-5. GitHub Actions auto-validates — you earn points on the leaderboard!
-
-See the [Vanguard Dashboard](https://vanguard.provnai.com) for all active challenges.
-
 ### 🛡️ Write New Rules
 Add Layer 1 rules to catch new attack patterns:
 
@@ -72,8 +61,7 @@ pytest tests/ -v
 ## Code of Conduct
 
 - Be respectful
-- No real exploits against production systems — Gauntlet challenges are sandboxed only
-- Validated bypass techniques are disclosed responsibly (they become public rules)
+- Validated bypass techniques should be disclosed responsibly so they can become public rules
 
 ## Questions?
 

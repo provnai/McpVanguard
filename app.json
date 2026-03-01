@@ -1,0 +1,19 @@
+{
+    "name": "McpVanguard Proxy",
+    "description": "The Interception & Verification Layer for MCP Agents.",
+    "repository": "https://github.com/provnai/McpVanguard",
+    "env": {
+        "VEX_API_URL": {
+            "description": "The endpoint for the VEX Protocol Flight Recorder (e.g., https://vex-api.up.railway.app/api/v1)",
+            "required": false
+        },
+        "OLLAMA_API_BASE": {
+            "description": "URL for remote Ollama/OpenAI intent scoring (if not running locally)",
+            "required": false
+        },
+        "VANGUARD_REDIS_URL": {
+            "description": "Redis connection string for L3 Stateful Behavioral blocking",
+            "required": false
+        }
+    }
+}

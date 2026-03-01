@@ -5,7 +5,7 @@ Detects attack patterns that look benign at the message level but are obvious
 in aggregate — data scraping, enumeration, slow-burn exfiltration.
 
 Uses sliding-window counters per (session_id, tool_name) stored in memory.
-Events are optionally written to the Supabase `sessions` table.
+Events are optionally written to a shared Redis cluster.
 
 Detectors:
     BEH-001  Data scraping:       >50 read_file calls in 10s → BLOCK

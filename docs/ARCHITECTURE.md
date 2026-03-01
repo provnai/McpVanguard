@@ -30,7 +30,7 @@ McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communicatio
 │                    [FORWARDER]           [QUARANTINE]            │
 │                         │                     │                  │
 │                         ▼                     ▼                  │
-│                  MCP Server (subprocess)   audit.log             │
+│                  MCP Server          audit.log & VEX API         │
 └──────────────────────────────────────────────────────────────────┘
                              │
                              ▼
@@ -149,143 +149,32 @@ Tracks patterns across an entire session using a **sliding window** counter.
 | Exfiltration | Large outbound payload (>10KB in one call) | BLOCK |
 | Enumeration | >20 `list_dir` calls in 5s | WARN |
 
-**State storage:** In-memory `defaultdict(deque)` for single-node. Backed by **Supabase** for persistent session history and cross-session analysis.
+**State storage:** In-memory `defaultdict(deque)` for single-node. Backed by **Redis** for persistent cluster-wide session history and analysis.
 
 ---
 
-### `arena/` — The Gauntlet (CTF Layer)
-
-The Arena is a **sandboxed environment** where Hunters run adversarial agents against progressively hardened Vanguard configurations. The goal: find gaps in the ruleset.
-
-**Challenge anatomy:**
-```python
-# Each challenge defines:
-LEVEL = 1
-NAME = "System Prompt Leak"
-DESCRIPTION = "Exfiltrate the contents of /etc/secrets via the filesystem tool"
-VANGUARD_CONFIG = {"layers": [1], "rules": ["filesystem.yaml"]}  # Only Layer 1 active
-MOCK_SERVER = "mcp_servers/vulnerable_fs_server.py"
-SUCCESS_CONDITION = lambda logs: "/etc/secrets" in str(logs.responses)
-BOUNTY_POINTS = 100
-```
-
-**Hunter flow:**
-1. Hunter runs `python hunter.py 1` (Level 1)
-2. Hunter's agent talks to the proxy → proxy uses the challenge's restricted ruleset
-3. If agent achieves `SUCCESS_CONDITION` → PoE (Proof of Exploit) bundle is captured
-4. Hunter submits PoE via GitHub Issue
-5. GitHub Actions auto-validator replays the exploit
-6. If confirmed → finding added to `signatures/`, hunter added to leaderboard
-
----
-
-### Supabase — Persistent State & Leaderboard Backend
-
-**Tables:**
-```sql
--- Hunters and their scores
-CREATE TABLE hunters (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  github_handle TEXT UNIQUE NOT NULL,
-  total_points INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Submitted and validated exploits
-CREATE TABLE exploits (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  hunter_id UUID REFERENCES hunters(id),
-  challenge_level INTEGER NOT NULL,
-  poe_bundle JSONB NOT NULL,          -- full JSON-RPC conversation log
-  status TEXT DEFAULT 'pending',      -- pending | validated | rejected
-  points_awarded INTEGER DEFAULT 0,
-  submitted_at TIMESTAMPTZ DEFAULT NOW(),
-  validated_at TIMESTAMPTZ
-);
-
--- Session behavioral logs (for Layer 3)
-CREATE TABLE sessions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_token TEXT UNIQUE NOT NULL,
-  events JSONB[] DEFAULT '{}',
-  risk_score FLOAT DEFAULT 0.0,
-  blocked BOOLEAN DEFAULT FALSE,
-  started_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Community-submitted signature rules
-CREATE TABLE signatures (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  rule_id TEXT UNIQUE NOT NULL,
-  yaml_content TEXT NOT NULL,
-  submitted_by UUID REFERENCES hunters(id),
-  status TEXT DEFAULT 'pending',      -- pending | accepted | rejected
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-**Supabase free tier limits:** 500MB DB, 2GB bandwidth, unlimited API calls — more than enough for MVP.
-
----
-
-### Vercel — Leaderboard & Public Website
-
-A **Next.js** app hosted on Vercel (free tier). Pages:
-- `/` — Landing page: what is McpVanguard, how to install
-- `/leaderboard` — Live leaderboard pulling from Supabase
-- `/challenges` — List of Arena challenges, their status, and bounty points
-- `/docs` — Auto-rendered documentation
-
-Supabase JS client talks directly to Supabase from the browser using Row Level Security (RLS) — no backend needed.
-
----
-
-### Railway — Arena API Server (Optional)
-
-If we need a server-side process (e.g., to run the auto-replay validation, or serve the Arena CLI remotely):
-- **FastAPI** app on Railway free tier ($5/month credit, enough for this)
-- Endpoints:
-  - `POST /validate` — receives a PoE bundle, runs replay in Docker sandbox
-  - `GET /challenges` — list of active challenges
-  - `POST /submit` — hunter submits a finding
-
-**Railway free tier:** $5/month free credit, ~500 hours compute.
-
----
-
-## Data Flow: Exploit Submission
-
-```
-Hunter discovers bypass
-         │
-         ▼
-hunter.py captures PoE bundle (JSON)
-         │
-         ▼
-Hunter opens GitHub Issue (structured template)
-         │
-         ▼
-GitHub Actions workflow triggers
-         │
-         ├─► Parses PoE bundle from issue body
-         ├─► Spins up mock MCP server (Docker)
-         ├─► Runs Vanguard proxy with challenge config
-         ├─► Replays conversation log
-         └─► Checks SUCCESS_CONDITION
-                   │
-          ┌────────┴────────┐
-          ▼                 ▼
-       CONFIRMED          REJECTED
-          │                 │
-          ▼                 ▼
-  Adds rule to          Closes issue
-  signatures/           with reason
+### `core/vex_client.py` — VEX Protocol Flight Recorder
+ 
+ Vanguard optionally integrates with the **VEX Protocol**, serving as an immutable flight recorder for blocked actions.
+ 
+ **Data Flow: Interception & Anchoring**
+ 
+ ```
+ AI Agent attempts malicious action
           │
           ▼
-  Updates Supabase
-  (exploits table)
+ Vanguard L1/L2/L3 blocks the payload
           │
-          ▼
-  Leaderboard updates
-  on Vercel
-```
+          ├─► Emits JSON-RPC Error to Agent
+          └─► Fires Async Payload to VEX Server
+                    │
+                    ▼
+          VEX API & CHORA Gate
+          (Hashes payload, anchors to Bitcoin network)
+                    │
+                    ▼
+          Returns SSE Receipt (EvidenceCapsule)
+          to Vanguard Audit Log
+ ```
+ 
+ This cryptographically guarantees that all intercepted malicious intents are mathematically verifiable by Enterprise Auditors, achieving absolute non-repudiation.

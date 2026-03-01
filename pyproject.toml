@@ -36,7 +36,6 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 full = [
-    "supabase>=2.0",
     "uvloop>=0.19; sys_platform != 'win32'",
 ]
 

@@ -15,6 +15,8 @@ Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Buil
 
 ## ⚡ Quickstart
 
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/YOUR_TEMPLATE_ID)
+
 ```bash
 # 1. Install
 pip install mcp-vanguard
@@ -24,6 +26,11 @@ vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 
 # 3. Enable advanced intelligence (Layer 2 + 3)
 vanguard start --server "..." --semantic --behavioral
+
+# 4. Enable VEX Flight Recorder (Immutable Audit)
+export VANGUARD_VEX_URL="https://api.vexprotocol.com"
+export VANGUARD_VEX_KEY="your-agent-jwt"
+vanguard start --server "..." --behavioral
 ```
 
 ---
@@ -64,16 +71,16 @@ The VEX Server cryptographically hashes the blocked intent, runs it through the 
 ## 🏗️ How It Works
 
 ```text
-                    ┌─────────────────────────────┐
-     AI Agent       │     McpVanguard Proxy        │      MCP Server
-  (Claude, GPT)     │                             │   (filesystem, shell...)
-        │           │  ┌──────────────────────┐   │
-        │──JSON-RPC▶│  │  L1: Rules Engine    │   │
-        │           │  │  L2: Semantic Scorer  │   │
-        │           │  │  L3: Behavioral Logic │   │
+                    ┌─────────────────────────────┐         ┌──────────────┐
+     AI Agent       │     McpVanguard Proxy        │        │   VEX API    │
+  (Claude, GPT)     │                             │──Async─▶│ (CHORA Gate) │
+        │           │  ┌──────────────────────┐   │         └──────────────┘
+        │──JSON-RPC▶│  │  L1: Rules Engine    │   │                │
+        │           │  │  L2: Semantic Scorer  │   │                ▼
+        │           │  │  L3: Behavioral Logic │   │      [Bitcoin Anchor]
         │           │  └──────────────────────┘   │
-        │◀─ BLOCK ──│        or ALLOW ───────────▶│
-        │  (Status  │                             │
+        │◀─ BLOCK ──│        or ALLOW ───────────▶│      MCP Server
+        │  (Status  │                             │ (filesystem, shell...)
         │   Code)   └─────────────────────────────┘
 ```
 
