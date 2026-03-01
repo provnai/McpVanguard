@@ -28,6 +28,8 @@ from typing import Optional
 
 if sys.platform != "win32":
     try:
+        if os.getenv("VANGUARD_DISABLE_UVLOOP", "0") == "1":
+            raise ImportError("uvloop disabled by VANGUARD_DISABLE_UVLOOP")
         import uvloop
         HAS_UVLOOP = True
     except ImportError:

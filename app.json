@@ -18,6 +18,11 @@
         "VANGUARD_REDIS_URL": {
             "description": "Redis connection string for L3 Stateful Behavioral blocking",
             "required": false
+        },
+        "VANGUARD_DISABLE_UVLOOP": {
+            "description": "Set to 1 to disable uvloop if encountering segmentation faults during subprocess creation",
+            "required": false,
+            "value": "1"
         }
     }
 }
