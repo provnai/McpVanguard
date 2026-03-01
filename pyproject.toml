@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "mcp-vanguard"
+version = "0.1.0"
+description = "Security proxy and verification layer for the Model Context Protocol (MCP)"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "Provnai Development Team", email = "research@provnai.com" }]
+keywords = ["mcp", "ai-security", "llm-security", "prompt-injection", "red-teaming"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "typer>=0.9",
+    "rich>=13.0",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+full = [
+    "supabase>=2.0",
+    "uvloop>=0.19; sys_platform != 'win32'",
+]
+
+[project.scripts]
+vanguard = "core.cli:app"
+
+[project.urls]
+Homepage = "https://provnai.com"
+Documentation = "https://provnai.dev"
+Repository = "https://github.com/provnai/McpVanguard"
+Issues = "https://github.com/provnai/McpVanguard/issues"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "rules*"]

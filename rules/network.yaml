@@ -1,0 +1,42 @@
+# McpVanguard — Network Exfiltration Rules (Layer 1)
+# Blocks patterns associated with data exfiltration over network channels.
+
+- id: "NET-001"
+  description: "Block DNS exfiltration patterns"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url", "params.arguments.command", "params.command"]
+  pattern: '([A-Za-z0-9+/=]{20,})\.(evil|exfil|attacker|data-out)\.'
+  message: "DNS-based exfiltration patterns are not permitted."
+
+- id: "NET-002"
+  description: "Block requests to known tunnel/exfil hostnames"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url", "params.arguments.command"]
+  pattern: '(ngrok\.io|requestbin\.net|webhook\.site|pipedream\.net|canarytokens\.com)'
+  message: "Requests to known data exfiltration services are not permitted."
+
+- id: "NET-003"
+  description: "Block curl/wget with data upload flags"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: '(curl|wget)\s+.*(-d\s+@|-T\s+|--data-binary\s+@|--upload-file)'
+  message: "Outbound file upload via curl/wget is not permitted."
+
+- id: "NET-004"
+  description: "Warn on HTTP requests to raw IP addresses (potential C2)"
+  severity: MEDIUM
+  action: WARN
+  match_fields: ["params.arguments.url", "params.url"]
+  pattern: 'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+  message: "Warning: HTTP request to raw IP address detected."
+
+- id: "NET-005"
+  description: "Block netcat file transfer patterns"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: '(nc|ncat|netcat)\s+.*(<\s*\S+|\|\s*tar|>\s*/)'
+  message: "Netcat-based file transfer is not permitted."

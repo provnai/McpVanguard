@@ -1,0 +1,66 @@
+# McpVanguard — Filesystem Rules (Layer 1)
+# Blocks access to sensitive system paths and directory traversal attacks.
+
+- id: "FS-001"
+  description: "Block access to /etc/ directory (Linux system config)"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.source", "params.arguments.destination"]
+  pattern: '(^|[\\/])etc[\\/]'
+  message: "Access to /etc/ system directory is not permitted."
+
+- id: "FS-002"
+  description: "Block access to SSH keys and credentials"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '(\.ssh[\\/]|\.aws[\\/]credentials|\.gnupg[\\/]|\.pgp)'
+  message: "Access to SSH/credential files is not permitted."
+
+- id: "FS-003"
+  description: "Block directory traversal via ../ sequences"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
+  pattern: '\.\.[\/\\]'
+  message: "Directory traversal sequences (../) are not permitted."
+
+- id: "FS-004"
+  description: "Block access to /proc/ virtual filesystem"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '(^|[\\/])proc[\\/](self|[0-9]+)'
+  message: "Access to /proc/ filesystem is not permitted."
+
+- id: "FS-005"
+  description: "Block access to Windows system directories"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '(C:\\\\Windows\\\\System32|C:\\\\Users\\\\[^\\\\]+\\\\AppData)'
+  message: "Access to Windows system directories is not permitted."
+
+- id: "FS-006"
+  description: "Block access to shell history files"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '\.(bash_history|zsh_history|fish_history|sh_history)$'
+  message: "Access to shell history files is not permitted."
+
+- id: "FS-007"
+  description: "Block access to environment files containing secrets"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '(^|[\\/])\.(env|env\.local|env\.production|env\.secret)'
+  message: "Access to .env secret files is not permitted."
+
+- id: "FS-008"
+  description: "Warn on access to home directory root"
+  severity: MEDIUM
+  action: WARN
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '^~[\\/]?$'
+  message: "Warning: attempting to access home directory root."

@@ -1,0 +1,74 @@
+# McpVanguard — Command Injection Rules (Layer 1)
+# Blocks dangerous shell commands and command injection patterns.
+
+- id: "CMD-001"
+  description: "Block recursive deletion commands"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: 'rm\s+-[rf]{1,2}[rf]?\s+'
+  message: "Recursive deletion commands (rm -rf) are not permitted."
+
+- id: "CMD-002"
+  description: "Block pipe-to-shell execution patterns"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(curl|wget|fetch)\s+.*\|\s*(bash|sh|zsh|fish|python|ruby|perl)'
+  message: "Pipe-to-shell execution patterns are not permitted."
+
+- id: "CMD-003"
+  description: "Block reverse shell patterns"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(bash|sh|nc|ncat|netcat)\s+.*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s+\d{2,5}'
+  message: "Reverse shell patterns are not permitted."
+
+- id: "CMD-004"
+  description: "Block command substitution injection"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path"]
+  pattern: '(\$\(|\`)[^)]*\)'
+  message: "Command substitution injection is not permitted."
+
+- id: "CMD-005"
+  description: "Block chmod to world-writable permissions"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: 'chmod\s+(777|a\+rwx|o\+w)'
+  message: "World-writable chmod commands are not permitted."
+
+- id: "CMD-006"
+  description: "Block fork bombs and resource exhaustion"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(\:\(\)\{.*\:\|.*\&.*\}|\:\(\))'
+  message: "Fork bomb patterns are not permitted."
+
+- id: "CMD-007"
+  description: "Block /dev/null overwrite tricks"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: '>\s*/dev/(sda|hda|null\s+<|mem)'
+  message: "Dangerous device file operations are not permitted."
+
+- id: "CMD-008"
+  description: "Warn on sudo usage"
+  severity: MEDIUM
+  action: WARN
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: '(^|\s)sudo\s+'
+  message: "Warning: sudo usage detected in tool call."
+
+- id: "CMD-009"
+  description: "Block base64-encoded command execution"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(echo\s+[A-Za-z0-9+/=]{20,}\s*\|\s*(base64\s+-d|openssl\s+base64))'
+  message: "Base64-encoded command execution is not permitted."

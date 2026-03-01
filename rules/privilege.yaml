@@ -1,0 +1,66 @@
+# McpVanguard — Privilege Escalation Rules (Layer 1)
+# Blocks patterns associated with privilege escalation and persistence.
+
+- id: "PRIV-001"
+  description: "Block cron job injection"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path", "params.arguments.content"]
+  pattern: '(crontab\s+-[el]|/etc/cron\.(d|daily|hourly|monthly|weekly)|/var/spool/cron)'
+  message: "Cron job creation/modification is not permitted."
+
+- id: "PRIV-002"
+  description: "Block SSH authorized_keys modification"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.destination", "params.arguments.content"]
+  pattern: 'authorized_keys'
+  message: "Modification of SSH authorized_keys is not permitted."
+
+- id: "PRIV-003"
+  description: "Block /etc/passwd and /etc/shadow access"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.content", "params.arguments.command"]
+  pattern: '/etc/(passwd|shadow|sudoers|gshadow)'
+  message: "Access to system authentication files is not permitted."
+
+- id: "PRIV-004"
+  description: "Block systemd service installation"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.command"]
+  pattern: '(/etc/systemd/system/|/usr/lib/systemd/system/).*\.service'
+  message: "Systemd service installation is not permitted."
+
+- id: "PRIV-005"
+  description: "Block setuid/setgid binary creation"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: 'chmod\s+(u\+s|g\+s|[0-9]*[246][0-9]{3})\s+'
+  message: "Setuid/setgid binary creation is not permitted."
+
+- id: "PRIV-006"
+  description: "Block /etc/hosts modification (DNS poisoning)"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
+  pattern: '/etc/hosts$'
+  message: "Modification of /etc/hosts is not permitted."
+
+- id: "PRIV-007"
+  description: "Warn on sudo -l (privilege enumeration)"
+  severity: MEDIUM
+  action: WARN
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: 'sudo\s+-l\b'
+  message: "Warning: sudo privilege enumeration detected."
+
+- id: "PRIV-008"
+  description: "Block SUID binary enumeration"
+  severity: MEDIUM
+  action: WARN
+  match_fields: ["params.arguments.command", "params.command"]
+  pattern: 'find\s+.*-perm\s+(-[0-9]*[24][0-9]{3}|\/[0-9]*[24][0-9]{3}|[0-9]*[24][0-9]{3})'
+  message: "Warning: SUID binary enumeration detected."

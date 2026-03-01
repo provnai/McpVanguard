@@ -1,0 +1,50 @@
+# McpVanguard — Prompt Injection / Jailbreak Rules (Layer 1)
+# Blocks known prompt injection strings embedded in tool call parameters.
+
+- id: "JB-001"
+  description: "Block ignore-previous-instructions jailbreak"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.text", "params.arguments.query", "params.query"]
+  pattern: 'ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?|guidelines?)'
+  message: "Prompt injection attempt (ignore-instructions) detected."
+
+- id: "JB-002"
+  description: "Block DAN / jailbreak personas"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.text"]
+  pattern: '(you are now|act as|pretend (you are|to be)|you must now)\s+(DAN|an?\s+(AI\s+)?without\s+(restrictions?|ethics?|guidelines?|limits?))'
+  message: "Jailbreak persona injection detected."
+
+- id: "JB-003"
+  description: "Block system prompt extraction attempts"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.query"]
+  pattern: '(reveal|print|output|show|repeat|display)\s+(your\s+)?(system\s+prompt|original\s+instructions?|initial\s+prompt|full\s+prompt)'
+  message: "System prompt extraction attempt detected."
+
+- id: "JB-004"
+  description: "Block hidden instruction injection via whitespace/unicode"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.content", "params.content"]
+  pattern: '(\u200b|\u200c|\u200d|\ufeff|\u2028|\u2029){3,}'
+  message: "Hidden instruction injection via invisible unicode characters detected."
+
+- id: "JB-005"
+  description: "Block context overflow / token stuffing"
+  severity: MEDIUM
+  action: WARN
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.text"]
+  pattern: '(.)\1{200,}'
+  message: "Warning: potential context overflow / token stuffing detected."
+
+- id: "JB-006"
+  description: "Block 'new session' reset injection"
+  severity: MEDIUM
+  action: BLOCK
+  match_fields: ["params.arguments.content", "params.content"]
+  pattern: '(end\s+of\s+(session|conversation)|new\s+(session|conversation|instructions?)\s+(begin|start))'
+  message: "Session reset injection attempt detected."
