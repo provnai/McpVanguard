@@ -407,6 +407,17 @@ def run_proxy(server_command: list[str], config: Optional[ProxyConfig] = None):
     Public entry point. Call this from the CLI.
     Sets up uvloop if available and runs the proxy.
     """
+    # 🛡️ Nixpacks/Docker Seccomp Fix:
+    # If the container starts with stdin (fd 0) closed, os.pipe() inside
+    # asyncio.create_subprocess_exec will allocate fd 0 for the pipe.
+    # Some container environments block epoll_ctl unconditionally on fd 0/1/2 
+    # via seccomp, causing PermissionError. We secure these slots with /dev/null.
+    for fd in (0, 1, 2):
+        try:
+            os.fstat(fd)
+        except OSError:
+            os.open(os.devnull, os.O_RDWR)
+
     if HAS_UVLOOP:
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
         logger.debug("[Vanguard] Using uvloop event loop")
