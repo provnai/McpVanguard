@@ -110,7 +110,8 @@ def start(
     if semantic:
         with console.status("[bold yellow]Checking Ollama health..."):
             import asyncio
-            semantic_ready = asyncio.run(semantic.check_ollama_health())
+            from core import semantic as semantic_mod
+            semantic_ready = asyncio.run(semantic_mod.check_ollama_health())
 
     # Load and display rules summary
     engine = RulesEngine(rules_dir=rules_dir)
