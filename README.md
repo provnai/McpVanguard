@@ -50,25 +50,14 @@ McpVanguard sits at the **Interception Layer** of the Provnai stack. It prevents
 
 ---
 
-## 🏟️ The Gauntlet — Expert Arena
+## 🛡️ VEX Protocol Integration (Flight Recorder)
 
-Battle-test your bypass skills in our gamified security lab. Every release includes 6 production-grade challenges.
+McpVanguard integrates natively with the **VEX Protocol**. 
+Whenever the proxy blocks a malicious action (L1/L2/L3), it instantly processes a "fire-and-forget" payload directly to the VEX API. 
 
-| Level | Name | Difficulty | Focal Layer | Points | Status |
-|:---:|:---|:---:|:---:|:---:|:---:|
-| 1 | System Prompt Leak | ★☆☆☆☆ | L1 (Rules) | 100 | ✅ ACTIVE |
-| 2 | Shell Escape | ★★☆☆☆ | L1 (Rules) | 150 | ✅ ACTIVE |
-| 3 | The Decoy | ★★★☆☆ | L3 (Behavioral) | 250 | ✅ ACTIVE |
-| 4 | The Whisperer | ★★★★☆ | L2 (Semantic) | 500 | ✅ ACTIVE |
-| 5 | Semantic Bypass | ★★★★☆ | L2 (Semantic) | 600 | ✅ ACTIVE |
-| 6 | Slow Burn | ★★★★★ | L3 (Behavioral) | 750 | ✅ ACTIVE |
+The VEX Server cryptographically hashes the blocked intent, runs it through the CHORA Gate, and anchors an immutable receipt (PoE) to the Bitcoin blockchain.
 
-```bash
-# Start a challenge
-python arena/hunter.py 1 --handle your-github-handle
-```
-
-🏆 **[View Leaderboard](https://vanguard.provnai.com/leaderboard)** | 🏟️ **[Browse Challenges](https://vanguard.provnai.com/challenges)**
+*Enterprise auditors can mathematically prove exactly why an agent was blocked without relying entirely on local log trust.*
 
 ---
 
@@ -96,12 +85,10 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **Phase 1** | Foundation (Proxy, CLI, 32 Tests) | ✅ DONE |
-| **Phase 2** | The Gauntlet (Levels 1-3, Hunter) | ✅ DONE |
-| **Phase 3** | Web (Next.js Leaderboard) | ✅ DONE |
-| **Phase 4** | Distribution (PyPI, README) | ✅ DONE |
-| **Phase 5** | Intelligence (L2Semantic, L3Behavioral) | ✅ DONE |
-| **Phase 6** | Ecosystem (Provnai Rebranding) | ✅ DONE |
+| **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | ✅ DONE |
+| **Phase 2** | Intelligence (L2 Semantic OpenAI, L3 Behavioral Redis Scaling) | ✅ DONE |
+| **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ DONE |
+| **Phase 4** | Distribution (PyPI Publish, DEPLOYMENT Guide) | ✅ DONE |
 
 ---
 
