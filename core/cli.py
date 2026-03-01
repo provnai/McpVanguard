@@ -143,6 +143,12 @@ def start(
     import shlex
     server_cmd = shlex.split(server)
 
+    if not server_cmd:
+        console.print("[bold red]Error:[/bold red] The --server argument is practically empty. "
+                      "If you are deploying on Railway or via Docker, ensure that you have provided "
+                      "a valid value for the MCP_SERVER_COMMAND environment variable.")
+        sys.exit(1)
+
     # Start the proxy (blocks until server exits or Ctrl+C)
     run_proxy(server_command=server_cmd, config=config)
 
