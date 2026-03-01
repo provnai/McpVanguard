@@ -102,7 +102,7 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 ## 📚 Resources
 
 *   **[Full Documentation](https://provnai.dev)**
-*   **[Ecosystem Report](https://github.com/provnai/ecosystem)**
+*   **[Ecosystem Report](https://github.com/provnai/provnai)**
 *   **[Contributing Guide](CONTRIBUTING.md)**
 *  ## 📄 License
 
