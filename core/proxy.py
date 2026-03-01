@@ -5,12 +5,6 @@ The McpVanguard transparent stdio proxy.
 Sits between an AI agent and a real MCP server subprocess.
 Intercepts every JSON-RPC message in both directions,
 runs inspection layers, and blocks or forwards accordingly.
-
-Architecture:
-    Agent stdin  →  [proxy]  →  Server process stdin
-    Server stdout →  [proxy]  →  Agent stdout
-
-Latency target: <10ms overhead on the happy path (Layer 1 only).
 """
 
 from __future__ import annotations
@@ -22,8 +16,6 @@ import logging.handlers
 import os
 import sys
 import time
-import uuid
-from pathlib import Path
 from typing import Optional
 
 if sys.platform != "win32":
@@ -40,7 +32,6 @@ else:
 from core.models import (
     AuditEvent,
     InspectionResult,
-    JsonRpcRequest,
     make_block_response,
 )
 from core.rules_engine import RulesEngine
@@ -78,13 +69,11 @@ def setup_audit_logger(log_file: str) -> logging.Logger:
     audit.setLevel(logging.DEBUG)
     audit.propagate = False
 
-    # File handler (Rotating: 10MB max size, keep 5 backups)
     fh = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )
     fh.setFormatter(logging.Formatter("%(message)s"))
 
-    # Console handler (stderr so it doesn't pollute stdout/stdin proxy)
     ch = logging.StreamHandler(sys.stderr)
     ch.setFormatter(logging.Formatter("%(message)s"))
 
@@ -100,9 +89,6 @@ def setup_audit_logger(log_file: str) -> logging.Logger:
 class VanguardProxy:
     """
     The core McpVanguard proxy.
-
-    Spawns a real MCP server subprocess and transparently intercepts
-    all JSON-RPC traffic between the agent and the server.
     """
 
     def __init__(
@@ -121,7 +107,6 @@ class VanguardProxy:
         self._session: Optional[SessionState] = None
         self._stats = {"allowed": 0, "blocked": 0, "warned": 0, "total": 0}
 
-        # Transport Injection
         self.agent_reader = agent_reader
         self.agent_writer = agent_writer
 
@@ -134,13 +119,9 @@ class VanguardProxy:
     # -----------------------------------------------------------------------
 
     async def run(self):
-        """
-        Start the proxy. Spawns the server subprocess and begins
-        bidirectional stdio interception.
-        """
+        """Start the proxy."""
         self._session = self.session_manager.create()
         logger.info(f"[Vanguard] Session {self._session.session_id} started")
-        logger.info(f"[Vanguard] Launching server: {' '.join(self.server_command)}")
 
         try:
             self._server_process = await asyncio.create_subprocess_exec(
@@ -149,13 +130,12 @@ class VanguardProxy:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-        except FileNotFoundError:
-            logger.error(f"[Vanguard] Server command not found: {self.server_command[0]}")
-            raise RuntimeError(f"MCP Server command not found: {self.server_command[0]}")
+        except Exception as e:
+            logger.error(f"[Vanguard] Failed to launch server: {e}")
+            raise RuntimeError(f"MCP Server command failed: {e}")
 
-        logger.info(f"[Vanguard] Server PID {self._server_process.pid} — proxy active")
+        logger.info(f"[Vanguard] Server PID {self._server_process.pid} proxy active")
 
-        # Run bidirectional pumps concurrently
         try:
             await asyncio.gather(
                 self._pump_agent_to_server(),
@@ -168,67 +148,61 @@ class VanguardProxy:
             await self._shutdown()
 
     # -----------------------------------------------------------------------
-    # Agent → Server pump (inspection happens here)
+    # Agent → Server pump
     # -----------------------------------------------------------------------
 
     async def _pump_agent_to_server(self):
-        """
-        Read JSON-RPC messages from agent, inspect them, then forward or block.
-        """
         loop = asyncio.get_event_loop()
 
         while True:
             try:
                 if self.agent_reader:
-                    # Generic reader (e.g. SSE)
                     line = await self.agent_reader.readline()
                 else:
-                    # Default: Stdio with EPERM fix
                     line = await loop.run_in_executor(None, sys.stdin.buffer.readline)
-            except Exception as e:
-                logger.error(f"[Vanguard] Error reading from agent: {e}")
+            except Exception:
                 break
 
             if not line:
                 break
 
+            if isinstance(line, bytes):
+                line = line.decode("utf-8", errors="replace")
+            
             line = line.strip()
             if not line:
                 continue
 
-            logger.debug(f"[Vanguard] Received message from agent: {line[:50]}...")
             t_start = time.monotonic()
 
-            # Parse the JSON-RPC message
             try:
                 raw_message = json.loads(line)
             except json.JSONDecodeError:
-                logger.warning(f"[Vanguard] Invalid JSON from agent: {line[:100]}")
                 continue
 
-            # Inspect the message
-            result = await self._inspect_message(raw_message)
-            latency_ms = (time.monotonic() - t_start) * 1000
-
-            # Parse for logging metadata
             method = raw_message.get("method", "")
             request_id = raw_message.get("id")
             tool_name = None
             if method == "tools/call":
                 tool_name = raw_message.get("params", {}).get("name")
 
-            # Record into session state
-            self._session.record_call(
-                tool_name=tool_name or method,
-                method=method,
-                params=raw_message.get("params", {}),
-                action=result.action,
-            )
-            self._stats["total"] += 1
+            # Inspect the message
+            result = await self._inspect_message(raw_message)
+            latency_ms = (time.monotonic() - t_start) * 1000
 
-            # Build and write audit event
+            # Record into session state
+            self._stats["total"] += 1
+            if self._session:
+                self._session.record_call(
+                    tool_name=tool_name or method,
+                    method=method,
+                    params=raw_message.get("params", {}),
+                    action=result.action,
+                )
+
+            # Audit logging
             event = AuditEvent(
-                session_id=self._session.session_id,
+                session_id=self._session.session_id if self._session else "no-session",
                 direction="agent→server",
                 method=method,
                 tool_name=tool_name,
@@ -242,37 +216,30 @@ class VanguardProxy:
             self.audit.info(event.to_log_line())
 
             if result.allowed:
-                # Forward to server
                 self._stats["allowed"] += 1
                 if result.action == "WARN":
                     self._stats["warned"] += 1
                 await self._write_to_server(line)
             else:
-                # Block — send error response back to agent
                 self._stats["blocked"] += 1
                 rule_id = result.rule_matches[0].rule_id if result.rule_matches else "VANGUARD"
 
-                # 🛡️ The VEX Flight Recorder Handoff
-                # Transmit the blocked tool call to the VEX Rust Server asynchronously.
-                # VEX will hash it, hit the CHORA Gate, and anchor the signature.
-                submit_blocked_call(raw_message, session_id=self._session.session_id)
+                if self._session:
+                    submit_blocked_call(raw_message, session_id=self._session.session_id)
 
                 block_response = make_block_response(
                     request_id=request_id,
                     reason=result.block_reason or "Security policy violation",
                     rule_id=rule_id,
                 )
+                logger.info(f"[Vanguard] BLOCKED {method} {tool_name or ''}")
                 await self._write_to_agent(json.dumps(block_response))
 
     # -----------------------------------------------------------------------
-    # Server → Agent pump (response filtering)
+    # Server → Agent pump
     # -----------------------------------------------------------------------
 
     async def _pump_server_to_agent(self):
-        """
-        Read responses from the server and forward to the agent.
-        (Response filtering can be added here in future layers.)
-        """
         while True:
             try:
                 line = await self._server_process.stdout.readline()
@@ -282,8 +249,7 @@ class VanguardProxy:
             if not line:
                 break
 
-            # Layer 3: Response inspection (large payloads)
-            if self.config.behavioral_enabled:
+            if self.config.behavioral_enabled and self._session:
                 try:
                     line_str = line.decode("utf-8", errors="replace")
                     resp_result = await behavioral.inspect_response(
@@ -291,17 +257,13 @@ class VanguardProxy:
                     )
                     if resp_result and not resp_result.allowed:
                         logger.warning(f"[Vanguard] Blocking large response: {resp_result.block_reason}")
-                        # for now just skip forwarding. 
-                        # future: send back legitimate error to agent
                         continue
-                except Exception as e:
-                    logger.error(f"[Vanguard] Error in response inspection: {e}")
+                except Exception:
+                    pass
 
-            # Forward response to agent
-            await self._write_to_agent(line.decode("utf-8", errors="replace"))
+            await self._write_to_agent(line)
 
     async def _pump_server_stderr(self):
-        """Forward server's stderr to our stderr (for debugging)."""
         while True:
             try:
                 line = await self._server_process.stderr.readline()
@@ -317,16 +279,10 @@ class VanguardProxy:
     # -----------------------------------------------------------------------
 
     async def _inspect_message(self, message: dict) -> InspectionResult:
-        """
-        Run a message through all enabled inspection layers.
-        Returns the first BLOCK result or ALLOW if all layers pass.
-        """
-        # Layer 1: Static rules
         result = self.rules_engine.check(message)
         if not result.allowed:
             return result
 
-        # Layer 3: Behavioral analysis (if enabled)
         if self.config.behavioral_enabled and self._session:
             beh_result = await behavioral.inspect_request(
                 self._session.session_id, message
@@ -334,18 +290,15 @@ class VanguardProxy:
             if beh_result:
                 if not beh_result.allowed:
                     return beh_result
-                # Accumulate warnings
                 if beh_result.action == "WARN":
                     result.action = "WARN"
                     result.rule_matches.extend(beh_result.rule_matches)
 
-        # Layer 2: Semantic scoring (if enabled)
         if self.config.semantic_enabled:
             sem_result = await semantic.score_intent(message)
             if sem_result:
                 if not sem_result.allowed:
                     return sem_result
-                # Accumulate warnings/score
                 result.semantic_score = sem_result.semantic_score
                 if sem_result.action == "WARN":
                     result.action = "WARN"
@@ -353,65 +306,57 @@ class VanguardProxy:
 
         return result
 
-
     # -----------------------------------------------------------------------
     # I/O helpers
     # -----------------------------------------------------------------------
 
-    async def _write_to_server(self, data: str):
-        """Write a line to the server subprocess stdin."""
-        if self._server_process and self._server_process.stdin:
-            try:
-                self._server_process.stdin.write((data + "\n").encode())
-                await self._server_process.stdin.drain()
-            except Exception as e:
-                logger.error(f"[Vanguard] Failed to write to server: {e}")
-
-    async def _write_to_agent(self, data: str):
-        """Write a line back to the agent (stdout or network transport)."""
-        if not data.endswith("\n"):
-            data += "\n"
-
+    async def _write_to_server(self, data: str | bytes):
+        if not self._server_process or not self._server_process.stdin:
+            return
         try:
+            if isinstance(data, str):
+                buf = (data.strip() + "\n").encode()
+            else:
+                buf = data.strip() + b"\n"
+            
+            self._server_process.stdin.write(buf)
+            await self._server_process.stdin.drain()
+        except Exception:
+            pass
+
+    async def _write_to_agent(self, data: str | bytes):
+        try:
+            if isinstance(data, str):
+                buf = (data.strip() + "\n").encode("utf-8")
+            else:
+                buf = data.strip() + b"\n"
+
             if self.agent_writer:
-                # Generic writer
-                self.agent_writer.write(data.encode("utf-8"))
+                self.agent_writer.write(buf)
                 await self.agent_writer.drain()
             else:
-                # Default: Stdio
-                sys.stdout.buffer.write(data.encode("utf-8"))
+                sys.stdout.buffer.write(buf)
                 sys.stdout.buffer.flush()
-        except Exception as e:
-            logger.error(f"[Vanguard] Failed to write to agent: {e}")
+        except Exception:
+            pass
 
     # -----------------------------------------------------------------------
     # Shutdown
     # -----------------------------------------------------------------------
 
     async def _shutdown(self):
-        """Clean up the server process on exit."""
         if self._server_process:
             try:
-                # 🛡️ Robust Shutdown: Try termination, then kill if it hangs
                 if sys.platform == "win32":
-                    # On Windows, terminate() often fails for complex pipe structures
                     self._server_process.kill()
                 else:
                     self._server_process.terminate()
-                
-                try:
-                    await asyncio.wait_for(self._server_process.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
-                    self._server_process.kill()
-            except Exception as e:
-                logger.debug(f"[Vanguard] Shutdown internal error (usually safe to ignore): {e}")
+                await asyncio.wait_for(self._server_process.wait(), timeout=2.0)
+            except Exception:
+                pass
 
-        if self._session:
-            s = self._session.summary()
-            logger.info(
-                f"[Vanguard] Session {s['session_id']} ended — "
-                f"{s['total_calls']} calls | {s['blocked']} blocked | {s['warnings']} warnings"
-            )
+    async def get_stats(self):
+        return self._stats
 
 
 # ---------------------------------------------------------------------------
@@ -419,15 +364,6 @@ class VanguardProxy:
 # ---------------------------------------------------------------------------
 
 def run_proxy(server_command: list[str], config: Optional[ProxyConfig] = None):
-    """
-    Public entry point. Call this from the CLI.
-    Sets up uvloop if available and runs the proxy.
-    """
-    # 🛡️ Nixpacks/Docker Seccomp Fix:
-    # If the container starts with stdin (fd 0) closed, os.pipe() inside
-    # asyncio.create_subprocess_exec will allocate fd 0 for the pipe.
-    # Some container environments block epoll_ctl unconditionally on fd 0/1/2 
-    # via seccomp, causing PermissionError. We secure these slots with /dev/null.
     for fd in (0, 1, 2):
         try:
             os.fstat(fd)
@@ -436,11 +372,10 @@ def run_proxy(server_command: list[str], config: Optional[ProxyConfig] = None):
 
     if HAS_UVLOOP:
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-        logger.debug("[Vanguard] Using uvloop event loop")
 
     proxy = VanguardProxy(server_command=server_command, config=config)
 
     try:
         asyncio.run(proxy.run())
     except KeyboardInterrupt:
-        logger.info("[Vanguard] Interrupted — shutting down")
+        pass

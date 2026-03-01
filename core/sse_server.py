@@ -1,58 +1,94 @@
 """
 core/sse_server.py
 The SSE bridge for McpVanguard.
-Allows the proxy to receive tool calls over the internet (Railway/Docker).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import json
+import sys
 from typing import Optional
 
-from mcp.server.sse import SseServerTransport
+from mcp.server.sse import SseServerTransport, SessionMessage
 from core.proxy import VanguardProxy, ProxyConfig
 
 logger = logging.getLogger("vanguard.sse")
 
 class StreamWrapper:
-    """Helper to bridge SseServerTransport streams to VanguardProxy expectations."""
     def __init__(self, read_stream, write_stream):
         self.read_stream = read_stream
         self.write_stream = write_stream
         self._buffer = b""
 
     async def readline(self) -> bytes:
-        """Read a line from the transport stream."""
-        while b"\n" not in self._buffer:
+        while True:
+            if b"\n" in self._buffer:
+                idx = self._buffer.find(b"\n")
+                line = self._buffer[:idx+1]
+                self._buffer = self._buffer[idx+1:]
+                return line
+
             try:
-                chunk = await self.read_stream.receive()
-                if not chunk:
+                msg = await self.read_stream.receive()
+                if not msg:
                     return b""
+                
+                # SseServerTransport yields SessionMessage(message=...)
+                if hasattr(msg, "message"):
+                    msg = msg.message
+                
+                chunk = b""
+                if hasattr(msg, "model_dump_json"):
+                    chunk = msg.model_dump_json().encode("utf-8")
+                elif hasattr(msg, "json"):
+                    chunk = msg.json().encode("utf-8")
+                elif isinstance(msg, dict):
+                    chunk = json.dumps(msg).encode("utf-8")
+                elif isinstance(msg, bytes):
+                    chunk = msg
+                else:
+                    try:
+                        chunk = json.dumps(msg, default=str).encode("utf-8")
+                    except Exception:
+                        chunk = str(msg).encode("utf-8")
+                
                 self._buffer += chunk
-            except Exception:
+                
+                # Check for balanced JSON object
+                stripped = self._buffer.strip()
+                if stripped.startswith(b"{") and stripped.endswith(b"}"):
+                    line = self._buffer
+                    if not line.endswith(b"\n"):
+                        line += b"\n"
+                    self._buffer = b""
+                    return line
+            except Exception as e:
+                logger.debug(f"StreamWrapper read error: {e}")
                 return b""
-        
-        idx = self._buffer.find(b"\n")
-        line = self._buffer[:idx+1]
-        self._buffer = self._buffer[idx+1:]
-        return line
 
     def write(self, data: bytes):
-        """Write to the transport stream."""
         self._pending_write = data
 
     async def drain(self):
-        """Send the data over the transport."""
         if hasattr(self, "_pending_write"):
             try:
-                # SseServerTransport manages its own SSE framing 
-                # for the underlying ByteSendStream.
-                await self.write_stream.send(self._pending_write)
+                raw_str = self._pending_write.decode("utf-8", errors="replace").strip()
+                try:
+                    obj = json.loads(raw_str)
+                    from mcp.types import JSONRPCMessage
+                    # Proper MCP SDK serialization
+                    msg_obj = SessionMessage(message=JSONRPCMessage.model_validate(obj))
+                    await self.write_stream.send(msg_obj)
+                except Exception:
+                    # Fallback for non-JSON or other errors
+                    await self.write_stream.send(raw_str)
             except Exception as e:
-                logger.error(f"SSE Write Error: {e}")
+                logger.error(f"StreamWrapper drain error: {e}")
             finally:
-                del self._pending_write
+                if hasattr(self, "_pending_write"):
+                    del self._pending_write
 
 async def run_sse_server(
     server_command: list[str],
@@ -60,67 +96,44 @@ async def run_sse_server(
     port: int = 8080,
     config: Optional[ProxyConfig] = None
 ):
-    """
-    Run a raw ASGI server that hosts the MCP SSE transport.
-    """
-    logger.info(f"🚀 Starting Vanguard SSE Bridge on {host}:{port}")
-    
-    # Critical: The endpoint URL must match the path used in the POST handler
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.responses import Response
+
+    print(f"Starting Vanguard SSE Bridge on {host}:{port}")
     sse_transport = SseServerTransport("/messages")
 
-    async def app(scope, receive, send):
-        if scope["type"] == "lifespan":
-            while True:
-                message = await receive()
-                if message["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
-                elif message["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
-                    return
-        
-        if scope["type"] != "http":
-            return
+    async def handle_sse(request):
+        async with sse_transport.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
+            bridge = StreamWrapper(read_stream, write_stream)
+            proxy = VanguardProxy(
+                server_command=server_command,
+                config=config,
+                agent_reader=bridge,
+                agent_writer=bridge
+            )
+            await proxy.run()
+        return Response(status_code=200)
 
-        # Normalize path
-        path = scope["path"].rstrip("/")
-        if not path:
-            path = "/"
+    async def handle_messages(request):
+        await sse_transport.handle_post_message(request.scope, request.receive, request._send)
+        return Response(status_code=202)
 
-        if path == "/sse" and scope["method"] == "GET":
-            try:
-                async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
-                    bridge = StreamWrapper(read_stream, write_stream)
-                    proxy = VanguardProxy(
-                        server_command=server_command,
-                        config=config,
-                        agent_reader=bridge,
-                        agent_writer=bridge
-                    )
-                    logger.info("New agent connected via SSE")
-                    await proxy.run()
-                    logger.info("Agent disconnected")
-            except Exception as e:
-                logger.error(f"SSE Error: {e}", exc_info=True)
-        
-        elif path == "/messages" and scope["method"] == "POST":
-            try:
-                await sse_transport.handle_post_message(scope, receive, send)
-            except Exception as e:
-                logger.error(f"POST Error: {e}", exc_info=True)
-        
-        else:
-            await send({
-                "type": "http.response.start",
-                "status": 404,
-                "headers": [(b"content-type", b"text/plain")],
-            })
-            await send({"type": "http.response.body", "body": b"Not Found"})
+    app = Starlette(
+        debug=False,
+        routes=[
+            Route("/sse", endpoint=handle_sse, methods=["GET"]),
+            Route("/messages", endpoint=handle_messages, methods=["POST"]),
+        ]
+    )
 
     import uvicorn
-    # Use raw app without Starlette wrapper for maximum protocol fidelity
     config_uv = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config_uv)
     await server.serve()
+
 if __name__ == "__main__":
-    import sys
-    asyncio.run(run_sse_server([sys.executable, "-c", "import sys; [sys.stdout.write(l) for l in sys.stdin]"]))
+    if len(sys.argv) > 1:
+        asyncio.run(run_sse_server(sys.argv[1:]))
+    else:
+        asyncio.run(run_sse_server([sys.executable, "-c", "import sys; [sys.stdout.write(l) for l in sys.stdin]"]))

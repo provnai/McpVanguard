@@ -13,6 +13,7 @@ build/
 
 # Virtual environments
 .venv/
+.venv_wsl/
 venv/
 env/
 ENV/
@@ -26,6 +27,8 @@ ENV/
 # Logs & audit
 audit.log
 *.log
+*.txt
+run_tests_isolated.py
 
 # Arena temp files
 .arena_rules_tmp/

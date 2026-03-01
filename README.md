@@ -97,7 +97,7 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 | **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | ✅ DONE |
 | **Phase 2** | Intelligence (L2 Semantic OpenAI, L3 Behavioral Redis Scaling) | ✅ DONE |
 | **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ DONE |
-| **Phase 4** | Distribution (PyPI Publish, DEPLOYMENT Guide) | ✅ DONE |
+| Phase 4 | Distribution (v1.0.0 Stable, PyPI, WSL Verified) | ✅ DONE |
 
 ---
 

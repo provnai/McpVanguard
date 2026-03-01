@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Provnai Development Team", email = "research@provnai.com" }]
 keywords = ["mcp", "ai-security", "llm-security", "prompt-injection", "red-teaming"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",

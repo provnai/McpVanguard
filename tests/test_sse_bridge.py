@@ -10,6 +10,7 @@ import socket
 import pytest
 import httpx
 import sys
+import traceback
 from core.sse_server import run_sse_server
 from core.proxy import ProxyConfig
 
@@ -62,7 +63,9 @@ async def test_sse_bridge_e2e():
                         current_event = None
                         async for line in response.aiter_lines():
                             line = line.strip()
-                            if not line: continue
+                            if not line: 
+                                print("SSE Recv: <empty line>")
+                                continue
                             print(f"SSE Recv: {line}")
                             
                             if line.startswith("event:"):
@@ -86,6 +89,7 @@ async def test_sse_bridge_e2e():
                     print("SSE Client cancelled")
                 except Exception as e:
                     print(f"SSE Client Error: {e}")
+                    traceback.print_exc()
 
             client_task = asyncio.create_task(run_sse_client())
             
