@@ -28,8 +28,9 @@ async def test_sse_bridge_e2e():
     port = get_free_port()
     host = "127.0.0.1"
     
-    # Mock server command: just something that exists
-    server_cmd = ["python", "-c", "import sys; [sys.stdout.write(l) for l in sys.stdin]"]
+    import sys
+    # Use the same python binary that is running the test
+    server_cmd = [sys.executable, "-c", "import sys; [sys.stdout.write(l) for l in sys.stdin]"]
     
     config = ProxyConfig()
     config.semantic_enabled = False # disable for speed
@@ -45,26 +46,40 @@ async def test_sse_bridge_e2e():
     # Wait for server to boot
     await asyncio.sleep(2)
     
+    if server_task.done():
+        try:
+            await server_task
+        except Exception as e:
+            pytest.fail(f"Server failed to start: {e}")
+
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             # Step 1: Establish SSE Connection (GET /sse)
             session_id = None
             async def connect_sse():
                 nonlocal session_id
-                async with client.stream("GET", f"http://{host}:{port}/sse/", follow_redirects=True) as response:
-                    async for line in response.aiter_lines():
-                        if line.startswith("data:"):
-                            # Format: endpoint: /messages?sessionId=...
-                            if "sessionId=" in line:
-                                session_id = line.split("sessionId=")[-1].strip()
-                                return line
-            
+                try:
+                    async with client.stream("GET", f"http://{host}:{port}/sse/", follow_redirects=True) as response:
+                        print(f"SSE GET status: {response.status_code}")
+                        async for line in response.aiter_lines():
+                            print(f"SSE Line: {line}")
+                            if line.startswith("data:"):
+                                # Format: endpoint: /messages?sessionId=...
+                                if "sessionId=" in line:
+                                    session_id = line.split("sessionId=")[-1].strip()
+                                    print(f"Session ID Found: {session_id}")
+                                    return
+                except Exception as e:
+                    print(f"SSE Stream Error: {e}")
+
             sse_connect_task = asyncio.create_task(connect_sse())
             
             # Wait for session ID to be assigned and returned
-            for _ in range(10):
+            for i in range(20):
                 if session_id:
                     break
+                if server_task.done():
+                    await server_task # trigger exception if it crashed
                 await asyncio.sleep(0.5)
             
             if not session_id:

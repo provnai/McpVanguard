@@ -151,7 +151,7 @@ class VanguardProxy:
             )
         except FileNotFoundError:
             logger.error(f"[Vanguard] Server command not found: {self.server_command[0]}")
-            sys.exit(1)
+            raise RuntimeError(f"MCP Server command not found: {self.server_command[0]}")
 
         logger.info(f"[Vanguard] Server PID {self._server_process.pid} — proxy active")
 

@@ -35,7 +35,8 @@ class StreamWrapper:
                 if not chunk:
                     return b""
                 self._buffer += chunk
-            except Exception:
+            except Exception as e:
+                logger.debug(f"StreamWrapper read error: {e}")
                 return b""
         
         idx = self._buffer.find(b"\n")
@@ -73,10 +74,12 @@ async def run_sse_server(
 
     async def handle_sse(scope, receive, send):
         """Raw ASGI handler for SSE."""
+        logger.debug("SSE connection attempt started")
         try:
             async with sse_transport.connect_sse(
                 scope, receive, send
             ) as (read_stream, write_stream):
+                logger.debug("SseServerTransport context entered")
                 # Wrap the streams for our Proxy
                 bridge = StreamWrapper(read_stream, write_stream)
                 
@@ -90,9 +93,11 @@ async def run_sse_server(
                 
                 logger.info("New agent connected via SSE")
                 await proxy.run()
-                logger.info("Agent disconnected")
+                logger.info("Agent disconnected normally")
+        except asyncio.CancelledError:
+            logger.info("SSE connection cancelled")
         except Exception as e:
-            logger.error(f"SSE Error: {e}", exc_info=True)
+            logger.error(f"SSE Error in handle_sse: {e}", exc_info=True)
             # Don't raise here for ASGI to avoid double logging
             # but we could send a 500 if we haven't started sending SSE
 
