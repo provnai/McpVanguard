@@ -3,6 +3,10 @@
     "description": "The Interception & Verification Layer for MCP Agents.",
     "repository": "https://github.com/provnai/McpVanguard",
     "env": {
+        "MCP_SERVER_COMMAND": {
+            "description": "The command to run your target MCP server. e.g. 'npx @modelcontextprotocol/server-filesystem /app'",
+            "required": true
+        },
         "VEX_API_URL": {
             "description": "The endpoint for the VEX Protocol Flight Recorder (e.g., https://vex-api.up.railway.app/api/v1)",
             "required": false
