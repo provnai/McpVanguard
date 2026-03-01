@@ -36,11 +36,11 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short
 
       - name: Test rule counts
         run: |
-          python -c "
+          PYTHONPATH=. python -c "
           from core.rules_engine import RulesEngine
           engine = RulesEngine(rules_dir='rules')
           print(f'Loaded {engine.rule_count} rules')
