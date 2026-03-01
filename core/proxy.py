@@ -166,22 +166,15 @@ class VanguardProxy:
         Read JSON-RPC messages from agent (our stdin),
         inspect them, then forward or block.
         """
-        # ⚠️ Windows Fix: Use binary buffer for stdin to avoid encoding crashes
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
         loop = asyncio.get_event_loop()
-        
-        # Explicitly handle Windows Proactor transport quirks
-        try:
-            transport, _ = await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
-        except Exception as e:
-            logger.error(f"[Vanguard] Failed to connect stdin pipe: {e}")
-            return
 
         while True:
             try:
-                line = await reader.readline()
-            except Exception:
+                # Use run_in_executor to read from stdin to avoid epoll() EPERM issues
+                # when stdin is not a pipe/TTY (e.g., /dev/null in Docker/Railway)
+                line = await loop.run_in_executor(None, sys.stdin.buffer.readline)
+            except Exception as e:
+                logger.error(f"[Vanguard] Error reading stdin: {e}")
                 break
 
             if not line:
