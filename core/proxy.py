@@ -196,6 +196,7 @@ class VanguardProxy:
             if not line:
                 continue
 
+            logger.debug(f"[Vanguard] Received message from agent: {line[:50]}...")
             t_start = time.monotonic()
 
             # Parse the JSON-RPC message

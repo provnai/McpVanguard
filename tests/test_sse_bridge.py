@@ -9,6 +9,7 @@ import json
 import socket
 import pytest
 import httpx
+import sys
 from core.sse_server import run_sse_server
 from core.proxy import ProxyConfig
 
@@ -20,22 +21,19 @@ def get_free_port():
 @pytest.mark.asyncio
 async def test_sse_bridge_e2e():
     """
-    1. Starts a Vanguard SSE Server with a mock server ('echo').
-    2. Connects via SSE client.
-    3. Sends a malicious command via POST to /messages.
-    4. Asserts that Vanguard intercepts and returns a JSON-RPC error.
+    Verifies the bidirectional SSE flow:
+    1. Establish persistent SSE stream.
+    2. POST a tool call while SSE is open.
+    3. Capture the block response via the SSE stream or POST response.
     """
     port = get_free_port()
     host = "127.0.0.1"
     
-    import sys
-    # Use the same python binary that is running the test
     server_cmd = [sys.executable, "-c", "import sys; [sys.stdout.write(l) for l in sys.stdin]"]
     
     config = ProxyConfig()
-    config.semantic_enabled = False # disable for speed
+    config.semantic_enabled = False 
     
-    # Start the server in the background
     server_task = asyncio.create_task(run_sse_server(
         server_command=server_cmd,
         host=host,
@@ -43,9 +41,7 @@ async def test_sse_bridge_e2e():
         config=config
     ))
     
-    # Wait for server to boot
     await asyncio.sleep(2)
-    
     if server_task.done():
         try:
             await server_task
@@ -53,41 +49,48 @@ async def test_sse_bridge_e2e():
             pytest.fail(f"Server failed to start: {e}")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Step 1: Establish SSE Connection (GET /sse)
-            session_id = None
-            async def connect_sse():
-                nonlocal session_id
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            connection_established = asyncio.Event()
+            post_url = None
+            sse_responses = []
+            
+            async def run_sse_client():
+                nonlocal post_url
                 try:
-                    async with client.stream("GET", f"http://{host}:{port}/sse/", follow_redirects=True) as response:
-                        print(f"SSE GET status: {response.status_code}")
+                    async with client.stream("GET", f"http://{host}:{port}/sse", follow_redirects=True) as response:
+                        print(f"SSE Connected: {response.status_code}")
                         async for line in response.aiter_lines():
-                            print(f"SSE Line: {line}")
+                            if not line.strip(): continue
+                            print(f"SSE Recv: {line}")
+                            
                             if line.startswith("data:"):
-                                # Format: endpoint: /messages?sessionId=...
-                                if "sessionId=" in line:
-                                    session_id = line.split("sessionId=")[-1].strip()
-                                    print(f"Session ID Found: {session_id}")
-                                    return
+                                data = line[5:].strip()
+                                # Is this the endpoint assignment?
+                                if "session" in data and "messages" in data:
+                                    post_url = data
+                                    connection_established.set()
+                                else:
+                                    # It might be a JSON-RPC response
+                                    try:
+                                        sse_responses.append(json.loads(data))
+                                    except:
+                                        pass
+                except asyncio.CancelledError:
+                    print("SSE Client cancelled")
                 except Exception as e:
-                    print(f"SSE Stream Error: {e}")
+                    print(f"SSE Client Error: {e}")
 
-            sse_connect_task = asyncio.create_task(connect_sse())
+            client_task = asyncio.create_task(run_sse_client())
             
-            # Wait for session ID to be assigned and returned
-            for i in range(20):
-                if session_id:
-                    break
-                if server_task.done():
-                    await server_task # trigger exception if it crashed
-                await asyncio.sleep(0.5)
+            # Wait for connection
+            try:
+                await asyncio.wait_for(connection_established.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                client_task.cancel()
+                pytest.fail("Timeout waiting for SSE session ID")
             
-            if not session_id:
-                pytest.fail("Failed to get sessionId from SSE connection")
+            print(f"Using POST URL: {post_url}")
             
-            print(f"Acquired session ID: {session_id}")
-
-            # Build malicious payload
             payload = {
                 "jsonrpc": "2.0",
                 "id": "sse-test-1",
@@ -98,21 +101,50 @@ async def test_sse_bridge_e2e():
                 }
             }
             
-            # Step 2: POST the message to /messages with the real session ID
-            response = await client.post(
-                f"http://{host}:{port}/messages?sessionId={session_id}",
-                json=payload
-            )
+            full_post_url = f"http://{host}:{port}{post_url}" if post_url.startswith("/") else post_url
             
-            print(f"POST Result: {response.status_code} - {response.text}")
-            assert response.status_code in (200, 202)
+            # POST the message with a newline to satisfy the line-based reader
+            print(f"POSTing payload to {full_post_url}")
+            post_resp = await client.post(full_post_url, content=json.dumps(payload) + "\n")
+            print(f"POST Resp: {post_resp.status_code}")
+            assert post_resp.status_code in (200, 202)
+            
+            # Now wait for the response to come back via SSE
+            # (In some MCP implementations, the block error might come back via POST response too)
+            success = False
+            for _ in range(20):
+                # Check POST response body
+                try:
+                    data = post_resp.json()
+                    if "error" in data:
+                        print("Block received via POST response")
+                        success = True
+                        break
+                except:
+                    pass
+                
+                # Check SSE responses
+                if any("error" in r for r in sse_responses):
+                    print("Block received via SSE stream")
+                    success = True
+                    break
+                    
+                await asyncio.sleep(0.5)
+            
+            if not success:
+                pytest.fail("Failed to receive block response via SSE or POST")
+
+            client_task.cancel()
+            try:
+                await client_task
+            except asyncio.CancelledError:
+                pass
 
     finally:
         server_task.cancel()
         try:
             await server_task
         except (asyncio.CancelledError, ValueError):
-            # ValueError: I/O operation on closed pipe is common on Windows during teardown
             pass
 
 if __name__ == "__main__":

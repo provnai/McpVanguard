@@ -10,12 +10,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from starlette.applications import Starlette
-from starlette.routing import Route, Mount
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 from mcp.server.sse import SseServerTransport
-
 from core.proxy import VanguardProxy, ProxyConfig
 
 logger = logging.getLogger("vanguard.sse")
@@ -35,8 +30,7 @@ class StreamWrapper:
                 if not chunk:
                     return b""
                 self._buffer += chunk
-            except Exception as e:
-                logger.debug(f"StreamWrapper read error: {e}")
+            except Exception:
                 return b""
         
         idx = self._buffer.find(b"\n")
@@ -45,14 +39,20 @@ class StreamWrapper:
         return line
 
     def write(self, data: bytes):
-        """Write to the transport stream (async handled by drain)."""
+        """Write to the transport stream."""
         self._pending_write = data
 
     async def drain(self):
         """Send the data over the transport."""
         if hasattr(self, "_pending_write"):
-            await self.write_stream.send(self._pending_write)
-            del self._pending_write
+            try:
+                # SseServerTransport manages its own SSE framing 
+                # for the underlying ByteSendStream.
+                await self.write_stream.send(self._pending_write)
+            except Exception as e:
+                logger.error(f"SSE Write Error: {e}")
+            finally:
+                del self._pending_write
 
 async def run_sse_server(
     server_command: list[str],
@@ -61,64 +61,66 @@ async def run_sse_server(
     config: Optional[ProxyConfig] = None
 ):
     """
-    Run an ASGI server (Starlette) that hosts the MCP SSE transport.
-    Incoming RPC calls are piped through the VanguardProxy.
+    Run a raw ASGI server that hosts the MCP SSE transport.
     """
     logger.info(f"🚀 Starting Vanguard SSE Bridge on {host}:{port}")
     
-    # We create a single shared logic instance, but each SSE connection
-    # might need its own pump? 
-    # For simplicity in MVP: 1 connection = 1 proxy session.
-    
+    # Critical: The endpoint URL must match the path used in the POST handler
     sse_transport = SseServerTransport("/messages")
 
-    async def handle_sse(scope, receive, send):
-        """Raw ASGI handler for SSE."""
-        logger.debug("SSE connection attempt started")
-        try:
-            async with sse_transport.connect_sse(
-                scope, receive, send
-            ) as (read_stream, write_stream):
-                logger.debug("SseServerTransport context entered")
-                # Wrap the streams for our Proxy
-                bridge = StreamWrapper(read_stream, write_stream)
-                
-                # Start the Vanguard Proxy with this transport
-                proxy = VanguardProxy(
-                    server_command=server_command,
-                    config=config,
-                    agent_reader=bridge,
-                    agent_writer=bridge
-                )
-                
-                logger.info("New agent connected via SSE")
-                await proxy.run()
-                logger.info("Agent disconnected normally")
-        except asyncio.CancelledError:
-            logger.info("SSE connection cancelled")
-        except Exception as e:
-            logger.error(f"SSE Error in handle_sse: {e}", exc_info=True)
-            # Don't raise here for ASGI to avoid double logging
-            # but we could send a 500 if we haven't started sending SSE
+    async def app(scope, receive, send):
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        
+        if scope["type"] != "http":
+            return
 
-    async def handle_messages(request: Request):
-        try:
-            await sse_transport.handle_post_message(request.scope, request.receive, request.send)
-        except Exception as e:
-            logger.error(f"Post Message Error: {e}", exc_info=True)
-            raise
+        # Normalize path
+        path = scope["path"].rstrip("/")
+        if not path:
+            path = "/"
 
-    app = Starlette(
-        debug=True,
-        routes=[
-            Mount("/sse", app=handle_sse),
-            Route("/messages", endpoint=handle_messages, methods=["POST"]),
-        ]
-    )
+        if path == "/sse" and scope["method"] == "GET":
+            try:
+                async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
+                    bridge = StreamWrapper(read_stream, write_stream)
+                    proxy = VanguardProxy(
+                        server_command=server_command,
+                        config=config,
+                        agent_reader=bridge,
+                        agent_writer=bridge
+                    )
+                    logger.info("New agent connected via SSE")
+                    await proxy.run()
+                    logger.info("Agent disconnected")
+            except Exception as e:
+                logger.error(f"SSE Error: {e}", exc_info=True)
+        
+        elif path == "/messages" and scope["method"] == "POST":
+            try:
+                await sse_transport.handle_post_message(scope, receive, send)
+            except Exception as e:
+                logger.error(f"POST Error: {e}", exc_info=True)
+        
+        else:
+            await send({
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [(b"content-type", b"text/plain")],
+            })
+            await send({"type": "http.response.body", "body": b"Not Found"})
 
     import uvicorn
-    # Use uvicorn to run the Starlette app
-    # uvicorn.run(app, host=host, port=port)
+    # Use raw app without Starlette wrapper for maximum protocol fidelity
     config_uv = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config_uv)
     await server.serve()
+if __name__ == "__main__":
+    import sys
+    asyncio.run(run_sse_server([sys.executable, "-c", "import sys; [sys.stdout.write(l) for l in sys.stdin]"]))
