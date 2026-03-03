@@ -16,7 +16,9 @@ import logging.handlers
 import os
 import sys
 import time
-from typing import Optional
+import unicodedata
+import urllib.parse
+from typing import Optional, Any
 
 if sys.platform != "win32":
     try:
@@ -186,8 +188,11 @@ class VanguardProxy:
             if method == "tools/call":
                 tool_name = raw_message.get("params", {}).get("name")
 
+            # Normalize the message before inspection to prevent encoding bypasses
+            normalized_message = self._normalize_message(raw_message)
+
             # Inspect the message
-            result = await self._inspect_message(raw_message)
+            result = await self._inspect_message(normalized_message)
             latency_ms = (time.monotonic() - t_start) * 1000
 
             # Record into session state
@@ -305,6 +310,22 @@ class VanguardProxy:
                     result.rule_matches.extend(sem_result.rule_matches)
 
         return result
+
+    def _normalize_message(self, message: Any) -> Any:
+        """
+        Recursively URL-decodes and Unicode-normalizes (NFKC) all string values 
+        in a message to prevent encoding-based rule bypasses.
+        """
+        if isinstance(message, dict):
+            return {k: self._normalize_message(v) for k, v in message.items()}
+        elif isinstance(message, list):
+            return [self._normalize_message(v) for v in message]
+        elif isinstance(message, str):
+            # 1. URL Decode (handles %2e, %2f, etc.)
+            unquoted = urllib.parse.unquote(message)
+            # 2. Unicode Normalization (handles fullwidth dot U+FF0E, etc.)
+            return unicodedata.normalize("NFKC", unquoted)
+        return message
 
     # -----------------------------------------------------------------------
     # I/O helpers

@@ -40,3 +40,19 @@
   match_fields: ["params.arguments.command", "params.command"]
   pattern: '(nc|ncat|netcat)\s+.*(<\s*\S+|\|\s*tar|>\s*/)'
   message: "Netcat-based file transfer is not permitted."
+
+- id: "NET-006"
+  description: "Block access to Cloud Metadata Services"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url", "params.arguments.command"]
+  pattern: '(169\.254\.169\.254|metadata\.google\.internal|instance-data|metadata\.azure\.com)'
+  message: "Requests to cloud metadata services are blocked."
+
+- id: "NET-007"
+  description: "Block Hex/Octal IP address bypasses"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url"]
+  pattern: '0[xX][0-9a-fA-F]+'
+  message: "Hexadecimal-encoded IP addresses are not permitted."

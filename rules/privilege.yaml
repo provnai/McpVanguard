@@ -64,3 +64,19 @@
   match_fields: ["params.arguments.command", "params.command"]
   pattern: 'find\s+.*-perm\s+(-[0-9]*[24][0-9]{3}|\/[0-9]*[24][0-9]{3}|[0-9]*[24][0-9]{3})'
   message: "Warning: SUID binary enumeration detected."
+
+- id: "PRIV-009"
+  description: "Block environment library injection (LD_PRELOAD)"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.arguments.env"]
+  pattern: '(LD_PRELOAD|LD_LIBRARY_PATH|PYTHONPATH)='
+  message: "Environment-based library injection is not permitted."
+
+- id: "PRIV-010"
+  description: "Block self-execution and proc-based hijacks"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.command"]
+  pattern: '/proc/(self|thread-self)/(exe|mem|fd|environ)'
+  message: "Self-execution or process memory access is not permitted."

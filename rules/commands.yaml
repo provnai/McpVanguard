@@ -72,3 +72,19 @@
   match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
   pattern: '(echo\s+[A-Za-z0-9+/=]{20,}\s*\|\s*(base64\s+-d|openssl\s+base64))'
   message: "Base64-encoded command execution is not permitted."
+
+- id: "CMD-010"
+  description: "Block brace and glob expansion bypasses"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path"]
+  pattern: '([^\s]*\{[^\}]+\}|[^\s]*[*?][^\s]*)'
+  message: "Brace or glob expansion ({}, *, ?) is not permitted in sensitive contexts."
+
+- id: "CMD-011"
+  description: "Block environment variable expansion"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(\$[A-Z_]+|\$\{[A-Z_]+\})'
+  message: "Environment variable expansion ($VAR) is not permitted."

@@ -9,6 +9,14 @@
   pattern: '(^|[\\/])etc[\\/]'
   message: "Access to /etc/ system directory is not permitted."
 
+- id: "FS-001b"
+  description: "Block null byte injection in paths"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '\x00'
+  message: "Null byte injection detected in path."
+
 - id: "FS-002"
   description: "Block access to SSH keys and credentials"
   severity: CRITICAL
@@ -24,6 +32,14 @@
   match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
   pattern: '\.\.[\/\\]'
   message: "Directory traversal sequences (../) are not permitted."
+
+- id: "FS-003b"
+  description: "Block redundant slash traversal"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path"]
+  pattern: '[\\/]{2,}\.\.'
+  message: "Redundant slash traversal detected."
 
 - id: "FS-004"
   description: "Block access to /proc/ virtual filesystem"

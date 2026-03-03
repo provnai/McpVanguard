@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-03-01
+## [1.0.1] - 2026-03-03
+### Added
+- **Security Normalization**: Implemented recursive URL-decoding and Unicode NFKC normalization for all incoming tool call messages. Mitigates encoding-based bypasses (e.g., `%2e%2e%2f` and fullwidth dot `U+FF0E`).
+- **Hardened Rulesets**:
+    - **Filesystem**: Added signatures for Null Byte (`\x00`) and redundant slash traversal.
+    - **Network**: Added blocks for Cloud Metadata service IPs (AWS/GCP/Azure) and hex-encoded IP addresses to prevent SSRF.
+    - **Commands**: Added protection against shell expansion bypasses (brace expansion, globbing, variable expansion).
+    - **Privilege Protection**: Added detection for environment-based library injection (`LD_PRELOAD`) and procfs memory hijacks.
+- **Core Proxy**: Sub-2ms JSON-RPC proxy for intercepting Agent-to-Server interactions.
+- **Cloud Security Gateway (SSE Bridge)**: Implemented `vanguard sse` command for real-time bidirectional JSON-RPC over network streams.
+- **Railway/Cloud Support**: One-click deployment configuration via `app.json` and `railway.json` with native Starlette handling.
+- **Documentation**: Comprehensive guides for Railway, VEX/Bitcoin anchoring (CHORA), and vulnerability disclosure.
+- **E2E Test Suite**: Verified 100% integrity across 50+ test cases in isolated WSL environment.
 ### Added
 - **Core Proxy**: Sub-2ms JSON-RPC proxy for intercepting Agent-to-Server interactions.
 - **Cloud Security Gateway (SSE Bridge)**: Implemented `vanguard sse` command to transform the proxy into an internet-reachable gateway.
