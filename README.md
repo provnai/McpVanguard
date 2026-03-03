@@ -16,7 +16,7 @@ Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Buil
 
 ## ⚡ Quickstart
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/import?repository=https://github.com/provnai/McpVanguard)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/provnai/McpVanguard)
 
 ```bash
 # 1. Install
