@@ -80,3 +80,11 @@
   match_fields: ["params.arguments.path", "params.path"]
   pattern: '^~[\\/]?$'
   message: "Warning: attempting to access home directory root."
+
+- id: "FS-009"
+  description: "Block Cyrillic/homograph lookalike characters in paths"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
+  pattern: '[\u0430\u0435\u043e\u0440\u0441\u0445\u0440\u03b1\u03bb\u03c1\u03c3]'
+  message: "Cyrillic or Greek homograph characters detected in path."

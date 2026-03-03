@@ -6,6 +6,7 @@
 Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Building the **Immune System for AI**.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
+[![PyPI version](https://badge.fury.io/py/mcp-vanguard.svg)](https://pypi.org/project/mcp-vanguard/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
@@ -22,16 +23,20 @@ Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Buil
 pip install mcp-vanguard
 
 # 2. Start as a Cloud Security Gateway (SSE)
-# This allows remote agents to connect over HTTP
+# Set an API key to protect your endpoint
+export VANGUARD_API_KEY="your-secret-key"
 vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 
-# 3. Traditional Stdio Wrap
+# 3. Traditional Stdio Wrap (no network, no auth needed)
 vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 
 # 4. Enable VEX Flight Recorder (Immutable Audit)
 export VANGUARD_VEX_URL="https://api.vexprotocol.com"
 export VANGUARD_VEX_KEY="your-agent-jwt"
 vanguard sse --server "..." --behavioral
+
+# 5. Sync latest threat signatures from GitHub
+vanguard update
 ```
 
 ---
@@ -44,18 +49,18 @@ McpVanguard sits at the **Interception Layer** of the Provnai stack. It prevents
 
 | Layer | Component | Defense Mechanism | Performance |
 |-------|-----------|-------------------|-------------|
-| **L0** | **Cloud Gateway** | SSE/Network Bridge for remote agent access | <5ms |
-| **L1** | **Static Rules** | 60+ security signatures across 5 categories | <1ms |
+| **L0** | **Cloud Gateway** | SSE/Network Bridge with optional API key auth | <5ms |
+| **L1** | **Static Rules** | 80+ security signatures across 5 categories | <1ms |
 | **L2** | **Semantic Intelligence** | Local Ollama LLM intent classification | Async |
 | **L3** | **Behavioral Analysis** | Sliding-window anomaly detection (Scraping/Enum) | Stateful |
 
 ### Rule Categories (Layer 1)
 
-*   **Filesystem**: Path traversal, restricted roots (`/etc/`, `~/.ssh/`).
-*   **Command**: Pipe-to-shell, reverse shells, privilege escalation.
-*   **Network**: Data exfiltration detection, tunnel host blocking.
-*   **Jailbreak**: Prompt extraction, instruction-ignore patterns.
-*   **Privilege**: SUID binary creation, crontab manipulation.
+*   **Filesystem**: Path traversal, null bytes, restricted roots (`/etc/`, `~/.ssh/`), Cyrillic homograph detection.
+*   **Command**: Pipe-to-shell, reverse shells, semicolon/`&&`/newline command chaining, expansion bypasses.
+*   **Network**: SSRF, cloud metadata endpoints (AWS/GCP/Azure), IPv6 and hex/octal encoded IPs.
+*   **Jailbreak**: Prompt extraction, instruction-ignore patterns, unicode hidden characters.
+*   **Privilege**: SUID binary creation, `LD_PRELOAD` injection, crontab manipulation.
 
 ---
 
@@ -106,7 +111,12 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 *   **[Full Documentation](https://provnai.dev)**
 *   **[Ecosystem Report](https://github.com/provnai/provnai)**
 *   **[Contributing Guide](CONTRIBUTING.md)**
-*  ## 📄 License
+*   **[Deployment Guide](docs/DEPLOYMENT.md)**
+*   **[Architecture](docs/ARCHITECTURE.md)**
+
+---
+
+## 📄 License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 

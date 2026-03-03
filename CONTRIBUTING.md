@@ -18,6 +18,7 @@ Add Layer 1 rules to catch new attack patterns:
        - "params.arguments.path"
        - "params.arguments.command"
      pattern: 'your_regex_here'
+     message: "User-facing block reason"
    ```
 3. Add a test case to `tests/test_rules.py`
 4. Run `pytest tests/test_rules.py -v` — all tests must pass
@@ -29,34 +30,55 @@ Open a GitHub issue with:
 - Minimal reproduction steps
 - Python version and OS
 
+### 🔒 Report Security Vulnerabilities
+**Do NOT open a public issue.** Email **contact@provnai.com** instead.
+See [SECURITY.md](SECURITY.md) for the full disclosure policy.
+
 ### 📚 Improve Documentation
 - Fix typos, improve clarity, add examples
-- All docs are in `docs/` (Markdown)
+- Docs live in `docs/` and `README.md`
+
+---
 
 ## Development Setup
 
 ```bash
-1.  Fork the repository on GitHub: [https://github.com/provnai/McpVanguard](https://github.com/provnai/McpVanguard)
-2.  Clone your fork locally: `git clone https://github.com/provnai/McpVanguard`
+# 1. Fork and clone
+git clone https://github.com/provnai/McpVanguard
+cd McpVanguard
+
+# 2. Create a virtual environment
 python -m venv .venv
-.venv\Scripts\activate      # Windows
-# or: source .venv/bin/activate  # Mac/Linux
-pip install -r requirements.txt
+# Windows:
+.venv\Scripts\activate
+# Mac/Linux:
+source .venv/bin/activate
+
+# 3. Install dependencies
+pip install -e ".[dev]"
+
+# 4. Run the full test suite
 pytest tests/ -v
 ```
+
+---
 
 ## Code Style
 
 - **Python**: PEP 8, type hints where practical, docstrings on all public methods
-- **YAML rules**: Follow the existing schema exactly
+- **YAML rules**: Follow the existing schema exactly — `id`, `description`, `severity`, `action`, `match_fields`, `pattern`, `message`
 - **Tests**: Every new rule needs a corresponding test — both a block case and an allow case
+
+---
 
 ## Pull Request Checklist
 
 - [ ] `pytest tests/ -v` passes (all green)
 - [ ] New rules have both block and allow test cases
 - [ ] No sensitive data in the PR (no real credentials, etc.)
-- [ ] If adding a challenge level: include `SUCCESS_CONDITION`, hints, and `get_challenge_config()`
+- [ ] `CHANGELOG.md` updated for any user-facing changes
+
+---
 
 ## Code of Conduct
 

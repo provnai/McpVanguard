@@ -56,3 +56,35 @@
   match_fields: ["params.arguments.url", "params.url"]
   pattern: '0[xX][0-9a-fA-F]+'
   message: "Hexadecimal-encoded IP addresses are not permitted."
+
+- id: "NET-008"
+  description: "Block IPv6 localhost and loopback addresses"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url", "params.arguments.command"]
+  pattern: '(::1|::ffff:|\[::1\]|\[::ffff:)'
+  message: "IPv6 loopback/mapped addresses are not permitted."
+
+- id: "NET-009"
+  description: "Block integer-encoded IP addresses (SSRF bypass)"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url"]
+  pattern: 'https?://[0-9]{8,11}(/|$)'
+  message: "Integer-encoded IP address format is not permitted."
+
+- id: "NET-010"
+  description: "Block octal-encoded IP addresses"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url"]
+  pattern: 'https?://0[0-7]+\.0[0-7]+\.0[0-7]+'
+  message: "Octal-encoded IP address format is not permitted."
+
+- id: "NET-011"
+  description: "Block leading-zero decimal IP addresses"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url"]
+  pattern: 'https?://0\d+\.\d+\.\d+\.\d+'
+  message: "Leading-zero encoded IP addresses are not permitted."

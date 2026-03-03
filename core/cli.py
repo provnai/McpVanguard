@@ -273,18 +273,43 @@ def update(
     Fetch the latest security signatures from the official registry.
     This updates your local rules/ directory with the newest threats.
     """
+    import httpx
+
+    RULE_FILES = [
+        "commands.yaml",
+        "filesystem.yaml",
+        "network.yaml",
+        "privilege.yaml",
+        "jailbreak.yaml",
+    ]
+    base_url = f"https://raw.githubusercontent.com/{repo}/main/rules"
+    rules_dir_path = rules_dir
+
     console.print(f"[bold blue]🔄 Syncing signatures from {repo}...[/bold blue]")
-    
-    # In a real implementation, this would use httpx to fetch YAML files
-    # from GitHub and write them to the rules/ directory.
-    # For now, we simulate the success.
-    
-    with console.status("Checking for updates..."):
-        import time
-        time.sleep(1.5)  # Simulate network hop
-        
-    console.print("[bold green]✅ All signatures are up to date.[/bold green]")
-    console.print("[dim]Currently using 36 rules across 5 categories.[/dim]")
+
+    updated = 0
+    failed = 0
+    with console.status("[bold yellow]Fetching latest rules...[/bold yellow]"):
+        for filename in RULE_FILES:
+            url = f"{base_url}/{filename}"
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    resp = client.get(url)
+                    resp.raise_for_status()
+                dest = os.path.join(rules_dir_path, filename)
+                os.makedirs(rules_dir_path, exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write(resp.text)
+                console.print(f"  [green]✅ Updated[/green] {filename}")
+                updated += 1
+            except Exception as exc:
+                console.print(f"  [red]❌ Failed[/red] {filename}: {exc}")
+                failed += 1
+
+    if failed == 0:
+        console.print(f"\n[bold green]✅ All {updated} signature files updated successfully.[/bold green]")
+    else:
+        console.print(f"\n[yellow]⚠️  Updated {updated} files, {failed} failed. Check your connection.[/yellow]")
 
 
 # ---------------------------------------------------------------------------

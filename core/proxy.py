@@ -59,6 +59,11 @@ class ProxyConfig:
         self.behavioral_enabled: bool = os.getenv("VANGUARD_BEHAVIORAL_ENABLED", "true").lower() == "true"
         self.block_threshold: float = float(os.getenv("VANGUARD_BLOCK_THRESHOLD", "0.8"))
         self.warn_threshold: float = float(os.getenv("VANGUARD_WARN_THRESHOLD", "0.5"))
+        # SSE auth key — also read by sse_server.py directly for early validation
+        self.api_key: str = os.getenv("VANGUARD_API_KEY", "")
+        # Set to "true" to expose detailed block reasons to agents (useful for debugging).
+        # Off by default in production to avoid leaking rule internals.
+        self.expose_block_reason: bool = os.getenv("VANGUARD_EXPOSE_BLOCK_REASON", "false").lower() == "true"
 
 
 # ---------------------------------------------------------------------------
@@ -232,9 +237,15 @@ class VanguardProxy:
                 if self._session:
                     submit_blocked_call(raw_message, session_id=self._session.session_id)
 
+                # Sanitize response: only expose detail if explicitly opted-in
+                if self.config.expose_block_reason:
+                    agent_reason = result.block_reason or "Security policy violation"
+                else:
+                    agent_reason = "Request blocked by McpVanguard security policy."
+
                 block_response = make_block_response(
                     request_id=request_id,
-                    reason=result.block_reason or "Security policy violation",
+                    reason=agent_reason,
                     rule_id=rule_id,
                 )
                 logger.info(f"[Vanguard] BLOCKED {method} {tool_name or ''}")
@@ -313,18 +324,31 @@ class VanguardProxy:
 
     def _normalize_message(self, message: Any) -> Any:
         """
-        Recursively URL-decodes and Unicode-normalizes (NFKC) all string values 
+        Recursively URL-decodes and Unicode-normalizes (NFKC) all string values
         in a message to prevent encoding-based rule bypasses.
+        Loops URL decode until the value stabilizes to handle double/triple encoding.
         """
         if isinstance(message, dict):
             return {k: self._normalize_message(v) for k, v in message.items()}
         elif isinstance(message, list):
             return [self._normalize_message(v) for v in message]
         elif isinstance(message, str):
-            # 1. URL Decode (handles %2e, %2f, etc.)
-            unquoted = urllib.parse.unquote(message)
-            # 2. Unicode Normalization (handles fullwidth dot U+FF0E, etc.)
-            return unicodedata.normalize("NFKC", unquoted)
+            # 1. Loop URL decode until stable (handles %252F triple encoding etc.)
+            value = message
+            for _ in range(5):  # max 5 passes prevents infinite loops
+                decoded = urllib.parse.unquote(value)
+                decoded = decoded.replace("%5c", "\\").replace("%5C", "\\")
+                if decoded == value:
+                    break
+                value = decoded
+            # 2. Unicode NFKC (handles fullwidth chars, Cyrillic lookalikes where possible)
+            value = unicodedata.normalize("NFKC", value)
+            # 3. Strip zero-width / invisible characters
+            value = ''.join(
+                ch for ch in value
+                if unicodedata.category(ch) not in ('Cf',)  # Cf = Format chars (ZWS, RTL marks etc)
+            )
+            return value
         return message
 
     # -----------------------------------------------------------------------

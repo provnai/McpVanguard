@@ -96,15 +96,40 @@ async def run_sse_server(
     port: int = 8080,
     config: Optional[ProxyConfig] = None
 ):
+    import os
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.responses import Response
+
+    VANGUARD_API_KEY = os.getenv("VANGUARD_API_KEY", "")
+    if VANGUARD_API_KEY:
+        print(f"[Vanguard] SSE authentication ENABLED (VANGUARD_API_KEY is set)")
+    else:
+        print(f"[Vanguard] WARNING: VANGUARD_API_KEY not set. SSE endpoints are open.")
+
+    def _check_auth(scope) -> bool:
+        """Returns True if authenticated or if auth is disabled."""
+        if not VANGUARD_API_KEY:
+            return True
+        headers = dict(scope.get("headers", []))
+        api_key = headers.get(b"x-api-key", b"").decode("utf-8", errors="replace")
+        bearer = headers.get(b"authorization", b"").decode("utf-8", errors="replace")
+        if bearer.lower().startswith("bearer "):
+            bearer = bearer[7:].strip()
+        return api_key == VANGUARD_API_KEY or bearer == VANGUARD_API_KEY
+
+    async def _send_401(send):
+        await send({"type": "http.response.start", "status": 401, "headers": [[b"content-type", b"application/json"]]})
+        await send({"type": "http.response.body", "body": b'{"error": "Unauthorized. Provide VANGUARD_API_KEY via X-Api-Key header."}'})
 
     print(f"Starting Vanguard SSE Bridge on {host}:{port}")
     sse_transport = SseServerTransport("/messages")
 
     async def handle_sse(scope, receive, send):
         assert scope["type"] == "http"
+        if not _check_auth(scope):
+            await _send_401(send)
+            return
         async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
             bridge = StreamWrapper(read_stream, write_stream)
             proxy = VanguardProxy(
@@ -117,12 +142,15 @@ async def run_sse_server(
 
     async def handle_messages(scope, receive, send):
         assert scope["type"] == "http"
+        if not _check_auth(scope):
+            await _send_401(send)
+            return
         await sse_transport.handle_post_message(scope, receive, send)
 
     async def health_check_handler(scope, receive, send):
-        """Standard health check for Railway/Cloud readiness."""
+        """Standard health check for Railway/Cloud readiness. No auth required."""
         assert scope["type"] == "http"
-        response = Response(json.dumps({"status": "ok", "version": "1.0.1"}), media_type="application/json")
+        response = Response(json.dumps({"status": "ok", "version": "1.0.2"}), media_type="application/json")
         await response(scope, receive, send)
 
     class AsgiAppWrapper:

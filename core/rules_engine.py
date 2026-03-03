@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Optional
 import yaml
@@ -41,6 +42,22 @@ class Rule:
             logger.error(f"Invalid regex in rule {self.rule_id}: {e}")
             self.pattern = re.compile(r"(?!)")  # never matches
 
+    # Shared thread-pool: runs regex matches with a timeout to prevent ReDoS
+    _match_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="vanguard-re")
+    _REGEX_TIMEOUT_SECS = 0.1  # 100ms per pattern — catastrophic backtracking will abort
+
+    def _safe_search(self, value: str) -> bool:
+        """Run pattern.search in a thread with a timeout to guard against ReDoS."""
+        try:
+            future = Rule._match_pool.submit(self.pattern.search, value)
+            result = future.result(timeout=Rule._REGEX_TIMEOUT_SECS)
+            return result is not None
+        except FuturesTimeoutError:
+            logger.warning("ReDoS guard triggered for rule %s — aborting match", self.rule_id)
+            return False
+        except Exception:
+            return False
+
     def check(self, message: dict) -> Optional[RuleMatch]:
         """
         Check if this rule matches any field in the message.
@@ -51,7 +68,7 @@ class Rule:
             if value is None:
                 continue
             str_value = str(value)
-            if self.pattern.search(str_value):
+            if self._safe_search(str_value):
                 return RuleMatch(
                     rule_id=self.rule_id,
                     rule_name=self.description,

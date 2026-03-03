@@ -89,3 +89,43 @@ export VANGUARD_LOG_FILE="/var/log/vanguard/audit.log"
 ## Summary
 
 With these environment variables configured, Vanguard is ready for enterprise scale. It will intercept threats via static rules, semantically score complex payloads via OpenAI, track cluster-wide behavior via Redis, and cryptographically log all defense actions via VEX.
+
+---
+
+## 6. SSE Authentication
+
+When running `vanguard sse` in a public-facing deployment, protect your endpoint with an API key:
+
+```bash
+export VANGUARD_API_KEY="your-long-random-secret"
+```
+
+Clients must send the key in every request:
+```http
+X-Api-Key: your-long-random-secret
+# or
+Authorization: Bearer your-long-random-secret
+```
+
+The `/health` endpoint is exempt and always accessible for Railway/cloud health-checks.
+
+---
+
+## 7. Advanced / Debug Options
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `VANGUARD_SESSION_TTL` | `86400` | Session expiry in seconds (24h). Stale sessions are auto-evicted. |
+| `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. Off by default to avoid leaking rule internals to agents. |
+
+---
+
+## 8. Signature Updates
+
+Keep your threat signatures up to date by running:
+
+```bash
+vanguard update
+```
+
+This fetches the latest YAML rule files from the official `provnai/McpVanguard` repository on GitHub and overwrites your local `rules/` directory.

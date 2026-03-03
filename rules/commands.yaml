@@ -88,3 +88,35 @@
   match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
   pattern: '(\$[A-Z_]+|\$\{[A-Z_]+\})'
   message: "Environment variable expansion ($VAR) is not permitted."
+
+- id: "CMD-012"
+  description: "Block command chaining via semicolons"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: ';\s*(bash|sh|zsh|python|ruby|perl|curl|wget|nc|ncat|rm|chmod|chown|sudo|eval)'
+  message: "Command chaining via semicolon is not permitted."
+
+- id: "CMD-013"
+  description: "Block command chaining via && and ||"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(&&|\|\|)\s*(bash|sh|zsh|python|ruby|perl|curl|wget|nc|ncat|rm|chmod|chown|sudo|eval)'
+  message: "Conditional command chaining (&&/||) is not permitted."
+
+- id: "CMD-014"
+  description: "Block newline-separated command injection"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '(\n|\r|\x0a|\x0d)\s*(bash|sh|zsh|python|curl|wget|nc|rm|chmod|sudo|eval)'
+  message: "Newline-separated command injection is not permitted."
+
+- id: "CMD-015"
+  description: "Block tab-separated command injection"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code"]
+  pattern: '\t(bash|sh|zsh|python|curl|wget|nc|rm|chmod|sudo|eval)'
+  message: "Tab-separated command injection is not permitted."

@@ -5,6 +5,7 @@ Detects patterns that only become dangerous across multiple turns.
 """
 
 from __future__ import annotations
+import os
 import time
 import uuid
 from collections import defaultdict, deque
@@ -109,22 +110,36 @@ class SessionManager:
     One session per agent connection.
     """
 
+    SESSION_TTL_SECONDS = int(os.getenv("VANGUARD_SESSION_TTL", str(60 * 60 * 24)))  # 24h default
+
     def __init__(self, max_sessions: int = 1000):
         self._sessions: dict[str, SessionState] = {}
         self._max_sessions = max_sessions
 
+    def _evict_expired(self):
+        """Remove sessions older than SESSION_TTL_SECONDS."""
+        cutoff = time.time() - self.SESSION_TTL_SECONDS
+        expired = [sid for sid, s in self._sessions.items() if s.started_at < cutoff]
+        for sid in expired:
+            del self._sessions[sid]
+
     def create(self) -> SessionState:
         """Create and register a new session."""
+        self._evict_expired()
         session = SessionState()
         self._sessions[session.session_id] = session
-        # Evict oldest if at capacity
+        # Evict oldest if still at capacity
         if len(self._sessions) > self._max_sessions:
             oldest_id = next(iter(self._sessions))
             del self._sessions[oldest_id]
         return session
 
     def get(self, session_id: str) -> Optional[SessionState]:
-        return self._sessions.get(session_id)
+        session = self._sessions.get(session_id)
+        if session and session.age_seconds > self.SESSION_TTL_SECONDS:
+            del self._sessions[session_id]
+            return None
+        return session
 
     def remove(self, session_id: str):
         self._sessions.pop(session_id, None)
