@@ -119,6 +119,12 @@ async def run_sse_server(
         assert scope["type"] == "http"
         await sse_transport.handle_post_message(scope, receive, send)
 
+    async def health_check_handler(scope, receive, send):
+        """Standard health check for Railway/Cloud readiness."""
+        assert scope["type"] == "http"
+        response = Response(json.dumps({"status": "ok", "version": "1.0.1"}), media_type="application/json")
+        await response(scope, receive, send)
+
     class AsgiAppWrapper:
         def __init__(self, func):
             self.func = func
@@ -130,6 +136,7 @@ async def run_sse_server(
         routes=[
             Route("/sse", endpoint=AsgiAppWrapper(handle_sse), methods=["GET"]),
             Route("/messages", endpoint=AsgiAppWrapper(handle_messages), methods=["POST"]),
+            Route("/health", endpoint=AsgiAppWrapper(health_check_handler), methods=["GET"]),
         ]
     )
 

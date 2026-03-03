@@ -1,30 +1,31 @@
 {
     "name": "McpVanguard Proxy",
-    "description": "Cloud-Native Security Gateway for MCP Agents (SSE Bridge).",
+    "description": "Enterprise-grade security gateway for the Model Context Protocol (MCP). Protects servers from malicious agent intent.",
     "repository": "https://github.com/provnai/McpVanguard",
+    "icon": "assets/logo.png",
     "env": {
         "MCP_SERVER_COMMAND": {
-            "description": "The command to run your target MCP server. e.g. 'npx @modelcontextprotocol/server-filesystem /app'",
+            "description": "The shell command to spawn your target MCP server (e.g. 'npx @modelcontextprotocol/server-filesystem /path/to/data')",
             "required": true
         },
         "VANGUARD_VEX_URL": {
-            "description": "The endpoint for the VEX Protocol Flight Recorder (e.g., https://vex-api.up.railway.app/api/v1)",
+            "description": "Optional: VEX Protocol Flight Recorder API (Immutable Audit)",
             "required": false
         },
         "VANGUARD_VEX_KEY": {
-            "description": "The JWT Key for your VEX Auditor agent",
+            "description": "Optional: JWT Key for VEX Auditor integration",
             "required": false
         },
         "OLLAMA_API_BASE": {
-            "description": "URL for remote Ollama/OpenAI intent scoring (if not running locally)",
+            "description": "Optional: Remote LLM base URL for L2 Semantic intent scoring",
             "required": false
         },
         "VANGUARD_REDIS_URL": {
-            "description": "Redis connection string for L3 Stateful Behavioral blocking",
+            "description": "Optional: Redis connection string for L3 Stateful Behavior tracing",
             "required": false
         },
         "VANGUARD_DISABLE_UVLOOP": {
-            "description": "Set to 1 to disable uvloop if encountering segmentation faults during subprocess creation",
+            "description": "Safety: Set to 1 if encountering uvloop subprocess issues",
             "required": false,
             "value": "1"
         }
