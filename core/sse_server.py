@@ -103,8 +103,9 @@ async def run_sse_server(
     print(f"Starting Vanguard SSE Bridge on {host}:{port}")
     sse_transport = SseServerTransport("/messages")
 
-    async def handle_sse(request):
-        async with sse_transport.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
+    async def handle_sse(scope, receive, send):
+        assert scope["type"] == "http"
+        async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
             bridge = StreamWrapper(read_stream, write_stream)
             proxy = VanguardProxy(
                 server_command=server_command,
@@ -113,19 +114,25 @@ async def run_sse_server(
                 agent_writer=bridge
             )
             await proxy.run()
-        return Response(status_code=200)
 
-    async def handle_messages(request):
-        await sse_transport.handle_post_message(request.scope, request.receive, request._send)
-        return Response(status_code=202)
+    async def handle_messages(scope, receive, send):
+        assert scope["type"] == "http"
+        await sse_transport.handle_post_message(scope, receive, send)
+
+    class AsgiAppWrapper:
+        def __init__(self, func):
+            self.func = func
+        async def __call__(self, scope, receive, send):
+            await self.func(scope, receive, send)
 
     app = Starlette(
         debug=False,
         routes=[
-            Route("/sse", endpoint=handle_sse, methods=["GET"]),
-            Route("/messages", endpoint=handle_messages, methods=["POST"]),
+            Route("/sse", endpoint=AsgiAppWrapper(handle_sse), methods=["GET"]),
+            Route("/messages", endpoint=AsgiAppWrapper(handle_messages), methods=["POST"]),
         ]
     )
+
 
     import uvicorn
     config_uv = uvicorn.Config(app, host=host, port=port, log_level="info")
