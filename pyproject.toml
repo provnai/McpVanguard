@@ -10,7 +10,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 authors = [{ name = "Provnai Development Team", email = "research@provnai.com" }]
-keywords = ["mcp", "ai-security", "llm-security", "prompt-injection", "red-teaming"]
+keywords = ["mcp", "model-context-protocol", "ai-security", "railway", "firewall", "security-proxy", "vex-protocol"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
