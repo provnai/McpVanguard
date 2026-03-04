@@ -5,7 +5,7 @@
   description: "Block ignore-previous-instructions jailbreak"
   severity: HIGH
   action: BLOCK
-  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.text", "params.arguments.query", "params.query"]
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.text", "params.arguments.query", "params.query", "params.arguments.message", "params.message"]
   pattern: 'ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?|guidelines?)'
   message: "Prompt injection attempt (ignore-instructions) detected."
 
@@ -13,7 +13,7 @@
   description: "Block DAN / jailbreak personas"
   severity: HIGH
   action: BLOCK
-  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.text"]
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.text", "params.arguments.message", "params.message"]
   pattern: '(you are now|act as|pretend (you are|to be)|you must now)\s+(DAN|an?\s+(AI\s+)?without\s+(restrictions?|ethics?|guidelines?|limits?))'
   message: "Jailbreak persona injection detected."
 
@@ -21,7 +21,7 @@
   description: "Block system prompt extraction attempts"
   severity: HIGH
   action: BLOCK
-  match_fields: ["params.arguments.content", "params.content", "params.arguments.query"]
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.query", "params.arguments.message", "params.message", "params.arguments.text"]
   pattern: '(reveal|print|output|show|repeat|display)\s+(your\s+)?(system\s+prompt|original\s+instructions?|initial\s+prompt|full\s+prompt)'
   message: "System prompt extraction attempt detected."
 
@@ -29,7 +29,7 @@
   description: "Block hidden instruction injection via whitespace/unicode"
   severity: HIGH
   action: BLOCK
-  match_fields: ["params.arguments.content", "params.content"]
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.message", "params.message"]
   pattern: '(\u200b|\u200c|\u200d|\ufeff|\u2028|\u2029){3,}'
   message: "Hidden instruction injection via invisible unicode characters detected."
 
@@ -37,7 +37,7 @@
   description: "Block context overflow / token stuffing"
   severity: MEDIUM
   action: WARN
-  match_fields: ["params.arguments.content", "params.content", "params.arguments.text"]
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.text", "params.arguments.message"]
   pattern: '(.)\1{200,}'
   message: "Warning: potential context overflow / token stuffing detected."
 
@@ -45,6 +45,6 @@
   description: "Block 'new session' reset injection"
   severity: MEDIUM
   action: BLOCK
-  match_fields: ["params.arguments.content", "params.content"]
+  match_fields: ["params.arguments.content", "params.content", "params.arguments.message", "params.message"]
   pattern: '(end\s+of\s+(session|conversation)|new\s+(session|conversation|instructions?)\s+(begin|start))'
   message: "Session reset injection attempt detected."

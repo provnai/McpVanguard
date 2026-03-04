@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.3] - 2026-03-04
 
 ### Changed
+- **Railway Certification Suite** (`tests/benchmarks/railway_certification.py`): Added a comprehensive 5-phase certification benchmark suite to validate 100% Postgres finalize rates, SSE interception, and local scaling failsafes against VEX v0.3.0.
 - **Forensic Metadata Strategy** (`core/vex_client.py`): VEX audit submissions now extract and transmit sanitized forensic risk indicators (attack class, pattern summary, risk tier) instead of raw malicious payloads. This ensures 100% audit finality by cleanly separating forensic evidence from exploit strings, resolving false-positive rejections from the VEX API safety layer.
 - **Railway Deployment Guide** (`docs/railway-deployment-guide.md`): Updated with VEX v0.2.1/v0.3.0 compatibility notes including PostgreSQL backend auto-detection and OTEL tracing configuration.
 
 ### Fixed
+- **Jailbreak Payload Gap** (`rules/jailbreak.yaml`): Added `params.arguments.message` to the match fields for all Jailbreak and Ignore-Instructions rules. This patches a blind spot where system prompts embedded natively in the `message` argument were bypassing the Layer 1 proxy.
 - **Test Import Resolution** (`tests/test_rules.py`): Corrected `from tests.conftest import` to `from conftest import` — the absolute package path was resolving to a stale cached copy in site-packages, causing CI collection failures.
 
 

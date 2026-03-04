@@ -57,3 +57,5 @@ htmlcov/
 # Build dist
 dist/
 *.whl
+
+RAILWAY_TEST_REPORT.*
