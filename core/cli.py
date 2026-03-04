@@ -15,7 +15,11 @@ import sys
 from typing import Optional
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
+
+# Load environment variables from .env
+load_dotenv()
 from rich.table import Table
 from rich.panel import Panel
 from rich import print as rprint

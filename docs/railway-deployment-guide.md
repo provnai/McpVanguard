@@ -14,7 +14,7 @@ Once deployed, Railway will assign you a public URL (e.g., `mcp-vanguard.up.rail
 
 ```bash
 curl https://your-project.up.railway.app/health
-# Expected: {"status": "ok", "version": "1.0.1"}
+# Expected: {"status": "ok", "version": "1.0.2"}
 ```
 
 ## 🌉 Connecting Your Agent
