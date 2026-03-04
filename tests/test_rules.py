@@ -4,7 +4,7 @@ Unit tests for the Layer 1 rules engine.
 Tests that every rule category correctly blocks its target attack patterns.
 """
 import pytest
-from tests.conftest import make_tool_call, make_generic_request
+from conftest import make_tool_call, make_generic_request
 from core.rules_engine import RulesEngine
 
 
