@@ -7,14 +7,13 @@ name = "mcp-vanguard"
 version = "1.0.2"
 description = "Security proxy and verification layer for the Model Context Protocol (MCP)"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Provnai Development Team", email = "research@provnai.com" }]
 keywords = ["mcp", "model-context-protocol", "ai-security", "railway", "firewall", "security-proxy", "vex-protocol"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
