@@ -6,7 +6,7 @@
 Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Building the **Immune System for AI**.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
-[![PyPI version](https://badge.fury.io/py/mcp-vanguard.svg)](https://pypi.org/project/mcp-vanguard/)
+[![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
@@ -78,6 +78,8 @@ The VEX Server cryptographically hashes the blocked intent, runs it through the 
 ---
 
 ## 🏗️ How It Works
+
+![McpVanguard Architecture](docs/architecture.png)
 
 ```text
                     ┌─────────────────────────────┐         ┌──────────────┐
