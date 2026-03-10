@@ -100,4 +100,7 @@ def test_semantic_ollama_offline(mock_ollama_client):
     
     res = asyncio.run(semantic.score_intent(msg))
     
-    assert res is None  # Should fail open (allowed)
+    assert res is not None
+    assert res.action == "BLOCK"
+    assert res.layer_triggered == 2
+    assert "api unreachable" in res.block_reason.lower()
