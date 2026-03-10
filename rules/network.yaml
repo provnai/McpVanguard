@@ -70,7 +70,8 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.url", "params.url", "params.arguments.command", "params.command"]
-  pattern: 'https?://[0-9]{8,11}(/|$)'
+  # Captures integer IPs like 2852039166, with or without protocol prefix
+  pattern: '(https?://)?\b[0-9]{8,11}\b(/|$)'
   message: "Integer-encoded IP address format is not permitted."
 
 - id: "NET-010"
@@ -78,7 +79,8 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.url", "params.url", "params.arguments.command", "params.command"]
-  pattern: 'https?://0[0-7]+\.0[0-7]+\.0[0-7]+'
+  # Captures octal IPs like 010.010.010.010, with or without protocol prefix
+  pattern: '(https?://)?0[0-7]+\.0[0-7]+\.0[0-7]+\.0[0-7]+'
   message: "Octal-encoded IP address format is not permitted."
 
 - id: "NET-011"
@@ -86,5 +88,6 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.url", "params.url", "params.arguments.command", "params.command"]
-  pattern: 'https?://0\d+\.\d+\.\d+\.\d+'
+  # Captures leading-zero decimal IPs like 010.1.1.1, with or without protocol prefix
+  pattern: '(https?://)?0\d+\.\d+\.\d+\.\d+'
   message: "Leading-zero encoded IP addresses are not permitted."
