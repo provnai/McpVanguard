@@ -122,6 +122,9 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
         return 0.0, "api timeout"
     except Exception as exc:
         logger.warning("Semantic scorer error: %s", exc)
+        if os.getenv("VANGUARD_SEMANTIC_FAIL_CLOSED", "false").lower() == "true":
+             # High-security: fail closed
+             return 1.0, f"FAIL-CLOSED: {exc}"
         return 0.0, f"scorer error: {exc}"
 
 

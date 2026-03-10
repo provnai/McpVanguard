@@ -4,6 +4,10 @@
     "repository": "https://github.com/provnai/McpVanguard",
     "icon": "assets/logo.png",
     "env": {
+        "VANGUARD_API_KEY": {
+            "description": "Required: Secret key for SSE clients. Must be sent in X-Api-Key header.",
+            "required": true
+        },
         "MCP_SERVER_COMMAND": {
             "description": "The shell command to spawn your target MCP server (e.g. 'npx @modelcontextprotocol/server-filesystem /path/to/data')",
             "required": true

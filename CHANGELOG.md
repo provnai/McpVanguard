@@ -5,7 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-03-10 (Stability & Concurrency Update)
+
+### Added
+- **Stable Concurrency** (`core/sse_server.py` & `core/session.py`): Implemented `asyncio.Lock` and `threading.Lock` for atomic registry management. Prevents race conditions during high-burst connection surges.
+- **Strict Authentication Decoding**: Authentication headers now enforce strict UTF-8 decoding in the SSE transport layer.
+- **Enhanced Behavioral Reporting**: `BEH-003` (Privilege Escalation) blocks now include the specific sensitive path(s) that triggered the violation.
+
+### Changed
+- **Session Entropy**: Upgraded to full UUID4 for session identifiers.
+- **Input Hardening**: Added length-based safeguards to prevent resource exhaustion.
+- **Atomic Sessions**: Guaranteed thread-safe session creation and restoration.
+- **Clean Shutdown**: Added task cancellation to prevent proxy hangs.
+- **Scale Test Suite**: Automated stress test simulating 5,000+ requests.
+
+### Fixed
+- Fixed a potential race condition in `SessionManager.create` that could lead to exceeding session capacity.
+- Removed vestigial debug logging in behavioral analysis logic.
+- Unified block reason formatting across all security layers.
+
 ## [1.1.2] - 2026-03-10
+
+### Added
+- **Deep Audit Hardening**: Implemented 10 security fixes from the Deep Audit Report.
+- **SSE Rate Limiting**: Token-bucket algorithm for transport protection.
+- **Fail-Closed Semantic Layer**: High-security mode for LLM-based inspection.
+- **Redis Session Persistence**: Session metadata now survives server restarts.
+- **IP Allowlisting**: Configurable access control for SSE connections.
+- **Dynamic Versioning**: Integrated `setuptools-scm` for flawless releases.
+
+### Fixed
+- Fixed SSE version leakage in `/health` endpoint.
+- Upgraded directory enumeration (BEH-002) to `BLOCK` mode.
+- Expanded Unicode homograph detection (FS-009).
+- Resolved PyPI Trusted Publishing OIDC configuration errors.
 
 ### Security
 - **Constant-Time Authentication** (`core/sse_server.py`): Switched to `hmac.compare_digest` for API key verification to prevent character-level timing attacks.
@@ -25,12 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Jailbreak Payload Gap** (`rules/jailbreak.yaml`): Added `params.arguments.message` to the match fields for all Jailbreak and Ignore-Instructions rules. This patches a blind spot where system prompts embedded natively in the `message` argument were bypassing the Layer 1 proxy.
 - **Test Import Resolution** (`tests/test_rules.py`): Corrected `from tests.conftest import` to `from conftest import` — the absolute package path was resolving to a stale cached copy in site-packages, causing CI collection failures.
 
-
 ## [1.0.2] - 2026-03-03
 
-
 ### Security
-
 - **Recursive URL Decoding**: `_normalize_message` now loops until the value stabilizes — defeats double and triple URL-encoding attacks (e.g., `..%252F`).
 - **Zero-Width Character Stripping**: All Unicode format characters (zero-width space, RTL/LTR marks, zero-width joiners) are now silently removed from all incoming payloads before inspection.
 - **Command Separator Blocking** (`CMD-012–015`): Added rules to block command chaining via `;`, `&&`, `||`, `\n`, and `\t` separators.
@@ -40,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ReDoS Timeout Guard**: Every regex match now runs in a thread with a 100ms timeout. Catastrophically backtracking patterns abort cleanly instead of hanging the proxy.
 
 ## [1.0.1] - 2026-03-03
+
 ### Added
 - **Security Normalization**: Implemented recursive URL-decoding and Unicode NFKC normalization for all incoming tool call messages. Mitigates encoding-based bypasses (e.g., `%2e%2e%2f` and fullwidth dot `U+FF0E`).
 - **Hardened Rulesets**:
@@ -52,22 +83,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Railway/Cloud Support**: One-click deployment configuration via `app.json` and `railway.json` with native Starlette handling.
 - **Documentation**: Comprehensive guides for Railway, VEX/Bitcoin anchoring (CHORA), and vulnerability disclosure.
 - **E2E Test Suite**: Verified 100% integrity across 50+ test cases in isolated WSL environment.
-### Added
-- **Core Proxy**: Sub-2ms JSON-RPC proxy for intercepting Agent-to-Server interactions.
-- **Cloud Security Gateway (SSE Bridge)**: Implemented `vanguard sse` command to transform the proxy into an internet-reachable gateway.
-- **Network Transport**: Integrated `Starlette` and `mcp.server.sse` for real-time bidirectional JSON-RPC over network streams. Refactored to native Starlette app for robust POST/GET route handling and connection stability.
 - **Rules Engine (Layer 1)**: Robust 60+ static signature YAML configuration preventing prompt injection and data exfiltration.
 - **Semantic Intelligence (Layer 2)**: Quantized local Ollama API fallback and cloud OpenAI intent-scoring support.
 - **Behavioral Analysis (Layer 3)**: Redis-backed sliding window memory analysis for clustered Vanguard deployments.
 - **VEX Protocol Integration**: Fire-and-forget payload offloading to the VEX API and CHORA Gate for cryptographic Bitcoin anchoring.
 - **CI/CD**: GitHub Actions pipeline configuring seamless PyPI Trusted Publisher releases.
 - **Cloud Deployment**: Railway configuration (`railway.json` and `app.json`) for one-click proxy and Redis instantiation.
-- **E2E Test Suite**: Added `tests/test_sse_bridge.py` and `tests/test_e2e_vex.py` for verifying system integrity. Achieved **47/47 passing tests** in an isolated WSL verification environment.
 - **Documentation**: Comprehensive `DEPLOYMENT.md`, `ARCHITECTURE.md`, and `README.md` for full system transparency.
 
 ### Fixed
 - **Railway/Docker Stability**: Automated `uvloop` detection and disabling; implemented threaded `stdin` reads to bypass container security restrictions.
 - **Performance**: Optimized audit logger to prevent race conditions during concurrent rotating events.
-- **Audit Scaling**: Restructured `audit.log` module to enforce 10MB bounds with 5-snapshot Native RotatingFileHandler retention.
+- **Audit Scaling**: Restructured `audit.log` module to enforce 100MB bounds with 5-snapshot Native RotatingFileHandler retention.
 - **SSE Serialization**: Resolved a critical Pydantic `AttributeError` by correctly validating `JSONRPCMessage` types within the `StreamWrapper` drain loop.
-

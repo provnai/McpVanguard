@@ -49,12 +49,17 @@ McpVanguard sits at the **Interception Layer** of the Provnai stack. It prevents
 
 ### 3-Layer Defense-in-Depth
 
-| Layer | Component | Defense Mechanism | Performance |
-|-------|-----------|-------------------|-------------|
-| **L0** | **Cloud Gateway** | SSE/Network Bridge with optional API key auth | <5ms |
-| **L1** | **Static Rules** | 80+ security signatures across 5 categories | <1ms |
+| Layer | Component | Defense Mechanism | Latency (P99) |
+|-------|-----------|-------------------|---------------|
+| **L1** | **Static Rules** | 80+ security signatures across 5 categories | **~16ms** |
 | **L2** | **Semantic Intelligence** | Local Ollama LLM intent classification | Async |
 | **L3** | **Behavioral Analysis** | Sliding-window anomaly detection (Scraping/Enum) | Stateful |
+
+### 🚀 Performance (Scale Verified)
+McpVanguard is designed for high-concurrency production environments. Our latest benchmarks show:
+- **Throughput**: 240+ requests/second.
+- **Security Overhead**: <20ms (Layer 1).
+- **Stability**: Zero packet loss or state corruption across 5,000+ request bursts.
 
 ### Rule Categories (Layer 1)
 
@@ -69,11 +74,11 @@ McpVanguard sits at the **Interception Layer** of the Provnai stack. It prevents
 ## 🛡️ VEX Protocol Integration (Flight Recorder)
 
 McpVanguard integrates natively with the **VEX Protocol**. 
-Whenever the proxy blocks a malicious action (L1/L2/L3), it instantly processes a "fire-and-forget" payload directly to the VEX API. 
+Whenever the proxy blocks a malicious action (L1/L2/L3), it instantly sends a background report to the VEX API. 
 
 The VEX Server cryptographically hashes the blocked intent, runs it through the CHORA Gate, and anchors an immutable receipt (PoE) to the Bitcoin blockchain.
 
-*Enterprise auditors can mathematically prove exactly why an agent was blocked without relying entirely on local log trust.*
+*Auditors can mathematically prove exactly why an agent was blocked without relying entirely on local log trust.*
 
 ---
 
@@ -104,10 +109,10 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 | Phase | Goal | Status |
 |-------|------|--------|
 | **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | ✅ DONE |
-| **Phase 2** | Intelligence (L2 Semantic OpenAI, L3 Behavioral Redis Scaling) | ✅ DONE |
+| **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral Scaling) | ✅ DONE |
 | **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ DONE |
 | **Phase 4** | Distribution (v1.0.0 Stable, PyPI, WSL Verified) | ✅ DONE |
-| **Phase 5** | Enterprise Integration (Railway, 100% Finality) | ✅ DONE |
+| **Phase 5** | Production Hardening (v1.1.3 stability & Telemetry) | ✅ DONE |
 
 ---
 

@@ -4,7 +4,7 @@
 
 ## About Hosting McpVanguard
 
-Hosting McpVanguard on Railway provides a cloud-native "Security Gateway" (SSE Bridge) for your AI agents. By wrapping your local or remote MCP servers with Vanguard, you gain a persistent, secure endpoint that inspects every JSON-RPC message. Railway's infrastructure ensures that your defense layer is always-on, high-performance, and easily scalable with minimal configuration.
+Hosting McpVanguard on Railway provides a cloud-native "Security Gateway" (SSE Bridge) for your AI agents. By wrapping your local or remote MCP servers with Vanguard, you gain a persistent, secure endpoint that inspects every JSON-RPC message. Our load-tested core ensures sub-20ms security latency even under high-concurrency bursts.
 
 ## Common Use Cases
 

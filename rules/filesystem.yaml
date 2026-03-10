@@ -82,9 +82,10 @@
   message: "Warning: attempting to access home directory root."
 
 - id: "FS-009"
-  description: "Block Cyrillic/homograph lookalike characters in paths"
+  description: "Block Cyrillic/Greek/Latin homograph lookalike characters in paths"
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
-  pattern: '[\u0430\u0435\u043e\u0440\u0441\u0445\u0440\u03b1\u03bb\u03c1\u03c3]'
-  message: "Cyrillic or Greek homograph characters detected in path."
+  # Comprehensive list of confusable characters (Cyrillic, Greek, etc. that look like Latin)
+  pattern: '[\u0430\u0435\u043e\u0440\u0441\u0445\u0443\u0436\u043d\u043b\u043c\u0442\u0432\u0437\u0511\u03b1\u03b5\u03bf\u03c1\u03c2\u03c4\u03bd\u03c7\u03c9\u03ca\u0391\u0392\u0395\u0397\u0399\u039a\u039c\u039d\u039f\u03a1\u03a4\u03a7\u03a9\u0410\u0412\u0415\u041d\u041e\u0420\u0421\u0422\u0425\u0423]'
+  message: "Visual spoofing/homograph characters detected in path."

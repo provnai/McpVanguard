@@ -37,6 +37,7 @@ Fine-tune the behavior of the security engine:
 | `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. Leave `false` in production to avoid leaking rule internals. |
 | `VANGUARD_BLOCK_THRESHOLD` | `0.8` | Semantic scoring threshold above which a request is blocked (Layer 2, requires Ollama). |
 | `VANGUARD_WARN_THRESHOLD` | `0.5` | Semantic scoring threshold above which a request is flagged as a warning. |
+| `VANGUARD_MAX_STRING_LEN` | `65536` | Protection against ReDoS/Memory exhaustion. Strings longer than this are truncated before inspection. |
 
 ### 3. Layer 3: Behavioral Analysis (Optional)
 
@@ -78,7 +79,7 @@ Once deployed, Railway assigns you a public URL (e.g., `https://mcpvanguard-your
 Verify the service is running:
 ```bash
 curl https://your-project.up.railway.app/health
-# Expected: {"status": "ok", "version": "1.0.2"}
+# Expected: {"status": "ok", "version": "1.1.3"}
 ```
 
 ---
@@ -132,7 +133,7 @@ The template is pre-configured with a `/health` endpoint:
 
 ```bash
 GET /health
-→ {"status": "ok", "version": "1.0.2"}
+→ {"status": "ok", "version": "1.1.3"}
 ```
 
 Railway uses this for readiness checks before routing traffic to new deployments.

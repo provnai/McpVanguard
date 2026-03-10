@@ -38,7 +38,7 @@ from core.models import (
 )
 from core.rules_engine import RulesEngine
 from core.session import SessionManager, SessionState
-from core import semantic, behavioral
+from core import semantic, behavioral, telemetry
 from core.vex_client import submit_blocked_call
 
 logger = logging.getLogger(__name__)
@@ -61,9 +61,10 @@ class ProxyConfig:
         self.warn_threshold: float = float(os.getenv("VANGUARD_WARN_THRESHOLD", "0.5"))
         # SSE auth key — also read by sse_server.py directly for early validation
         self.api_key: str = os.getenv("VANGUARD_API_KEY", "")
-        # Set to "true" to expose detailed block reasons to agents (useful for debugging).
         # Off by default in production to avoid leaking rule internals.
         self.expose_block_reason: bool = os.getenv("VANGUARD_EXPOSE_BLOCK_REASON", "false").lower() == "true"
+        # Maximum string length allowed in incoming tool calls (prevents memory exhaustion)
+        self.max_string_len: int = int(os.getenv("VANGUARD_MAX_STRING_LEN", "65536")) # 64KB default
 
 
 # ---------------------------------------------------------------------------
@@ -144,13 +145,22 @@ class VanguardProxy:
         logger.info(f"[Vanguard] Server PID {self._server_process.pid} proxy active")
 
         try:
-            await asyncio.gather(
-                self._pump_agent_to_server(),
-                self._pump_server_to_agent(),
-                self._pump_server_stderr(),
+            # Run all pumps until the first one completes (usually agent_to_server closing)
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(self._pump_agent_to_server()),
+                    asyncio.create_task(self._pump_server_to_agent()),
+                    asyncio.create_task(self._pump_server_stderr()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
             )
-        except asyncio.CancelledError:
-            pass
+            # Cancel the remaining pumps
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        except Exception as e:
+            logger.error(f"[Vanguard] Unexpected error in proxy loop: {e}")
         finally:
             await self._shutdown()
 
@@ -208,6 +218,7 @@ class VanguardProxy:
                     layer=2,
                 )
             latency_ms = (time.monotonic() - t_start) * 1000
+            telemetry.metrics.record_latency("TOTAL", latency_ms)
 
             # Record into session state
             self._stats["total"] += 1
@@ -236,11 +247,14 @@ class VanguardProxy:
 
             if result.allowed:
                 self._stats["allowed"] += 1
+                telemetry.metrics.record_status("allowed")
                 if result.action == "WARN":
                     self._stats["warned"] += 1
+                    telemetry.metrics.record_status("warned")
                 await self._write_to_server(line)
             else:
                 self._stats["blocked"] += 1
+                telemetry.metrics.record_status("blocked")
                 rule_id = result.rule_matches[0].rule_id if result.rule_matches else "VANGUARD"
 
                 if self._session:
@@ -304,14 +318,19 @@ class VanguardProxy:
     # -----------------------------------------------------------------------
 
     async def _inspect_message(self, message: dict) -> InspectionResult:
+        t_start = time.monotonic()
         result = self.rules_engine.check(message)
+        telemetry.metrics.record_latency("L1", (time.monotonic() - t_start) * 1000)
+
         if not result.allowed:
             return result
 
         if self.config.behavioral_enabled and self._session:
+            t_start = time.monotonic()
             beh_result = await behavioral.inspect_request(
                 self._session.session_id, message
             )
+            telemetry.metrics.record_latency("L3", (time.monotonic() - t_start) * 1000)
             if beh_result:
                 if not beh_result.allowed:
                     return beh_result
@@ -320,7 +339,9 @@ class VanguardProxy:
                     result.rule_matches.extend(beh_result.rule_matches)
 
         if self.config.semantic_enabled:
+            t_start = time.monotonic()
             sem_result = await semantic.score_intent(message)
+            telemetry.metrics.record_latency("L2", (time.monotonic() - t_start) * 1000)
             if sem_result:
                 if not sem_result.allowed:
                     return sem_result
@@ -350,13 +371,18 @@ class VanguardProxy:
                 if decoded == value:
                     break
                 value = decoded
-            # 2. Unicode NFKC (handles fullwidth chars, Cyrillic lookalikes where possible)
+            # 2. Unicode NFKC (Handles lookalikes where possible)
             value = unicodedata.normalize("NFKC", value)
             # 3. Strip zero-width / invisible characters
             value = ''.join(
                 ch for ch in value
-                if unicodedata.category(ch) not in ('Cf',)  # Cf = Format chars (ZWS, RTL marks etc)
+                if unicodedata.category(ch) not in ('Cf',)
             )
+            # 4. Length safeguard (prevents memory/CPU exhaustion)
+            if len(value) > self.config.max_string_len:
+                logger.warning(f"String exceeds max_string_len ({len(value)} > {self.config.max_string_len}). Truncating.")
+                value = value[:self.config.max_string_len] + "...[TRUNCATED]"
+            
             return value
         return message
 

@@ -78,7 +78,7 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path"]
-  # Detects braces, raw globs, quoted globs, and escaped globs
+  # Detects braces, raw globs, quoted globs, and escaped globs in sensitive path-like contexts
   pattern: '([^\s]*\{[^\}]+\}|[^\s]*[*?][^\s]*|["''][^"'']*[*?][^"'']*["'']|\\\\[*?])'
   message: "Brace or glob expansion ({}, *, ?) is not permitted in sensitive contexts."
 

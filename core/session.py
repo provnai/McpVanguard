@@ -10,6 +10,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+import threading
 from typing import Optional
 
 
@@ -30,7 +31,7 @@ class SessionState:
     Tracks the full state of one proxy session.
     A session is one continuous agent ↔ server connection.
     """
-    session_id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
+    session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     started_at: float = field(default_factory=time.time)
     call_history: deque = field(default_factory=lambda: deque(maxlen=500))
     blocked_count: int = 0
@@ -115,6 +116,7 @@ class SessionManager:
     def __init__(self, max_sessions: int = 1000):
         self._sessions: dict[str, SessionState] = {}
         self._max_sessions = max_sessions
+        self._lock = threading.Lock()
 
     def _evict_expired(self):
         """Remove sessions older than SESSION_TTL_SECONDS."""
@@ -125,24 +127,49 @@ class SessionManager:
 
     def create(self) -> SessionState:
         """Create and register a new session."""
-        self._evict_expired()
-        session = SessionState()
-        self._sessions[session.session_id] = session
-        # Evict oldest if still at capacity
-        if len(self._sessions) > self._max_sessions:
-            oldest_id = next(iter(self._sessions))
-            del self._sessions[oldest_id]
-        return session
+        with self._lock:
+            self._evict_expired()
+            session = SessionState()
+            self._sessions[session.session_id] = session
+            
+            # Redis persistence for metadata (prevents loss on restart)
+            if os.getenv("VANGUARD_REDIS_URL"):
+                try:
+                    import redis
+                    r = redis.from_url(os.getenv("VANGUARD_REDIS_URL"))
+                    r.setex(f"vguard:session:{session.session_id}", self.SESSION_TTL_SECONDS, "active")
+                except Exception:
+                    pass
+
+            # Evict oldest if still at capacity
+            if len(self._sessions) > self._max_sessions:
+                oldest_id = next(iter(self._sessions))
+                del self._sessions[oldest_id]
+            return session
 
     def get(self, session_id: str) -> Optional[SessionState]:
-        session = self._sessions.get(session_id)
-        if session and session.age_seconds > self.SESSION_TTL_SECONDS:
-            del self._sessions[session_id]
-            return None
-        return session
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session and os.getenv("VANGUARD_REDIS_URL"):
+                # Try to restore from Redis metadata
+                try:
+                    import redis
+                    r = redis.from_url(os.getenv("VANGUARD_REDIS_URL"), decode_responses=True)
+                    if r.exists(f"vguard:session:{session_id}"):
+                        # Minimal restoration: recreate state object with same ID
+                        session = SessionState(session_id=session_id)
+                        self._sessions[session_id] = session
+                except Exception:
+                    pass
+
+            if session and session.age_seconds > self.SESSION_TTL_SECONDS:
+                del self._sessions[session_id]
+                return None
+            return session
 
     def remove(self, session_id: str):
-        self._sessions.pop(session_id, None)
+        with self._lock:
+            self._sessions.pop(session_id, None)
 
     def active_count(self) -> int:
         return len(self._sessions)

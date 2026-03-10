@@ -39,6 +39,7 @@ MAX_LIST_DIR_PER_5S = int(os.getenv("VANGUARD_BEH_LIST_LIMIT", "20"))
 MAX_ANY_TOOL_PER_60S = int(os.getenv("VANGUARD_BEH_FLOOD_LIMIT", "200"))
 MAX_RESPONSE_BYTES = int(os.getenv("VANGUARD_BEH_PAYLOAD_LIMIT", str(10 * 1024)))
 VANGUARD_STRICT_REDIS = os.getenv("VANGUARD_STRICT_REDIS", "false").lower() == "true"
+VANGUARD_BLOCK_ENUMERATION = os.getenv("VANGUARD_BLOCK_ENUMERATION", "false").lower() == "true"
 
 REDIS_URL = os.getenv("VANGUARD_REDIS_URL", "")
 
@@ -58,8 +59,8 @@ except Exception as e:
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="vanguard-beh")
 
 # Paths that trigger the write-after-sensitive-read detector
-_SENSITIVE_PATH_FRAGMENTS = (
-    "/etc/", ".ssh/", ".env", "passwd", "shadow", "id_rsa", "authorized_keys",
+_SENSITIVE_PATH_FRAGMENTS = tuple(
+    os.getenv("VANGUARD_SENSITIVE_PATHS", "/etc/,.ssh/,.env,passwd,shadow,id_rsa,authorized_keys").split(",")
 )
 
 # ─── Sliding window ───────────────────────────────────────────────────────────
@@ -231,6 +232,7 @@ def _inspect_request_sync(
         InspectionResult to BLOCK or WARN, or None to pass through.
     """
     if not ENABLED:
+        # print(f"[VANGUARD-DEBUG] behavioral Layer is DISABLED (ENABLED={ENABLED})")
         return None
 
     # Fail-closed if STRICT_REDIS is enabled but client failed to connect
@@ -266,7 +268,7 @@ def _inspect_request_sync(
                 description=f"Write after reading sensitive path(s): {state.get_sensitive_reads()}",
                 severity="CRITICAL",
             )],
-            block_reason="Privilege escalation sequence: write following sensitive file read",
+            block_reason=f"Privilege escalation sequence: write following sensitive file read ({state.get_sensitive_reads()})",
         )
 
     # ── BEH-001: Data scraping detector ──
@@ -288,14 +290,15 @@ def _inspect_request_sync(
     list_count = state.window("list_directory").count_in(5.0)
     if list_count > MAX_LIST_DIR_PER_5S:
         return InspectionResult(
-            allowed=True,  # Warn, don't block
-            action="WARN",
+            allowed=not VANGUARD_BLOCK_ENUMERATION,
+            action="BLOCK" if VANGUARD_BLOCK_ENUMERATION else "WARN",
             layer_triggered=3,
             rule_matches=[RuleMatch(
                 rule_id="BEH-002",
                 description=f"list_directory called {list_count}× in 5s (limit {MAX_LIST_DIR_PER_5S})",
-                severity="MEDIUM",
+                severity="HIGH" if VANGUARD_BLOCK_ENUMERATION else "MEDIUM",
             )],
+            block_reason=f"Directory enumeration detected: {list_count} calls in 5s" if VANGUARD_BLOCK_ENUMERATION else None,
         )
 
     # ── BEH-005: Tool flood detector ──

@@ -10,12 +10,75 @@ import logging
 import json
 import sys
 import hmac
-from typing import Optional
+import collections
+import os
+import time
+from typing import Optional, Any
 
 from mcp.server.sse import SseServerTransport, SessionMessage
 from core.proxy import VanguardProxy, ProxyConfig
 
 logger = logging.getLogger("vanguard.sse")
+
+class RateLimiter:
+    """Simple token-bucket rate limiter."""
+    def __init__(self, rate: float, capacity: float):
+        self.rate = rate
+        self.capacity = capacity
+        self.tokens = capacity
+        self.last_update = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def consume(self, amount: float = 1.0) -> bool:
+        async with self._lock:
+            now = time.monotonic()
+            passed = now - self.last_update
+            self.tokens = min(self.capacity, self.tokens + passed * self.rate)
+            self.last_update = now
+            if self.tokens >= amount:
+                self.tokens -= amount
+                return True
+            return False
+
+_rate_limiters: dict[str, RateLimiter] = {}
+_active_connections: dict[str, int] = collections.defaultdict(int)
+_registry_lock = asyncio.Lock()
+
+def _get_sse_config():
+    return {
+        "API_KEY": os.getenv("VANGUARD_API_KEY", ""),
+        "ALLOWED_IPS": os.getenv("VANGUARD_ALLOWED_IPS", "").split(",") if os.getenv("VANGUARD_ALLOWED_IPS") else [],
+        "MAX_CONCURRENCY": int(os.getenv("VANGUARD_MAX_CONCURRENT_SSE", "5")),
+        "RATE_LIMIT_PER_SEC": float(os.getenv("VANGUARD_SSE_RATE_LIMIT", "1.0")),
+    }
+
+def _check_auth(scope) -> tuple[bool, str]:
+    """Returns (is_authed, error_message). Module-level for testing."""
+    cfg = _get_sse_config()
+    client_ip = scope.get("client", ["unknown"])[0]
+    
+    if cfg["ALLOWED_IPS"] and client_ip not in cfg["ALLOWED_IPS"]:
+        return False, f"IP {client_ip} not in allowlist."
+
+    if not cfg["API_KEY"]:
+        return True, ""
+
+    headers = dict(scope.get("headers", []))
+    try:
+        api_key = headers.get(b"x-api-key", b"").decode("utf-8")
+        bearer = headers.get(b"authorization", b"").decode("utf-8")
+    except UnicodeDecodeError:
+        return False, "Invalid encoding in authentication headers."
+
+    if bearer.lower().startswith("bearer "):
+        bearer = bearer[7:].strip()
+    
+    ok = hmac.compare_digest(api_key, cfg["API_KEY"]) or hmac.compare_digest(bearer, cfg["API_KEY"])
+    return ok, "Unauthorized. Provide valid VANGUARD_API_KEY."
+
+async def _send_error(send, status: int, message: str):
+    await send({"type": "http.response.start", "status": status, "headers": [[b"content-type", b"application/json"]]})
+    await send({"type": "http.response.body", "body": json.dumps({"error": message}).encode("utf-8")})
 
 class StreamWrapper:
     def __init__(self, read_stream, write_stream):
@@ -97,61 +160,75 @@ async def run_sse_server(
     port: int = 8080,
     config: Optional[ProxyConfig] = None
 ):
-    import os
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.responses import Response
 
-    VANGUARD_API_KEY = os.getenv("VANGUARD_API_KEY", "")
-    if VANGUARD_API_KEY:
+    cfg = _get_sse_config()
+    if cfg["API_KEY"]:
         print(f"[Vanguard] SSE authentication ENABLED (VANGUARD_API_KEY is set)")
     else:
         print(f"[Vanguard] WARNING: VANGUARD_API_KEY not set. SSE endpoints are open.")
-
-    def _check_auth(scope) -> bool:
-        """Returns True if authenticated or if auth is disabled."""
-        if not VANGUARD_API_KEY:
-            return True
-        headers = dict(scope.get("headers", []))
-        api_key = headers.get(b"x-api-key", b"").decode("utf-8", errors="replace")
-        bearer = headers.get(b"authorization", b"").decode("utf-8", errors="replace")
-        if bearer.lower().startswith("bearer "):
-            bearer = bearer[7:].strip()
-        return hmac.compare_digest(api_key, VANGUARD_API_KEY) or hmac.compare_digest(bearer, VANGUARD_API_KEY)
-
-    async def _send_401(send):
-        await send({"type": "http.response.start", "status": 401, "headers": [[b"content-type", b"application/json"]]})
-        await send({"type": "http.response.body", "body": b'{"error": "Unauthorized. Provide VANGUARD_API_KEY via X-Api-Key header."}'})
 
     print(f"Starting Vanguard SSE Bridge on {host}:{port}")
     sse_transport = SseServerTransport("/messages")
 
     async def handle_sse(scope, receive, send):
         assert scope["type"] == "http"
-        if not _check_auth(scope):
-            await _send_401(send)
+        authed, err = _check_auth(scope)
+        if not authed:
+            await _send_error(send, 401 if "Unauthorized" in err else 403, err)
             return
-        async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
-            bridge = StreamWrapper(read_stream, write_stream)
-            proxy = VanguardProxy(
-                server_command=server_command,
-                config=config,
-                agent_reader=bridge,
-                agent_writer=bridge
-            )
-            await proxy.run()
+
+        client_ip = scope.get("client", ["unknown"])[0]
+
+        # Registry operations (Rate Limiter and Concurrency Guard)
+        async with _registry_lock:
+            if client_ip not in _rate_limiters:
+                _rate_limiters[client_ip] = RateLimiter(cfg["RATE_LIMIT_PER_SEC"], cfg["MAX_CONCURRENCY"] * 2)
+            
+            limiter = _rate_limiters[client_ip]
+            
+            # Concurrency Guard
+            if _active_connections[client_ip] >= cfg["MAX_CONCURRENCY"]:
+                await _send_error(send, 429, f"Concurrent connection limit ({cfg['MAX_CONCURRENCY']}) reached.")
+                return
+
+            _active_connections[client_ip] += 1
+
+        # Rate Limiting (consume outside the registry lock to avoid blocking other IPs)
+        if not await limiter.consume():
+            async with _registry_lock:
+                _active_connections[client_ip] -= 1
+            await _send_error(send, 429, "Too Many Requests. Rate limit exceeded.")
+            return
+
+        try:
+            async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
+                bridge = StreamWrapper(read_stream, write_stream)
+                proxy = VanguardProxy(
+                    server_command=server_command,
+                    config=config,
+                    agent_reader=bridge,
+                    agent_writer=bridge
+                )
+                await proxy.run()
+        finally:
+            _active_connections[client_ip] -= 1
 
     async def handle_messages(scope, receive, send):
         assert scope["type"] == "http"
-        if not _check_auth(scope):
-            await _send_401(send)
+        authed, err = _check_auth(scope)
+        if not authed:
+            await _send_error(send, 401 if "Unauthorized" in err else 403, err)
             return
         await sse_transport.handle_post_message(scope, receive, send)
 
     async def health_check_handler(scope, receive, send):
         """Standard health check for Railway/Cloud readiness. No auth required."""
         assert scope["type"] == "http"
-        response = Response(json.dumps({"status": "ok", "version": "1.0.2"}), media_type="application/json")
+        # Security: Remove version leak
+        response = Response(json.dumps({"status": "ok"}), media_type="application/json")
         await response(scope, receive, send)
 
     class AsgiAppWrapper:
