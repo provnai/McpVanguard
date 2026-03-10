@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68", "setuptools-scm>=8.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-vanguard"
-version = "1.1.2"
+dynamic = ["version"]
 description = "Security proxy and verification layer for the Model Context Protocol (MCP)"
 readme = "README.md"
 license = "Apache-2.0"
@@ -62,3 +62,5 @@ filterwarnings = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "rules*"]
+[tool.setuptools_scm]
+write_to = "core/_version.py"

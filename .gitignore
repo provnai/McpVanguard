@@ -59,3 +59,6 @@ dist/
 *.whl
 
 RAILWAY_TEST_REPORT.*
+
+# setuptools-scm
+core/_version.py

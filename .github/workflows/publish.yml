@@ -1,32 +1,60 @@
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 jobs:
-  pypi-publish:
-    name: Upload release to PyPI
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for setuptools-scm to see tags
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build pytest pytest-asyncio .
+
+      - name: Run Regression Tests
+        run: python -m pytest tests/test_behavioral.py tests/test_proxy.py tests/test_rules.py tests/test_semantic.py tests/test_sse_bridge.py
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Store distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-distributions
+          path: dist/
+
+  publish:
+    name: Secure Publish to PyPI
+    needs: build-and-test
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/mcp-vanguard
     permissions:
-      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write  # Mandatory for Trusted Publishing
       contents: read
+      attestations: write # Optional: for GitHub Attestations
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Download distributions
+        uses: actions/download-artifact@v4
         with:
-          python-version: "3.12"
-          
-      - name: Install build dependencies
-        run: python -m pip install --upgrade pip build setuptools wheel
+          name: pypi-distributions
+          path: dist/
 
-      - name: Build package
-        run: python -m build
-
-      - name: Publish package distributions to PyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
