@@ -74,7 +74,7 @@ class ProxyConfig:
 def setup_audit_logger(log_file: str) -> logging.Logger:
     """Set up a dedicated file logger for the audit trail."""
     audit = logging.getLogger("vanguard.audit")
-    audit.setLevel(logging.DEBUG)
+    audit.setLevel(logging.INFO)
     audit.propagate = False
 
     fh = logging.handlers.RotatingFileHandler(

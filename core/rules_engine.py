@@ -43,7 +43,7 @@ class Rule:
             self.pattern = re.compile(r"(?!)")  # never matches
 
     # Shared thread-pool: runs regex matches with a timeout to prevent ReDoS
-    _match_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="vanguard-re")
+    _match_pool = ThreadPoolExecutor(max_workers=12, thread_name_prefix="vanguard-re")
     _REGEX_TIMEOUT_SECS = 0.1  # 100ms per pattern — catastrophic backtracking will abort
 
     def _safe_search(self, value: str) -> bool:
@@ -53,10 +53,11 @@ class Rule:
             result = future.result(timeout=Rule._REGEX_TIMEOUT_SECS)
             return result is not None
         except FuturesTimeoutError:
-            logger.warning("ReDoS guard triggered for rule %s — aborting match", self.rule_id)
-            return False
-        except Exception:
-            return False
+            logger.warning("ReDoS guard triggered for rule %s — aborting match (FAIL-CLOSED)", self.rule_id)
+            return True  # FAIL-CLOSED: Block on timeout
+        except Exception as e:
+            logger.error(f"Error in regex match for rule {self.rule_id}: {e}")
+            return True  # FAIL-CLOSED: Block on unexpected errors
 
     def check(self, message: dict) -> Optional[RuleMatch]:
         """

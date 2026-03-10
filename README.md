@@ -125,8 +125,9 @@ vanguard sse --server "..." --behavioral
 | **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral) | ✅ Done |
 | **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ Done |
 | **Phase 4** | Distribution (stable PyPI release) | ✅ Done |
-| **Phase 5** | Production Hardening (v1.1.3 stability & telemetry) | ✅ Done |
-| **Phase 6** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
+| **Phase 5** | Production Hardening (v1.1.3 stability) | ✅ Done |
+| **Phase 6** | **Security Audit Remediation (v1.1.4 hardening)** | ✅ Done |
+| **Phase 7** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
 
 ---
 

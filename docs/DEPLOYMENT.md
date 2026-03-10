@@ -64,6 +64,9 @@ export VANGUARD_REDIS_URL="redis://your-elasticache-endpoint:6379/0"
 
 *When the Redis URL is provided, Vanguard automatically switches to using sorted sets for cluster-wide behavioral tracking.*
 
+> [!IMPORTANT]
+> **PRODUCTION REQUIREMENT**: For horizontal scaling or persistent behavioral state across restarts, Redis is **required**. Without Redis, Vanguard uses in-memory state which is lost on restart and not shared across instances, potentially allowing multi-turn horizontal bypasses.
+
 ## 4. The VEX + CHORA Integration (Flight Recorder)
 
 When Vanguard blocks an agent's tool call, it needs to cryptographically prove that the block was justified. 

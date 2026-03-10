@@ -79,7 +79,7 @@ Once deployed, Railway assigns you a public URL (e.g., `https://mcpvanguard-your
 Verify the service is running:
 ```bash
 curl https://your-project.up.railway.app/health
-# Expected: {"status": "ok", "version": "1.1.3"}
+# Expected: {"status": "ok", "version": "1.1.4"}
 ```
 
 ---
@@ -133,7 +133,7 @@ The template is pre-configured with a `/health` endpoint:
 
 ```bash
 GET /health
-→ {"status": "ok", "version": "1.1.3"}
+→ {"status": "ok", "version": "1.1.4"}
 ```
 
 Railway uses this for readiness checks before routing traffic to new deployments.

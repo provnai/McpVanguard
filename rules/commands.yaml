@@ -78,9 +78,10 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path"]
-  # Detects braces, raw globs, quoted globs, and escaped globs in sensitive path-like contexts
-  pattern: '([^\s]*\{[^\}]+\}|[^\s]*[*?][^\s]*|["''][^"'']*[*?][^"'']*["'']|\\\\[*?])'
-  message: "Brace or glob expansion ({}, *, ?) is not permitted in sensitive contexts."
+  # Detects braces and glob expansion targets. Improved to allow simple terminal globs (*.py) 
+  # while blocking traversal globs (../../*) and nested command globs.
+  pattern: '([^\s]*\{[^\}]+\}|[^\s]*[?][^\s]*|(?:\.\.|\/)[^\s]*[*][^\s]*|["''][^"'']*[*?][^"'']*["''])'
+  message: "Dangerous brace or glob expansion ({}, *, ?) is not permitted in sensitive contexts."
 
 - id: "CMD-011"
   description: "Block environment variable expansion"

@@ -60,7 +60,9 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="vanguard-beh")
 
 # Paths that trigger the write-after-sensitive-read detector
 _SENSITIVE_PATH_FRAGMENTS = tuple(
-    os.getenv("VANGUARD_SENSITIVE_PATHS", "/etc/,.ssh/,.env,passwd,shadow,id_rsa,authorized_keys").split(",")
+    os.getenv("VANGUARD_SENSITIVE_PATHS", 
+              "/etc/,.ssh/,.env,passwd,shadow,id_rsa,authorized_keys,"
+              "System32/config/SAM,Microsoft/Credentials,NTDS.DIT").split(",")
 )
 
 # ─── Sliding window ───────────────────────────────────────────────────────────

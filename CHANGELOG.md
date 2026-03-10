@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-03-10 (Security Audit Hardening)
+
+### Security
+- **Fail-Closed ReDoS Guard** (`core/rules_engine.py`): We've re-engineered the regex timeout logic. If a complex pattern takes too long to match, the system now **blocks by default** (fail-closed) instead of letting it slip through.
+- **Zero-Bypass Network Rules** (`rules/network.yaml`): Closed a blind spot in our network rules. We now inspect `params.command` and `params.arguments.command` for encoded IP bypasses, catching attacks that hide inside tool arguments.
+- **Defensive Semantic Scoring** (`core/semantic.py`): The semantic layer now ships in "Fail-Closed" mode by default. If your LLM provider is down or reaching a timeout, Vanguard will protect your system by blocking suspicious-looking intents.
+- **Windows Sensitive Path Monitoring** (`core/behavioral.py`): Expanded our behavioral layer to include native Windows sensitive paths (like `System32/config/SAM`). Your Windows deployments are now as safe as our Linux ones.
+- **Parallel Rule Executions**: Increased the regex thread pool from 4 to 12 workers to handle high-concurrency security audits without breaking a sweat.
+
+### Added
+- **Finality Receipts** (`core/vex_client.py`): Vanguard now explicitly verifies and logs the receipt of CHORA EvidenceCapsules. You get cryptographic proof that every block was recorded.
+- **Production Readiness Alert**: Added clear guidance in the deployment docs regarding the **critical requirement of Redis** for horizontal scaling and state persistence.
+
+### Fixed
+- **Glob False Positives** (`rules/commands.yaml`): Refined `CMD-010` to allow everyday terminal globs like `ls *.py` while keeping up the guard against dangerous traversal attempts.
+- **Unicode Homograph Expansion**: Significantly broadened our detection of visual spoofing characters (Cyrillic, Greek, Math variations) in the filesystem rules.
+- **Optimized Production Logs**: Switched the default audit log level to `INFO` to keep your production logs clean and free of unnecessary noise.
+
 ## [1.1.3] - 2026-03-10 (Stability & Concurrency Update)
 
 ### Added

@@ -194,11 +194,15 @@ async def _execute_and_listen(payload: dict, session_id: str):
                         
                         # Once the job completes or fails, log the cryptographic EvidenceCapsule
                         if status in ("completed", "failed", "halted", "success"):
-                            logger.info(
-                                "🛡️ CHORA Receipt Recorded for Vanguard Block (Job %s):\n%s", 
-                                job_id, 
-                                json.dumps(parsed, indent=2)
-                            )
+                            receipt = parsed.get("evidence_capsule") or parsed.get("receipt")
+                            if receipt:
+                                logger.info(
+                                    "🛡️ CHORA EvidenceCapsule Recorded for Vanguard Block (Job %s):\n%s", 
+                                    job_id, 
+                                    json.dumps(receipt, indent=2)
+                                )
+                            else:
+                                logger.warning("VEX Job %s completed but no EvidenceCapsule was found in the stream.", job_id)
                             break
                     except json.JSONDecodeError:
                         continue

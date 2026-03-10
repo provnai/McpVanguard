@@ -34,6 +34,7 @@ OPENAI_MODEL = os.getenv("VANGUARD_OPENAI_MODEL", "gpt-4o-mini")
 THRESHOLD_BLOCK = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_BLOCK", "0.80"))
 THRESHOLD_WARN = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_WARN", "0.50"))
 ENABLED = os.getenv("VANGUARD_SEMANTIC_ENABLED", "false").lower() == "true"
+ENABLE_FAIL_CLOSED = os.getenv("VANGUARD_SEMANTIC_FAIL_CLOSED", "true").lower() == "true"
 TIMEOUT = float(os.getenv("VANGUARD_SEMANTIC_TIMEOUT_SECS", "5.0"))
 
 # Shared thread pool — keeps async loop unblocked
@@ -115,15 +116,18 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
             return max(0.0, min(1.0, score)), reason
 
     except httpx.ConnectError:
-        logger.warning("Remote API not reachable — skipping semantic layer")
+        logger.warning("Remote API not reachable")
+        if ENABLE_FAIL_CLOSED:
+            return 1.0, "semantic api unreachable (fail-closed)"
         return 0.0, "api unreachable"
     except httpx.TimeoutException:
-        logger.warning("Remote API timeout after %.1fs — skipping semantic layer", TIMEOUT)
+        logger.warning("Remote API timeout after %.1fs", TIMEOUT)
+        if ENABLE_FAIL_CLOSED:
+            return 1.0, "semantic api timeout (fail-closed)"
         return 0.0, "api timeout"
     except Exception as exc:
         logger.warning("Semantic scorer error: %s", exc)
-        if os.getenv("VANGUARD_SEMANTIC_FAIL_CLOSED", "false").lower() == "true":
-             # High-security: fail closed
+        if ENABLE_FAIL_CLOSED:
              return 1.0, f"FAIL-CLOSED: {exc}"
         return 0.0, f"scorer error: {exc}"
 
