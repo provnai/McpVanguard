@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-vanguard"
-version = "1.0.2"
+version = "1.1.2"
 description = "Security proxy and verification layer for the Model Context Protocol (MCP)"
 readme = "README.md"
 license = "Apache-2.0"
