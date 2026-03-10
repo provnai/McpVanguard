@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-03-10
+
+### Security
+- **Constant-Time Authentication** (`core/sse_server.py`): Switched to `hmac.compare_digest` for API key verification to prevent character-level timing attacks.
+- **20-Pass Stabilization Loop** (`core/proxy.py`): Upgraded message normalization from 5 to 20 passes. Defeats deep-nested encoding evasion (e.g., 6+ levels of URL/Hex nesting).
+- **Fail-Closed Inspection Timeouts** (`core/proxy.py`): Implemented a hard 5-second timeout on the inspection pipeline. Security checks that hang or take too long now trigger an automatic `BLOCK` to prevent "timeout bypasses."
+- **Strict State Consistency** (`core/behavioral.py`): Added `VANGUARD_STRICT_REDIS` environment flag. When enabled, the proxy enters a restricted failsafe mode (blocking all tool calls) if the Redis state backend becomes unreachable, preventing "Security Amnesia."
+- **Regex Hardening** (`rules/commands.yaml`): Refined `CMD-004` (Command Substitution) and `CMD-010` (Brace/Glob Expansion) patterns to close bypasses involving shell backticks and quoted glob characters.
+
 ## [1.0.3] - 2026-03-04
 
 ### Changed

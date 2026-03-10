@@ -30,7 +30,7 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path"]
-  pattern: '(\$\(|\`)[^)]*\)'
+  pattern: '(`.*`|\$\(.*\))'
   message: "Command substitution injection is not permitted."
 
 - id: "CMD-005"
@@ -78,7 +78,8 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path"]
-  pattern: '([^\s]*\{[^\}]+\}|[^\s]*[*?][^\s]*)'
+  # Detects braces, raw globs, quoted globs, and escaped globs
+  pattern: '([^\s]*\{[^\}]+\}|[^\s]*[*?][^\s]*|["''][^"'']*[*?][^"'']*["'']|\\\\[*?])'
   message: "Brace or glob expansion ({}, *, ?) is not permitted in sensitive contexts."
 
 - id: "CMD-011"

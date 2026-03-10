@@ -9,6 +9,7 @@ import asyncio
 import logging
 import json
 import sys
+import hmac
 from typing import Optional
 
 from mcp.server.sse import SseServerTransport, SessionMessage
@@ -116,7 +117,7 @@ async def run_sse_server(
         bearer = headers.get(b"authorization", b"").decode("utf-8", errors="replace")
         if bearer.lower().startswith("bearer "):
             bearer = bearer[7:].strip()
-        return api_key == VANGUARD_API_KEY or bearer == VANGUARD_API_KEY
+        return hmac.compare_digest(api_key, VANGUARD_API_KEY) or hmac.compare_digest(bearer, VANGUARD_API_KEY)
 
     async def _send_401(send):
         await send({"type": "http.response.start", "status": 401, "headers": [[b"content-type", b"application/json"]]})

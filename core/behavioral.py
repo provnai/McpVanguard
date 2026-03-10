@@ -38,6 +38,7 @@ MAX_READ_FILE_PER_10S = int(os.getenv("VANGUARD_BEH_READ_LIMIT", "50"))
 MAX_LIST_DIR_PER_5S = int(os.getenv("VANGUARD_BEH_LIST_LIMIT", "20"))
 MAX_ANY_TOOL_PER_60S = int(os.getenv("VANGUARD_BEH_FLOOD_LIMIT", "200"))
 MAX_RESPONSE_BYTES = int(os.getenv("VANGUARD_BEH_PAYLOAD_LIMIT", str(10 * 1024)))
+VANGUARD_STRICT_REDIS = os.getenv("VANGUARD_STRICT_REDIS", "false").lower() == "true"
 
 REDIS_URL = os.getenv("VANGUARD_REDIS_URL", "")
 
@@ -231,6 +232,13 @@ def _inspect_request_sync(
     """
     if not ENABLED:
         return None
+
+    # Fail-closed if STRICT_REDIS is enabled but client failed to connect
+    if VANGUARD_STRICT_REDIS and REDIS_URL and _redis_client is None:
+        return InspectionResult.block(
+            reason="High-security mode active: State synchronization (Redis) unavailable.",
+            layer=3,
+        )
 
     method = message.get("method", "")
     if method != "tools/call":

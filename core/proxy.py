@@ -196,8 +196,17 @@ class VanguardProxy:
             # Normalize the message before inspection to prevent encoding bypasses
             normalized_message = self._normalize_message(raw_message)
 
-            # Inspect the message
-            result = await self._inspect_message(normalized_message)
+            # Inspect the message (with 5s Fail-Closed timeout)
+            try:
+                result = await asyncio.wait_for(
+                    self._inspect_message(normalized_message), timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"[Vanguard] Inspection TIMEOUT (Fail-Closed) for {method}")
+                result = InspectionResult.block(
+                    reason="Security inspection timeout (Fail-Closed policy).",
+                    layer=2,
+                )
             latency_ms = (time.monotonic() - t_start) * 1000
 
             # Record into session state
@@ -335,7 +344,7 @@ class VanguardProxy:
         elif isinstance(message, str):
             # 1. Loop URL decode until stable (handles %252F triple encoding etc.)
             value = message
-            for _ in range(5):  # max 5 passes prevents infinite loops
+            for _ in range(20):  # max 20 passes prevents deep-nested exfiltration
                 decoded = urllib.parse.unquote(value)
                 decoded = decoded.replace("%5c", "\\").replace("%5C", "\\")
                 if decoded == value:
