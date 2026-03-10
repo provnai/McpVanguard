@@ -112,7 +112,8 @@ pip install llama-cpp-python
 ## Local Development Setup
 
 ```bash
-# 1. Clone the- **Repository**: [https://github.com/provnai/McpVanguard](https://github.com/provnai/McpVanguard)
+# 1. Clone the repository
+git clone https://github.com/provnai/McpVanguard
 
 # 2. Create virtual environment
 python -m venv .venv
@@ -143,4 +144,5 @@ OLLAMA_MODEL=llama3.2:1b              # or phi4-mini
 VANGUARD_LOG_LEVEL=INFO
 VANGUARD_SEMANTIC_ENABLED=false        # Set true to enable Layer 2
 VANGUARD_BEHAVIORAL_ENABLED=true
+VANGUARD_MAX_STRING_LEN=65536          # Safeguard against oversized payloads
 ```

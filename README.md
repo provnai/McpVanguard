@@ -1,106 +1,119 @@
 # 🛡️ McpVanguard
-### The Interception & Verification Layer for MCP Agents
+### A security proxy for AI agents that use MCP
 
-**McpVanguard** is an open-source security proxy and active firewall for the **Model Context Protocol (MCP)**. It acts as a real-time "Reflex System" between AI agents and their tools, protecting the host system from malicious intent, prompt injection, and data exfiltration.
+MCP (Model Context Protocol) lets AI agents like Claude or GPT call tools on your computer — reading files, running commands, browsing the web. **McpVanguard sits in between**, inspecting every tool call before it reaches your system and blocking anything that looks malicious.
 
-Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Building the **Immune System for AI**.
+No changes to your agent. No changes to your server. Just wrap it.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
-**No changes to your agent. No changes to your server. Just wrap it.**
+Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Building the Immune System for AI.
 
 ---
 
 ## ⚡ Quickstart
 
+```bash
+pip install mcp-vanguard
+```
+
+**Local stdio wrap** (no network):
+```bash
+vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
+```
+
+**Cloud Security Gateway** (SSE, deploy on Railway):
+```bash
+export VANGUARD_API_KEY="your-secret-key"
+vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
+```
+
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 > 📖 [Full Railway Deployment Guide](docs/railway-deployment-guide.md)
 
+---
+
+## 🧠 How it works
+
+Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVanguard inspects the request across three layers before it reaches the underlying server:
+
+| Layer | What it checks | Latency |
+|-------|---------------|---------|
+| **L1 — Rules** | 50+ static signatures: path traversal, reverse shells, SSRF, prompt injection | ~16ms |
+| **L2 — Semantic** | LLM-based intent scoring for ambiguous requests | Async |
+| **L3 — Behavioral** | Sliding-window anomaly detection (e.g. reading 500 files in 60 seconds) | Stateful |
+
+> **On latency**: 16ms is the overhead at peak concurrent load. In practice it's well under the 1–2 second LLM response time — imperceptible to the agent.
+
+If a request is blocked, the agent receives a standard JSON-RPC error response. The underlying server never sees it.
+
+---
+
+## 🛡️ What gets blocked
+
+- **Filesystem attacks**: Path traversal (`../../etc/passwd`), null bytes, restricted paths (`~/.ssh`), Unicode homograph evasion
+- **Command injection**: Pipe-to-shell, reverse shells, command chaining via `;` `&&` `\n`, expansion bypasses
+- **Network abuse**: SSRF, cloud metadata endpoints (AWS/GCP/Azure), hex/octal encoded IPs
+- **Prompt injection**: Jailbreak patterns, instruction-ignore sequences, hidden unicode characters
+- **Privilege escalation**: SUID binary creation, `LD_PRELOAD` injection, crontab manipulation
+
+---
+
+## 📊 VEX Protocol — Immutable Audit Log
+
+When McpVanguard blocks an attack, it can send a cryptographically-signed report to the **[VEX Protocol](https://github.com/provnai/vex)**. VEX anchors that report to the Bitcoin blockchain via the CHORA Gate.
+
+This means an auditor can independently verify *exactly what was blocked and why* — without relying on your local logs.
+
 ```bash
-# 1. Install
-pip install mcp-vanguard
-
-# 2. Start as a Cloud Security Gateway (SSE)
-# Set an API key to protect your endpoint
-export VANGUARD_API_KEY="your-secret-key"
-vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
-
-# 3. Traditional Stdio Wrap (no network, no auth needed)
-vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
-
-# 4. Enable VEX Flight Recorder (Immutable Audit)
 export VANGUARD_VEX_URL="https://api.vexprotocol.com"
 export VANGUARD_VEX_KEY="your-agent-jwt"
 vanguard sse --server "..." --behavioral
-
-# 5. Sync latest threat signatures from GitHub
-vanguard update
 ```
 
 ---
 
-## 🧠 The Interception Layer
+## 🏗️ Architecture
 
-McpVanguard sits at the **Interception Layer** of the Provnai stack. It prevents the gap between **Cognitive Intent** (what the agent thinks) and **Environmental Execution** (what actually happens to your PC).
-
-### 3-Layer Defense-in-Depth
-
-| Layer | Component | Defense Mechanism | Latency (P99) |
-|-------|-----------|-------------------|---------------|
-| **L1** | **Static Rules** | 80+ security signatures across 5 categories | **~16ms** |
-| **L2** | **Semantic Intelligence** | Local Ollama LLM intent classification | Async |
-| **L3** | **Behavioral Analysis** | Sliding-window anomaly detection (Scraping/Enum) | Stateful |
-
-### 🚀 Performance (Scale Verified)
-McpVanguard is designed for high-concurrency production environments. Our latest benchmarks show:
-- **Throughput**: 240+ requests/second.
-- **Security Overhead**: <20ms (Layer 1).
-- **Stability**: Zero packet loss or state corruption across 5,000+ request bursts.
-
-### Rule Categories (Layer 1)
-
-*   **Filesystem**: Path traversal, null bytes, restricted roots (`/etc/`, `~/.ssh/`), Cyrillic homograph detection.
-*   **Command**: Pipe-to-shell, reverse shells, semicolon/`&&`/newline command chaining, expansion bypasses.
-*   **Network**: SSRF, cloud metadata endpoints (AWS/GCP/Azure), IPv6 and hex/octal encoded IPs.
-*   **Jailbreak**: Prompt extraction, instruction-ignore patterns, unicode hidden characters.
-*   **Privilege**: SUID binary creation, `LD_PRELOAD` injection, crontab manipulation.
-
----
-
-## 🛡️ VEX Protocol Integration (Flight Recorder)
-
-McpVanguard integrates natively with the **VEX Protocol**. 
-Whenever the proxy blocks a malicious action (L1/L2/L3), it instantly sends a background report to the VEX API. 
-
-The VEX Server cryptographically hashes the blocked intent, runs it through the CHORA Gate, and anchors an immutable receipt (PoE) to the Bitcoin blockchain.
-
-*Auditors can mathematically prove exactly why an agent was blocked without relying entirely on local log trust.*
-
----
-
-## 🏗️ How It Works
-
-![McpVanguard Architecture](docs/architecture.png)
-
-```text
-                    ┌─────────────────────────────┐         ┌──────────────┐
-     AI Agent       │     McpVanguard Proxy        │        │   VEX API    │
-  (Claude, GPT)     │                             │──Async─▶│ (CHORA Gate) │
-        │           │  ┌──────────────────────┐   │         └──────────────┘
-        │──JSON-RPC▶│  │  L1: Rules Engine    │   │                │
-        │           │  │  L2: Semantic Scorer  │   │                ▼
-        │           │  │  L3: Behavioral Logic │   │      [Bitcoin Anchor]
-        │           │  └──────────────────────┘   │
-        │◀─ BLOCK ──│        or ALLOW ───────────▶│      MCP Server
-        │  (Status  │                             │ (filesystem, shell...)
-        │   Code)   └─────────────────────────────┘
 ```
-
-Traffic is inspected on every message, in both directions. Blocked messages return a standard JSON-RPC error response — the server never sees the attack.
+                      ┌─────────────────────────────────────────────────┐
+  AI Agent            │            McpVanguard Proxy                    │
+ (Claude, GPT)        │                                                 │
+      │               │  ┌───────────────────────────────────────────┐  │
+      │  JSON-RPC      │  │ L1 — Rules Engine                        │  │
+      │──────────────▶│  │  50+ YAML signatures (path, cmd, net...)  │  │
+      │  (stdio/SSE)   │  │  BLOCK on match → error back to agent    │  │
+      │               │  └────────────────┬──────────────────────────┘  │
+      │               │                   │ pass                         │
+      │               │  ┌────────────────▼──────────────────────────┐  │
+      │               │  │ L2 — Semantic Scorer (optional)           │  │
+      │               │  │  Ollama / OpenAI intent scoring 0.0→1.0   │  │
+      │               │  │  Async — never blocks the proxy loop      │  │
+      │               │  └────────────────┬──────────────────────────┘  │
+      │               │                   │ pass                         │
+      │               │  ┌────────────────▼──────────────────────────┐  │
+      │               │  │ L3 — Behavioral Analysis (optional)       │  │
+      │               │  │  Sliding window: scraping, enumeration    │  │
+      │               │  │  In-memory or Redis (multi-instance)      │  │
+      │               │  └────────────────┬──────────────────────────┘  │
+      │               │                   │                              │
+      │◀── BLOCK ─────│───────────────────┤ (any layer)                 │
+      │  (JSON-RPC    │                   │ ALLOW                        │
+      │   error)      │                   ▼                              │
+      │               │           MCP Server Process                     │
+      │               │        (filesystem, shell, APIs...)              │
+      │               └──────────────────┬──────────────────────────────┘
+      │                                  │
+      │◀─────────────── response ────────┘
+      │
+      │   (on BLOCK)
+      └──────────────▶ VEX API ──▶ CHORA Gate ──▶ Bitcoin Anchor
+                       (async, fire-and-forget audit receipt)
+```
 
 ---
 
@@ -108,21 +121,21 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | ✅ DONE |
-| **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral Scaling) | ✅ DONE |
-| **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ DONE |
-| **Phase 4** | Distribution (v1.0.0 Stable, PyPI, WSL Verified) | ✅ DONE |
-| **Phase 5** | Production Hardening (v1.1.3 stability & Telemetry) | ✅ DONE |
+| **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | ✅ Done |
+| **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral) | ✅ Done |
+| **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ Done |
+| **Phase 4** | Distribution (stable PyPI release) | ✅ Done |
+| **Phase 5** | Production Hardening (v1.1.3 stability & telemetry) | ✅ Done |
+| **Phase 6** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
 
 ---
 
 ## 📚 Resources
 
-*   **[Full Documentation](https://provnai.dev)**
-*   **[Ecosystem Report](https://github.com/provnai/provnai)**
-*   **[Contributing Guide](CONTRIBUTING.md)**
-*   **[Deployment Guide](docs/DEPLOYMENT.md)**
-*   **[Architecture](docs/ARCHITECTURE.md)**
+- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Contributing](CONTRIBUTING.md)
+- [Ecosystem Report](https://github.com/provnai/provnai)
 
 ---
 
@@ -130,5 +143,5 @@ Traffic is inspected on every message, in both directions. Blocked messages retu
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 
-Built by the **Provnai Open Research Initiative**.
+Built by the **[Provnai Open Research Initiative](https://provnai.com)**.
 *"Verifying the thoughts and actions of autonomous agents."*

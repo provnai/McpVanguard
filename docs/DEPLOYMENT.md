@@ -1,10 +1,10 @@
-# McpVanguard: Enterprise Deployment Guide
+# McpVanguard — Deployment Guide
 
-McpVanguard is designed to operate as a transparent security proxy between your AI Agents (LangChain, CrewAI, AutoGen) and your MCP application servers.
+McpVanguard is a transparent security proxy that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
-By sitting perfectly in the middle of standard `stdio` communication, Vanguard adds three powerful layers of defense—Regex, Semantic Intelligence, and Behavioral Analysis—without requiring any modifications to your existing agent code.
+It adds three layers of protection — static rules, semantic scoring, and behavioral analysis — without requiring any changes to your existing agent or server code.
 
-This guide outlines how a CISO or Infrastructure Team can deploy McpVanguard into a production environment.
+This guide covers how to deploy Vanguard in different environments.
 
 Vanguard is transport-agnostic and supports two main deployment modes:
 1.  **Local Stdio Mode**: For CLI-based agents running on the same machine.
@@ -88,7 +88,7 @@ export VANGUARD_LOG_FILE="/var/log/vanguard/audit.log"
 
 ## Summary
 
-With these environment variables configured, Vanguard is ready for enterprise scale. It will intercept threats via static rules, semantically score complex payloads via OpenAI, track cluster-wide behavior via Redis, and cryptographically log all defense actions via VEX.
+With these environment variables configured, Vanguard can intercept threats via static rules, semantically score complex payloads via OpenAI, track behavior via Redis, and log all defense actions via VEX.
 
 ---
 

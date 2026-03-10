@@ -66,19 +66,19 @@ Main Event Loop
 └── [Rules Engine]        │ → L1/L2/L3 sequential inspection
 ```
 
-**Latency Budget:**
-| Operation | Target Latency |
+**Latency Budget (under concurrent load):**
+| Operation | Measured P99 |
 |---|---|
-| Regex rule check (Layer 1) | < 0.5ms |
-| Behavioral check (Layer 3) | < 1ms |
-| Semantic score (Layer 2) | < 100ms (async, non-blocking) |
-| Total proxy overhead | < 10ms (without semantic) |
+| Regex rule check (Layer 1) | ~16ms |
+| Behavioral check (Layer 3) | <5ms |
+| Semantic score (Layer 2) | async, non-blocking |
+| Total proxy overhead | ~156ms under max load |
 
 ---
 
 ### `core/rules_engine.py` — Layer 1: Static Firewall
 
-Loads YAML rule files from `rules/` at startup. Applies rules in priority order on every incoming `params` payload.
+Loads YAML rule files from `rules/` at startup. Applies rules in priority order on every incoming `params` payload. Currently ships with **53 rules** across 5 categories.
 
 **Rule Schema:**
 ```yaml
@@ -179,7 +179,7 @@ Tracks patterns across an entire session using a **sliding window** counter.
           to Vanguard Audit Log
  ```
  
- This cryptographically guarantees that all intercepted malicious intents are mathematically verifiable by Enterprise Auditors, achieving absolute non-repudiation.
+ This means any auditor can independently verify all intercepted actions without relying on local log trust.
 
 ---
 

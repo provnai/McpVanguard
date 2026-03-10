@@ -1,6 +1,6 @@
 # Deploy and Host McpVanguard with Railway
 
-**McpVanguard** is an enterprise-grade security gateway and active firewall for the **Model Context Protocol (MCP)**. It acts as a real-time defense layer between AI agents and your tools, preventing malicious intent, prompt injection, and unauthorized data exfiltration before they reach your system.
+**McpVanguard** is an open-source security gateway and active firewall for the **Model Context Protocol (MCP)**. It sits in real-time between AI agents and your tools, intercepting malicious intent, prompt injection, and unauthorized data access before they reach your system.
 
 ## About Hosting McpVanguard
 

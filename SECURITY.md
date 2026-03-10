@@ -4,10 +4,11 @@
 
 Currently, only the latest major release of McpVanguard is supported with security updates.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| Version | Supported |
+| ------- | --------- |
+| 1.1.x   | ✅ Yes |
+| 1.0.x   | ⚠️ Critical fixes only |
+| < 1.0   | ❌ No |
 
 ## Reporting a Vulnerability
 
@@ -17,7 +18,7 @@ If you discover a security vulnerability within McpVanguard, please DO NOT open 
 
 Instead, please send an encrypted email or a direct message to the core maintainers at **contact@provnai.com**.
 
-We will acknowledge receipt of your vulnerability report within 48 hours and strive to send you regular updates about our progress. If you report a vulnerability that significantly affects the proxy's core interception logic, you may be eligible for our bug bounty program.
+We will acknowledge receipt of your report within 48 hours and keep you updated on progress. If your report reveals a significant bypass in the core inspection logic, you may be eligible for a recognition credit and bounty.
 
 ## Threat Model
 
