@@ -18,25 +18,22 @@ class TestAuditRemediation(unittest.IsolatedAsyncioTestCase):
 
     def test_redos_fail_closed(self):
         """Verify that a timeout in regex search triggers a fail-closed block."""
-        # Create a rule with a slow regex (simulated via mock)
-        slow_rule_data = {
+        # Create a rule with a simple regex
+        rule_data = {
             "id": "REDOS-TEST",
-            "description": "Slow regex test",
+            "description": "Fail-closed test",
             "severity": RuleSeverity.CRITICAL,
             "action": RuleAction.BLOCK,
             "match_fields": ["params.command"],
-            "pattern": r"(a+)+$"  # Classically slow for some engines
+            "pattern": "test"
         }
-        rule = Rule(slow_rule_data, "test.yaml")
+        rule = Rule(rule_data, "test.yaml")
         
         # Patch the match pool's result to raise TimeoutError
-        with patch("concurrent.futures.Future.result", side_effect=asyncio.TimeoutError()):
-            # In our implementation, we use concurrent.futures.TimeoutError (FuturesTimeoutError)
-            # which is what Rule._safe_search catches.
-            from concurrent.futures import TimeoutError as FuturesTimeoutError
-            with patch("concurrent.futures.Future.result", side_effect=FuturesTimeoutError()):
-                result = rule._safe_search("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!")
-                self.assertTrue(result, "Fail-closed should return True (match found) on timeout")
+        from concurrent.futures import TimeoutError as FuturesTimeoutError
+        with patch("concurrent.futures.Future.result", side_effect=FuturesTimeoutError()):
+            result = rule._safe_search("any text")
+            self.assertTrue(result, "Fail-closed should return True (match found) on timeout")
 
     def test_network_bypass_remediation(self):
         """Verify NET-007, NET-009, NET-010, NET-011 now catch command-based bypasses."""
@@ -87,11 +84,11 @@ class TestAuditRemediation(unittest.IsolatedAsyncioTestCase):
         
         for path in windows_paths:
             # First read (allowed, but marks session as 'had_sensitive_read')
-            msg = {"method": "tools/call", "params": {"arguments": {"path": path}}}
+            msg = {"method": "tools/call", "params": {"name": "read_file", "arguments": {"path": path}}}
             await inspect_request(session_id, msg)
             
             # Second call: write (should block BEH-003)
-            write_msg = {"method": "tools/call", "params": {"method": "write_file", "arguments": {"path": "tmp.txt"}}}
+            write_msg = {"method": "tools/call", "params": {"name": "write_file", "arguments": {"path": "tmp.txt"}}}
             result = await inspect_request(session_id, write_msg)
             self.assertIsNotNone(result, f"Write after reading sensitive Windows path {path} should be blocked")
             self.assertFalse(result.allowed)

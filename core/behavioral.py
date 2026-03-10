@@ -132,14 +132,17 @@ class BehavioralState:
             or params.get("path", "")
             or ""
         )
-        if any(frag in path for frag in _SENSITIVE_PATH_FRAGMENTS):
-            if _redis_client:
-                rkey = f"vguard:beh:{self.session_id}:reads"
-                _redis_client.sadd(rkey, path)
-                _redis_client.expire(rkey, 3600)
-            else:
-                self.sensitive_reads.add(path)
-            logger.debug("Sensitive path recorded: %s", path)
+        if path:
+            # Normalize to forward-slashes for consistent fragment matching
+            path = path.replace("\\", "/")
+            if any(frag.lower() in path.lower() for frag in _SENSITIVE_PATH_FRAGMENTS):
+                if _redis_client:
+                    rkey = f"vguard:beh:{self.session_id}:reads"
+                    _redis_client.sadd(rkey, path)
+                    _redis_client.expire(rkey, 3600)
+                else:
+                    self.sensitive_reads.add(path)
+                logger.debug("Sensitive path recorded: %s", path)
 
     def record_write(self, tool_name: str) -> None:
         has_sensitive = False
