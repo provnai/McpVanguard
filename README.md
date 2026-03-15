@@ -43,9 +43,9 @@ Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVangua
 
 | Layer | What it checks | Latency |
 |-------|---------------|---------|
-| **L1 — Rules** | 50+ static signatures: path traversal, reverse shells, SSRF, prompt injection | ~16ms |
+| **L1 — Safe Zones & Rules** | Kernel-level isolation (`openat2` / Windows canonicalization) and 50+ deterministic signatures | ~16ms |
 | **L2 — Semantic** | LLM-based intent scoring for ambiguous requests | Async |
-| **L3 — Behavioral** | Sliding-window anomaly detection (e.g. reading 500 files in 60 seconds) | Stateful |
+| **L3 — Behavioral** | Shannon Entropy ($H(X)$) scouter and sliding-window anomaly detection | Stateful |
 
 > **On latency**: 16ms is the overhead at peak concurrent load. In practice it's well under the 1–2 second LLM response time — imperceptible to the agent.
 
@@ -55,6 +55,8 @@ If a request is blocked, the agent receives a standard JSON-RPC error response. 
 
 ## 🛡️ What gets blocked
 
+- **Sandbox Escapes**: TOCTOU symlink attacks, Windows 8.3 shortnames (`PROGRA~1`), DOS device namespaces
+- **Data Exfiltration**: High-entropy payloads (H > 7.5 cryptographic keys) and velocity-based secret scraping
 - **Filesystem attacks**: Path traversal (`../../etc/passwd`), null bytes, restricted paths (`~/.ssh`), Unicode homograph evasion
 - **Command injection**: Pipe-to-shell, reverse shells, command chaining via `;` `&&` `\n`, expansion bypasses
 - **Network abuse**: SSRF, cloud metadata endpoints (AWS/GCP/Azure), hex/octal encoded IPs
@@ -65,9 +67,11 @@ If a request is blocked, the agent receives a standard JSON-RPC error response. 
 
 ## 📊 VEX Protocol — Immutable Audit Log
 
-When McpVanguard blocks an attack, it can send a cryptographically-signed report to the **[VEX Protocol](https://github.com/provnai/vex)**. VEX anchors that report to the Bitcoin blockchain via the CHORA Gate.
+When McpVanguard blocks an attack, it creates an OPA/Cerbos-compatible **Secure Tool Manifest** detailing the Principal, Action, Resource, and environmental snapshot.
 
-This means an auditor can independently verify *exactly what was blocked and why* — without relying on your local logs.
+This manifest is then sent as a cryptographically-signed report to the **[VEX Protocol](https://github.com/provnai/vex)**. VEX anchors that report to the Bitcoin blockchain via the CHORA Gate.
+
+This means an auditor can independently verify *exactly what was blocked, the entropy score, and why* — without relying on your local logs.
 
 ```bash
 export VANGUARD_VEX_URL="https://api.vexprotocol.com"
@@ -126,8 +130,9 @@ vanguard sse --server "..." --behavioral
 | **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ Done |
 | **Phase 4** | Distribution (stable PyPI release) | ✅ Done |
 | **Phase 5** | Production Hardening (v1.1.3 stability) | ✅ Done |
-| **Phase 6** | **Security Audit Remediation (v1.1.4 hardening)** | ✅ Done |
-| **Phase 7** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
+| **Phase 6** | Security Audit Remediation (v1.1.4 hardening) | ✅ Done |
+| **Phase 7** | Titan-Grade L1 Perimeter (v1.2.0 OS Isolation) | ✅ Done |
+| **Phase 8** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
 
 ---
 
