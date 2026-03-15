@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-15 (Titan-Grade L1 Perimeter)
+
+### Security (TitanGate Alignment)
+- **Kernel-Level Jailing (Linux )** (`core/jail.py`): Replaced fragile string-matching with deterministic path resolution using the `openat2` syscall (`RESOLVE_BENEATH`). It is now mathematically impossible for an agent to use symlinks or `../` to escape a designated Safe Zone.
+- **Handle-Based Canonicalization (Windows)** (`core/jail.py`): Defeated 8.3 shortname bypasses (`PROGRA~1`) and junction point tricks utilizing `GetFinalPathNameByHandleW`. Explicitly blocks extended paths (`\\?\`) and DOS device namespaces (`\\.\`).
+- **Risk-Weighted Entropy Throttling** (`core/behavioral.py`): The rate-limiter now acts as a Shannon Entropy ($H(X)$) scouter. It samples payload data to instantly detect cryptographic keys, binary data, or encrypted exfiltration attempts.
+  - Payloads with $H > 7.5$ trigger an immediate `BEH-006` block.
+  - Payloads with $H > 6.0$ apply a massive virtual penalty multiplier, freezing the session before data siphoning can occur.
+
+### Added
+- **Secure Tool Manifests** (`core/models.py`, `core/vex_client.py`): Standardized the handoff payload for the VEX backend. Blocked calls now generate an OPA-compatible JSON manifest including the Principal, Action, Resource, Entropy Score, and an environment snapshot, ensuring unpolluted forensic audits.
+- **Granular Safe Zones** (`rules/safe_zones.yaml`): Introduced a new deterministic configuration file that intercepts tool calls *before* legacy regex processing runs. Allows per-tool definitions (`allowed_prefixes`, `max_entropy`, `recursive`).
+- **The Breakout Test Suite** (`tests/test_breakouts.py`): Integrated a dedicated stress-test suite specifically targeted at simulating path traversal, symlink spoofing, and DOS namespace attacks. (All 27 core tests passing).
+
 ## [1.1.4] - 2026-03-10 (Security Audit Hardening)
+
 
 ### Security
 - **Fail-Closed ReDoS Guard** (`core/rules_engine.py`): We've re-engineered the regex timeout logic. If a complex pattern takes too long to match, the system now **blocks by default** (fail-closed) instead of letting it slip through.

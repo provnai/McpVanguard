@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import math
 import os
 import time
 import uuid
@@ -40,6 +41,12 @@ MAX_ANY_TOOL_PER_60S = int(os.getenv("VANGUARD_BEH_FLOOD_LIMIT", "200"))
 MAX_RESPONSE_BYTES = int(os.getenv("VANGUARD_BEH_PAYLOAD_LIMIT", str(10 * 1024)))
 VANGUARD_STRICT_REDIS = os.getenv("VANGUARD_STRICT_REDIS", "false").lower() == "true"
 VANGUARD_BLOCK_ENUMERATION = os.getenv("VANGUARD_BLOCK_ENUMERATION", "false").lower() == "true"
+
+# --- Task 3: Entropy Throttling config ---
+ENTROPY_SCAN_BYTES = 8192          # Scan first 8KB only (performance limit)
+ENTROPY_HIGH_THRESHOLD = float(os.getenv("VANGUARD_ENTROPY_HIGH", "6.0"))   # H > 6.0 = likely secret
+ENTROPY_BLOCK_THRESHOLD = float(os.getenv("VANGUARD_ENTROPY_BLOCK", "7.5")) # H > 7.5 = almost certainly encrypted/key
+ENTROPY_PENALTY_MULTIPLIER = float(os.getenv("VANGUARD_ENTROPY_PENALTY", "50"))  # virtual read cost multiplier
 
 REDIS_URL = os.getenv("VANGUARD_REDIS_URL", "")
 
@@ -324,6 +331,49 @@ def _inspect_request_sync(
     return None
 
 
+# ─── Task 3: Shannon Entropy Scouter ─────────────────────────────────────────
+
+def compute_shannon_entropy(data: bytes) -> float:
+    """
+    Compute Shannon Entropy H(X) for a byte buffer.
+    Samples up to ENTROPY_SCAN_BYTES (8KB) for performance.
+
+    H(X) = -Σ p(x_i) * log2(p(x_i))
+
+    Interpretation:
+        H < 4.0  → plain text, logs, source code   (very low risk)
+        H 4–6.0  → mixed content, structured data   (moderate)
+        H > 6.0  → likely encrypted / compressed    (HIGH risk — potential secret)
+        H > 7.5  → almost certainly binary / key    (BLOCK)
+    Max theoretical = 8.0 (perfectly random byte distribution).
+    """
+    sample = data[:ENTROPY_SCAN_BYTES]
+    if not sample:
+        return 0.0
+
+    freq = [0] * 256
+    for byte in sample:
+        freq[byte] += 1
+
+    length = len(sample)
+    entropy = 0.0
+    for count in freq:
+        if count:
+            p = count / length
+            entropy -= p * math.log2(p)
+
+    return round(entropy, 4)
+
+
+def entropy_risk_label(h: float) -> str:
+    """Human-readable label for the entropy score."""
+    if h >= ENTROPY_BLOCK_THRESHOLD:
+        return "CRITICAL (encrypted/key material)"
+    if h >= ENTROPY_HIGH_THRESHOLD:
+        return "HIGH (likely binary or compressed)"
+    return "LOW (plaintext)"
+
+
 async def inspect_response(session_id: str, response_body: str) -> Optional[InspectionResult]:
     """Async wrapper that delegates to _inspect_response_sync using ThreadPoolExecutor."""
     if not ENABLED: return None
@@ -336,22 +386,41 @@ def _inspect_response_sync(
     response_body: str,
 ) -> Optional[InspectionResult]:
     """
-    Inspect a server response for large payload exfiltration attempts.
-
-    Args:
-        session_id: Identifies the proxy session.
-        response_body: Raw response string (JSON).
-
-    Returns:
-        InspectionResult to BLOCK, or None to pass through.
+    Inspect a server response for large payload and high-entropy exfiltration attempts.
     """
     if not ENABLED:
         return None
 
-    byte_len = len(response_body.encode("utf-8"))
+    byte_data = response_body.encode("utf-8")
+    byte_len = len(byte_data)
     state = get_state(session_id)
-    total_bytes = state.add_response_bytes(byte_len)
 
+    # ── Task 3: Entropy check (BEH-006) ──
+    # Compute entropy on the response body sample
+    h = compute_shannon_entropy(byte_data)
+    if h >= ENTROPY_BLOCK_THRESHOLD:
+        logger.warning("High-entropy response blocked: H=%.4f session=%s", h, session_id)
+        return InspectionResult(
+            allowed=False,
+            action="BLOCK",
+            layer_triggered=3,
+            rule_matches=[RuleMatch(
+                rule_id="BEH-006",
+                description=f"Entropy scouter: H={h:.4f} — {entropy_risk_label(h)}",
+                severity="CRITICAL",
+            )],
+            block_reason=f"Entropy-based exfiltration block: H={h:.4f} ({entropy_risk_label(h)})",
+        )
+
+    # Apply virtual cost multiplier for high-entropy reads (clamps to rate limit faster)
+    if h >= ENTROPY_HIGH_THRESHOLD:
+        virtual_reads = int(ENTROPY_PENALTY_MULTIPLIER)
+        logger.info("Entropy penalty applied: H=%.4f → +%d virtual reads session=%s", h, virtual_reads, session_id)
+        for _ in range(virtual_reads):
+            state.window("read_file").record()
+
+    # ── BEH-004: Large payload ──
+    total_bytes = state.add_response_bytes(byte_len)
     if total_bytes > MAX_RESPONSE_BYTES:
         return InspectionResult(
             allowed=False,

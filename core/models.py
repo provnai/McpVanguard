@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field
 import time
 import uuid
+import platform
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +81,14 @@ class RuleMatch(BaseModel):
     matched_value: Optional[str] = None
     description: Optional[str] = None  # Replaces 'message' for clarity
     message: Optional[str] = None      # Keep for backward compatibility
+
+
+class SafeZone(BaseModel):
+    """Definition of a restricted 'jail' for a specific tool."""
+    tool: str
+    allowed_prefixes: list[str]
+    max_entropy: Optional[float] = None
+    recursive: bool = True
 
 
 class InspectionResult(BaseModel):
@@ -159,3 +168,91 @@ def make_block_response(request_id: Any, reason: str, rule_id: str = "VANGUARD")
             }
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Secure Tool Manifest (OPA-Ready / VEX Forensic Handoff)
+# ---------------------------------------------------------------------------
+
+class SecureToolManifest(BaseModel):
+    """
+    Standardized forensic evidence package generated when a tool call is blocked.
+
+    This format is designed to be:
+    - OPA-compatible: Can be fed directly as `input` to an OPA/Rego policy.
+    - Cerbos-compatible: Maps to the Principal-Action-Resource model.
+    - VEX-ready: Provides rich context for TitanGate's formal verification engine.
+    """
+    # --- Event Identity ---
+    manifest_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp_utc: float = Field(default_factory=time.time)
+    session_id: str
+    blocked_by_layer: int
+
+    # --- OPA/Cerbos: Principal-Action-Resource ---
+    principal: dict[str, Any] = Field(default_factory=dict)
+    # e.g. {"id": "agent-001", "roles": ["untrusted"], "jwt_claims": {...}}
+    action: str  # e.g. "tools/call"
+    resource: dict[str, Any] = Field(default_factory=dict)
+    # e.g. {"kind": "Filesystem", "id": "/etc/passwd", "tool": "read_file"}
+
+    # --- Forensic Context ---
+    rule_triggered: Optional[str] = None
+    block_reason: str
+    shannon_entropy: Optional[float] = None  # H(X) of the response body, if applicable
+    entropy_risk_label: Optional[str] = None
+
+    # --- Environment Snapshot ---
+    os_platform: str = Field(default_factory=platform.system)
+    python_version: str = Field(default_factory=lambda: platform.python_version())
+
+    def to_opa_input(self) -> dict:
+        """Serialize as an OPA policy evaluation input document."""
+        return {
+            "input": {
+                "principal": self.principal,
+                "action": {"name": self.action},
+                "resource": self.resource,
+                "context": {
+                    "manifest_id": self.manifest_id,
+                    "session_id": self.session_id,
+                    "timestamp": self.timestamp_utc,
+                    "entropy": {
+                        "score": self.shannon_entropy,
+                        "risk": self.entropy_risk_label,
+                    },
+                    "environment": {
+                        "os": self.os_platform,
+                        "python": self.python_version,
+                    }
+                }
+            }
+        }
+
+
+def build_manifest(
+    session_id: str,
+    message: dict,
+    result: "InspectionResult",
+    entropy: Optional[float] = None,
+    entropy_label: Optional[str] = None,
+) -> SecureToolManifest:
+    """Helper to build a SecureToolManifest from a blocked InspectionResult."""
+    params = message.get("params", {})
+    tool_name = params.get("name", "unknown")
+    args = params.get("arguments", {})
+    path = args.get("path") or args.get("filepath") or args.get("dir", "")
+
+    rule_id = result.rule_matches[0].rule_id if result.rule_matches else None
+
+    return SecureToolManifest(
+        session_id=session_id,
+        blocked_by_layer=result.layer_triggered or 1,
+        principal={"id": session_id, "roles": ["agent"]},
+        action=message.get("method", "tools/call"),
+        resource={"kind": "Filesystem", "id": path, "tool": tool_name},
+        rule_triggered=rule_id,
+        block_reason=result.block_reason or "Unknown",
+        shannon_entropy=entropy,
+        entropy_risk_label=entropy_label,
+    )

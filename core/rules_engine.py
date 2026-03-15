@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Optional
 import yaml
 
-from core.models import InspectionResult, RuleMatch, RuleAction, RuleSeverity
+from core.models import InspectionResult, RuleMatch, RuleAction, RuleSeverity, SafeZone
+from core.jail import check_path_jail
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,9 @@ class RulesEngine:
     def __init__(self, rules_dir: str = "rules"):
         self.rules_dir = Path(rules_dir)
         self.rules: list[Rule] = []
+        self.safe_zones: list[SafeZone] = []
         self.load_rules()
+        self.load_safe_zones()
 
     def load_rules(self) -> int:
         """Load (or reload) all YAML files from the rules directory."""
@@ -150,8 +153,79 @@ class RulesEngine:
         }
         self.rules.sort(key=lambda r: severity_order.get(r.severity, 99))
 
-        logger.info(f"Loaded {loaded} rules from {self.rules_dir}")
-        return loaded
+    def load_safe_zones(self) -> int:
+        """Load safe zones configuration from safe_zones.yaml."""
+        self.safe_zones.clear()
+        config_file = self.rules_dir / "safe_zones.yaml"
+        
+        if not config_file.exists():
+            logger.info("No safe_zones.yaml found — skipping Safe Zone enforcement.")
+            return 0
+
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            
+            if not isinstance(data, list):
+                logger.warning(f"Invalid format in {config_file.name}: expected a list")
+                return 0
+
+            for entry in data:
+                self.safe_zones.append(SafeZone(**entry))
+            
+            logger.info(f"Loaded {len(self.safe_zones)} Safe Zones from {config_file.name}")
+            return len(self.safe_zones)
+        except Exception as e:
+            logger.error(f"Failed to load {config_file.name}: {e}")
+            return 0
+
+    def _check_safe_zones(self, message: dict) -> Optional[InspectionResult]:
+        """
+        Verify tool arguments against defined Safe Zones (Jails).
+        Returns a BLOCK InspectionResult if a breach is detected.
+        """
+        # Only check tools/call methods
+        if message.get("method") != "tools/call":
+            return None
+        
+        params = message.get("params", {})
+        tool_name = params.get("name")
+        args = params.get("arguments", {})
+
+        # Find any safe zones for this tool
+        relevant_zones = [z for z in self.safe_zones if z.tool == tool_name]
+        if not relevant_zones:
+            return None
+
+        # Check for path-like arguments
+        # We look for common path keys like 'path', 'filepath', 'dir', etc.
+        path_keys = ["path", "filepath", "directory", "dir", "destination", "source"]
+        
+        for key in path_keys:
+            if key in args:
+                requested_path = str(args[key])
+                allowed = False
+                
+                for zone in relevant_zones:
+                    if check_path_jail(requested_path, zone.allowed_prefixes):
+                        allowed = True
+                        break
+                
+                if not allowed:
+                    logger.warning(f"SAFE ZONE BREACH: Tool '{tool_name}' attempted to access '{requested_path}' outside of allowed zones.")
+                    return InspectionResult.block(
+                        reason=f"Access denied: Path '{requested_path}' is outside the authorized Safe Zone for tool '{tool_name}'.",
+                        layer=1,
+                        rule_matches=[RuleMatch(
+                            rule_id="VANGUARD-SAFEZONE-001",
+                            rule_name="Safe Zone Violation",
+                            severity=RuleSeverity.CRITICAL,
+                            action=RuleAction.BLOCK,
+                            message=f"Deterministic jail failure for {tool_name}"
+                        )]
+                    )
+        
+        return None
 
     def check(self, message: dict) -> InspectionResult:
         """
@@ -161,6 +235,13 @@ class RulesEngine:
         t_start = time.monotonic()
         matches: list[RuleMatch] = []
 
+        # 1. Deterministic Safe Zone Check (Fastest & Most Critical)
+        jail_result = self._check_safe_zones(message)
+        if jail_result:
+            _log_latency(t_start, "Layer 1 SAFE-ZONE BLOCK")
+            return jail_result
+
+        # 2. Legacy Regex Rules
         for rule in self.rules:
             match = rule.check(message)
             if match is None:

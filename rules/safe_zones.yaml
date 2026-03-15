@@ -1,0 +1,22 @@
+# rules/safe_zones.yaml
+# Precise "Safe Zones" for filesystem-related tools.
+# Any call to these tools with arguments outside these prefixes will be BLOCKED.
+
+- tool: "read_file"
+  allowed_prefixes:
+    - "/home/project"
+    - "C:\\Users\\quint\\Desktop\\provnai"
+  max_entropy: 7.0
+  recursive: true
+
+- tool: "write_file"
+  allowed_prefixes:
+    - "/home/project/output"
+    - "C:\\Users\\quint\\Desktop\\provnai\\output"
+  recursive: true
+
+- tool: "list_directory"
+  allowed_prefixes:
+    - "/home/project"
+    - "C:\\Users\\quint\\Desktop\\provnai"
+  recursive: false
