@@ -5,7 +5,7 @@ First off — thanks for taking the time to contribute! McpVanguard is a communi
 ## Ways to Contribute
 
 ### 🛡️ Write New Rules
-Add Layer 1 rules to catch new attack patterns:
+While core filesystem isolation is handled deterministically via `safe_zones.yaml` and OS kernel features (`openat2`), we rely on the community to build Layer 1 regex signatures to catch malicious payloads and command injections.
 
 1. Open the relevant `rules/*.yaml` file (or create a new one)
 2. Add a new rule following the schema:

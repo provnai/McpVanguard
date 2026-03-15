@@ -18,8 +18,8 @@ McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communicatio
 │                         ┌──────────┼──────────┐                 │
 │                         ▼          ▼           ▼                 │
 │                     [Layer 1]  [Layer 2]   [Layer 3]            │
-│                     Static     Semantic    Behavioral            │
-│                     Rules      Scoring     Analysis              │
+│                     Safe Zones Semantic    Behavioral            │
+│                     & Rules    Scoring     & Entropy             │
 │                         │          │           │                 │
 │                         └──────────┴───────────┘                 │
 │                                    │                             │
@@ -76,24 +76,20 @@ Main Event Loop
 
 ---
 
-### `core/rules_engine.py` — Layer 1: Static Firewall
+### `core/rules_engine.py` & `core/jail.py` — Layer 1: Deterministic Safe Zones
 
-Loads YAML rule files from `rules/` at startup. Applies rules in priority order on every incoming `params` payload. Currently ships with **53 rules** across 5 categories.
+McpVanguard's first layer of defense has evolved from pure regex matching to **OS-level deterministic isolation**.
 
-**Rule Schema:**
-```yaml
-- id: "PATH_TRAVERSAL_001"
-  description: "Block access to critical filesystem paths"
-  layer: 1
-  severity: CRITICAL   # CRITICAL | HIGH | MEDIUM | LOW
-  match_fields: ["params.path", "params.content", "params.command"]
-  pattern: "(\/etc\/passwd|\/etc\/shadow|~\/\.ssh|\/proc\/self)"
-  action: BLOCK        # BLOCK | WARN | LOG
-  message: "Access to system paths is not permitted."
-```
+**1. Kernel-Backed Safe Zones (`safe_zones.yaml`)**
+Before inspecting payload strings, Vanguard intercepts tool calls (like `read_file` or `write_file`) and forces the operating system to canonicalize and jail the requested paths:
+- **Linux (`openat2`)**: Uses syscall 437 with `RESOLVE_BENEATH` to guarantee a path cannot escape its defined root directory, crushing TOCTOU and symlink attacks.
+- **Windows (`GetFinalPathNameByHandleW`)**: Opens a file handle to evaluate the true canonical path, defeating 8.3 shortnames (`PROGRA~1`), junction points, and DOS device paths (`\\.\`).
 
-**Rule Categories (initial set):**
-- `rules/filesystem.yaml` — path traversal, sensitive file access
+**2. Static Signature Firewall (`rules/*.yaml`)**
+If a request is within bounds (or has no specific Safe Zone defined), it falls back to the static firewall. Contains **50+ signatures** across 5 categories.
+
+**Rule Categories:**
+- `rules/filesystem.yaml` — null bytes, Unix/Windows sensitive paths
 - `rules/commands.yaml` — shell injection, dangerous commands (`rm -rf`, `curl | bash`, etc.)
 - `rules/network.yaml` — exfiltration patterns (data sent to external IPs)
 - `rules/jailbreak.yaml` — known prompt injection strings
@@ -139,16 +135,21 @@ User: Tool: read_file | Params: {"path": "/etc/passwd"}
 
 ---
 
-### `core/behavioral.py` — Layer 3: Behavioral Sentry
+### `core/behavioral.py` — Layer 3: Entropy & Behavioral Sentry
 
-Tracks patterns across an entire session using a **sliding window** counter.
+Tracks patterns across an entire session using a **sliding window** counter and performs **real-time data analysis**.
 
-**Detectors:**
+**1. Shannon Entropy ($H(X)$) Scouter**
+To detect precise data exfiltration, Vanguard calculates the Shannon Entropy of payload samples (up to 8KB) before returning them to the agent:
+- **$H > 7.5$**: Almost certainly cryptographic keys or compressed data. Immediately blocked (`BEH-006`).
+- **$H > 6.0$**: Highly dense/structured data. Applies a vast virtual penalty multiplier to the rate limiter, aggressively clamping the session.
+
+**2. Sliding Window Detectors:**
 | Detector | Rule | Action |
 |---|---|---|
 | Data Scraping | >50 `read_file` calls in 10s | BLOCK session |
 | Privilege Escalation | `write_file` after 5+ `read_file` to sensitive paths | ALERT |
-| Exfiltration | Large outbound payload (>10KB in one call) | BLOCK |
+| Flood Exfiltration | Large outbound payload (>10KB in one call) | BLOCK |
 | Enumeration | >20 `list_dir` calls in 5s | WARN |
 
 **State storage:** In-memory `defaultdict(deque)` for single-node. Backed by **Redis** for persistent cluster-wide session history and analysis.

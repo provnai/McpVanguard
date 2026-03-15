@@ -38,7 +38,8 @@ pytest-asyncio>=0.23.0      # Async test support
 - Critical for hitting our <10ms latency target
 
 ### `pyyaml`
-- Loads signature rule files from `rules/` directory
+- Loads static signature rule files from `rules/` directory AND the deterministic `safe_zones.yaml`.
+- While kernel-backed Safe Zones (`openat2`, etc.) handle path isolation, YAML rules handle complex payload matching.
 - YAML is human-readable → community can contribute rules via PRs
 - No schema validation needed for MVP (add `jsonschema` later)
 

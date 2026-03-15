@@ -2,9 +2,12 @@
 
 McpVanguard is a transparent security proxy that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
-It adds three layers of protection — static rules, semantic scoring, and behavioral analysis — without requiring any changes to your existing agent or server code.
+It adds three layers of protection — deterministic Safe Zones, semantic scoring, and behavioral analysis — without requiring any changes to your existing agent or server code.
 
 This guide covers how to deploy Vanguard in different environments.
+
+### 0. Define Your Safe Zones (L1 Perimeter)
+Before deploying, define exact directory bounds for your MCP tools in `rules/safe_zones.yaml`. Vanguard uses OS-level kernel checks to guarantee agents cannot break out of these prefix paths.
 
 Vanguard is transport-agnostic and supports two main deployment modes:
 1.  **Local Stdio Mode**: For CLI-based agents running on the same machine.
@@ -60,6 +63,10 @@ By default, this is stored in RAM. If you are load-balancing multiple Vanguard i
 ```bash
 export VANGUARD_BEHAVIORAL_ENABLED=true
 export VANGUARD_REDIS_URL="redis://your-elasticache-endpoint:6379/0"
+
+# Optional: Adjust Shannon Entropy thresholds for exfiltration detection
+export VANGUARD_ENTROPY_HIGH="6.0"    # Triggers massive rate-limit penalty
+export VANGUARD_ENTROPY_BLOCK="7.5"   # Immediate block (likely encryption keys)
 ```
 
 *When the Redis URL is provided, Vanguard automatically switches to using sorted sets for cluster-wide behavioral tracking.*
