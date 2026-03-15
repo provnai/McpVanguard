@@ -143,11 +143,11 @@ class AuditEvent(BaseModel):
     def to_log_line(self) -> str:
         from datetime import datetime
         ts = datetime.fromtimestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        icon = {"ALLOW": "✅", "BLOCK": "🚫", "WARN": "⚠️"}.get(self.action, "?")
+        tag = f"[{self.action}]"
         tool = f" [{self.tool_name}]" if self.tool_name else ""
         reason = f" — {self.blocked_reason}" if self.blocked_reason else ""
         layer = f" (Layer {self.layer_triggered})" if self.layer_triggered else ""
-        return f"[{ts}] {icon} {self.action}{layer} | {self.session_id[:8]} | {self.direction}{tool}{reason}"
+        return f"[{ts}] {tag:<9} {layer:<10} | {self.session_id[:8]} | {self.direction}{tool}{reason}"
 
 
 # ---------------------------------------------------------------------------

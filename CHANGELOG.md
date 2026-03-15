@@ -7,13 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.5.0] - 2026-03-15 (Forensic Hardening Update)
 
-### Security (Hardening Spec Alignment)
-- **Entropy-Aware Token Bucket Governor** (`core/behavioral.py`): Replaced sliding windows with a formal governor per SPEC-1.5.0. High-entropy data ($H > 6.0$) now drains tokens $10\times$ faster, ensuring rapid exhaustion during siphoning attempts.
-- **1 Byte/Second Hard Throttle** (`core/proxy.py`): Implemented real-time stream clamping. If an agent exhausts its entropy bucket, the proxy physically throttles the tool output to 1 byte per second, making secret exfiltration computationally expensive.
-- **Forensic Gate Sensors** (`core/models.py`): The `SecureToolManifest` now includes `gate_sensors`. This provides VEX engineers with deterministic OS-level resolution data (`resolved_physical_path`) and granular entropy violation metrics.
+### Security (Spec Alignment)
+- **Entropy-Aware Token Bucket Governor** (`core/behavioral.py`): Implemented formal governor for deterministic rate-limiting. High-entropy data now incurs a $10\times$ penalty relative to standard tool calls.
+- **1 Byte/Second Hard Throttle** (`core/proxy.py`): Implemented physical stream clamping for compromised agent sessions.
+- **Forensic Gate Sensors** (`core/models.py`): The `SecureToolManifest` now includes `gate_sensors` for OS-level path resolution and forensic audit finality.
 
 ### Changed
-- **Unified Forensic Schema**: Standardized all L1/L3 violation outputs to map directly to VEX forensic traces.
+- **CLI & Log Formatting**: Updated terminal output and audit log signatures for improved industry alignment and enterprise ingest compatibility.
+- **Project Identity**: Unified authorship and project metadata under the **Provnai Development Team**.
+- **Documentation Standards**: Refined README and deployment guides for technical precision and authoritative tone.
+- **Unified Forensic Schema**: Optimized all security violation outputs to map directly to VEX forensic traces.
 
 ## [1.2.0] - 2026-03-15 (Titan-Grade L1 Perimeter)
 

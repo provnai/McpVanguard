@@ -31,7 +31,7 @@ from core import semantic, behavioral
 
 app = typer.Typer(
     name="vanguard",
-    help="🛡️ McpVanguard — Real-time AI security proxy for MCP agents.",
+    help="McpVanguard — Real-time AI security proxy for MCP agents.",
     add_completion=False,
 )
 console = Console(stderr=True)
@@ -121,24 +121,24 @@ def start(
     engine = RulesEngine(rules_dir=rules_dir)
 
     console.print(Panel.fit(
-        f"[bold green]🛡️ McpVanguard v{__version__}[/bold green]\n"
+        f"[bold green]McpVanguard v{__version__}[/bold green]\n"
         f"[dim]Real-time security layer for MCP agents[/dim]",
         border_style="green",
     ))
     console.print(f"[bold]Server:[/bold]    {server}")
     console.print(f"[bold]Rules:[/bold]     {engine.rule_count} loaded from '{rules_dir}/'")
-    console.print(f"[bold]Layer 1:[/bold]    ✅ Static rules")
+    console.print(f"[bold]Layer 1:[/bold]    [green]Enabled[/green] (Static rules)")
     
     if behavioral:
-        console.print(f"[bold]Layer 3:[/bold]    ✅ Behavioral analysis (Active)")
+        console.print(f"[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
     else:
-        console.print(f"[bold]Layer 3:[/bold]    ⏸️  Behavioral analysis (Disabled)")
+        console.print(f"[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
 
     if semantic:
-        status = "✅ Ready" if semantic_ready else "❌ Offline (Scoring will be skipped)"
+        status = "Ready" if semantic_ready else "Offline (Scoring will be skipped)"
         console.print(f"[bold]Layer 2:[/bold]    {status} — Ollama ({ollama_model})")
     else:
-        console.print(f"[bold]Layer 2:[/bold]    ⏸️  Semantic scoring (Use --semantic to enable)")
+        console.print(f"[bold]Layer 2:[/bold]    [dim]Disabled[/dim] (Semantic scoring)")
 
     console.print(f"[bold]Audit log:[/bold]  {log_file}\n")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
@@ -220,7 +220,7 @@ def info(
     engine = RulesEngine(rules_dir=rules_dir)
 
     console.print(Panel.fit(
-        f"[bold green]🛡️ McpVanguard v{__version__}[/bold green]",
+        f"[bold green]McpVanguard v{__version__}[/bold green]",
         border_style="green",
     ))
 
@@ -289,7 +289,7 @@ def update(
     base_url = f"https://raw.githubusercontent.com/{repo}/main/rules"
     rules_dir_path = rules_dir
 
-    console.print(f"[bold blue]🔄 Syncing signatures from {repo}...[/bold blue]")
+    console.print(f"[bold blue]Syncing signatures from {repo}...[/bold blue]")
 
     updated = 0
     failed = 0
@@ -304,16 +304,16 @@ def update(
                 os.makedirs(rules_dir_path, exist_ok=True)
                 with open(dest, "w", encoding="utf-8") as f:
                     f.write(resp.text)
-                console.print(f"  [green]✅ Updated[/green] {filename}")
+                console.print(f"  [green]SUCCESS:[/green] Updated {filename}")
                 updated += 1
             except Exception as exc:
-                console.print(f"  [red]❌ Failed[/red] {filename}: {exc}")
+                console.print(f"  [red]FAILURE:[/red] {filename}: {exc}")
                 failed += 1
 
     if failed == 0:
-        console.print(f"\n[bold green]✅ All {updated} signature files updated successfully.[/bold green]")
+        console.print(f"\n[bold green]All {updated} signature files updated successfully.[/bold green]")
     else:
-        console.print(f"\n[yellow]⚠️  Updated {updated} files, {failed} failed. Check your connection.[/yellow]")
+        console.print(f"\n[yellow]Updated {updated} files, {failed} failed. Check your connection.[/yellow]")
 
 
 # ---------------------------------------------------------------------------

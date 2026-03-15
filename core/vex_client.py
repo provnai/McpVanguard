@@ -197,7 +197,7 @@ async def _execute_and_listen(payload: dict, session_id: str):
                             receipt = parsed.get("evidence_capsule") or parsed.get("receipt")
                             if receipt:
                                 logger.info(
-                                    "🛡️ CHORA EvidenceCapsule Recorded for Vanguard Block (Job %s):\n%s", 
+                                    "CHORA EvidenceCapsule Recorded for Vanguard Block (Job %s):\n%s", 
                                     job_id, 
                                     json.dumps(receipt, indent=2)
                                 )

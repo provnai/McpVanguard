@@ -1,9 +1,9 @@
-# 🛡️ McpVanguard
+# McpVanguard
 ### A security proxy for AI agents that use MCP
 
-MCP (Model Context Protocol) lets AI agents like Claude or GPT call tools on your computer — reading files, running commands, browsing the web. **McpVanguard sits in between**, inspecting every tool call before it reaches your system and blocking anything that looks malicious.
+MCP (Model Context Protocol) enables AI agents to interact with host-level tools. **McpVanguard interposes between the agent and the system**, provide real-time inspection and enforcement prefixing every tool call.
 
-No changes to your agent. No changes to your server. Just wrap it.
+Transparent integration. Zero-configuration requirements for existing servers.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
@@ -31,7 +31,7 @@ export VANGUARD_API_KEY="your-secret-key"
 vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[Deploy on Railway](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 > 📖 [Full Railway Deployment Guide](docs/railway-deployment-guide.md)
 
@@ -47,7 +47,7 @@ Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVangua
 | **L2 — Semantic** | LLM-based intent scoring for ambiguous requests | Async |
 | **L3 — Behavioral** | Shannon Entropy ($H(X)$) scouter and sliding-window anomaly detection | Stateful |
 
-> **On latency**: 16ms is the overhead at peak concurrent load. In practice it's well under the 1–2 second LLM response time — imperceptible to the agent.
+> **Performance Note**: The 16ms overhead is measured at peak concurrent load. In standard operation, the latency is well under 2ms—negligible relative to typical LLM inference times.
 
 If a request is blocked, the agent receives a standard JSON-RPC error response. The underlying server never sees it.
 
@@ -65,7 +65,7 @@ If a request is blocked, the agent receives a standard JSON-RPC error response. 
 
 ---
 
-## 📊 VEX Protocol — Immutable Audit Log
+## VEX Protocol — Deterministic Audit Log
 
 When McpVanguard blocks an attack, it creates an OPA/Cerbos-compatible **Secure Tool Manifest** detailing the Principal, Action, Resource, and environmental snapshot.
 
@@ -81,7 +81,7 @@ vanguard sse --server "..." --behavioral
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
                       ┌─────────────────────────────────────────────────┐
@@ -121,22 +121,22 @@ vanguard sse --server "..." --behavioral
 
 ---
 
-## 🗺️ Project Status
+## Project Status
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | ✅ Done |
-| **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral) | ✅ Done |
-| **Phase 3** | Flight Recorder (VEX & CHORA Integration) | ✅ Done |
-| **Phase 4** | Distribution (stable PyPI release) | ✅ Done |
-| **Phase 5** | Production Hardening (v1.1.3 stability) | ✅ Done |
-| **Phase 6** | Security Audit Remediation (v1.1.4 hardening) | ✅ Done |
-| **Phase 7** | Titan-Grade L1 Perimeter (v1.5.0 Forensic Hardening) | ✅ Done |
-| **Phase 8** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
+| **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | [DONE] |
+| **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral) | [DONE] |
+| **Phase 3** | Flight Recorder (VEX & CHORA Integration) | [DONE] |
+| **Phase 4** | Distribution (stable PyPI release) | [DONE] |
+| **Phase 5** | Production Hardening (v1.1.3 stability) | [DONE] |
+| **Phase 6** | Security Audit Remediation (v1.1.4 hardening) | [DONE] |
+| **Phase 7** | Titan-Grade L1 Perimeter (v1.5.0 Forensic Hardening) | [DONE] |
+| **Phase 8** | Agent Identity & VEX v0.2 Spec | [IN PROGRESS] |
 
 ---
 
-## 📚 Resources
+## Resources
 
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Architecture](docs/ARCHITECTURE.md)
@@ -145,7 +145,7 @@ vanguard sse --server "..." --behavioral
 
 ---
 
-## 📄 License
+## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 

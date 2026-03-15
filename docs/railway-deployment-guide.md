@@ -1,4 +1,4 @@
-# Deploying McpVanguard on Railway 🛡️🚉
+# Deploying McpVanguard on Railway
 
 McpVanguard is a real-time AI security proxy for the Model Context Protocol (MCP). Deploying it on Railway gives you a fully managed, cloud-native security gateway that intercepts and blocks malicious AI agent tool calls before they reach your infrastructure.
 
@@ -6,7 +6,7 @@ McpVanguard is a real-time AI security proxy for the Model Context Protocol (MCP
 
 Deploy the full McpVanguard stack in one click:
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[Deploy on Railway](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ## Prerequisites
 
@@ -71,7 +71,7 @@ For immutable, cryptographically anchored audit trails of every blocked attack, 
 | `VANGUARD_VEX_URL` | Your VEX server URL. e.g. `https://vex-production.up.railway.app` |
 | `VANGUARD_VEX_KEY` | Your VEX agent JWT for authentication. |
 
-> 💡 You can deploy your own VEX instance alongside McpVanguard for a complete Cloud-to-Cloud security stack. See [Deploying VEX on Railway](https://github.com/provnai/vex/blob/main/docs/railway.md).
+You can deploy your own VEX instance alongside McpVanguard for a complete Cloud-to-Cloud security stack. See [Deploying VEX on Railway](https://github.com/provnai/vex/blob/main/docs/railway.md).
 
 ---
 
@@ -130,16 +130,16 @@ VEX handles all the PostgreSQL logging, Merkle-tree anchoring, and CHORA evidenc
 
 ---
 
-## Health Checks
+## Health Verification
 
-The template is pre-configured with a `/health` endpoint:
+The instance is pre-configured with a `/health` endpoint:
 
 ```bash
 GET /health
 → {"status": "ok", "version": "1.5.0"}
 ```
 
-Railway uses this for readiness checks before routing traffic to new deployments.
+Railway uses this for readiness checks during deployment orchestration.
 
 ---
 

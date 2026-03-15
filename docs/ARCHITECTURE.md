@@ -1,4 +1,4 @@
-# 🛡️ McpVanguard — System Architecture
+# McpVanguard — System Architecture
 
 ## Overview
 

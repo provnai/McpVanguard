@@ -1,4 +1,4 @@
-# 🔧 McpVanguard — Tech Stack Reference
+# McpVanguard — Tech Stack Reference
 
 ## Python Core Dependencies
 
