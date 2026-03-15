@@ -40,8 +40,8 @@ async def test_proxy_blocks_layer_1_rules(proxy):
     
     assert not result.allowed
     assert result.action == "BLOCK"
-    # Layer 1 triggers first
-    assert any(r.rule_id.startswith("FS-") or r.rule_id.startswith("PRIV-") for r in result.rule_matches)
+    # Layer 1 triggers first (either via SafeZone or Regex rules)
+    assert any(r.rule_id.startswith("FS-") or r.rule_id.startswith("PRIV-") or "SAFEZONE" in r.rule_id for r in result.rule_matches)
 
 @pytest.mark.asyncio
 async def test_proxy_blocks_layer_2_semantic(proxy):

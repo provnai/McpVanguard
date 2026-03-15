@@ -10,7 +10,9 @@ from core.rules_engine import RulesEngine
 
 @pytest.fixture
 def engine():
-    return RulesEngine(rules_dir="rules")
+    e = RulesEngine(rules_dir="rules")
+    e.safe_zones = []  # Disable SafeZone intercept to test regex rules in isolation
+    return e
 
 
 class TestRulesEngineLoads:
