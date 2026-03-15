@@ -1,4 +1,5 @@
 # McpVanguard — Deployment Guide
+**Version**: v1.5.0 (Forensic Hardening Update)
 
 McpVanguard is a transparent security proxy that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 

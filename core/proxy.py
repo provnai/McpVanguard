@@ -294,9 +294,18 @@ class VanguardProxy:
                     resp_result = await behavioral.inspect_response(
                         self._session.session_id, line_str
                     )
+                    
                     if resp_result and not resp_result.allowed:
                         logger.warning(f"[Vanguard] Blocking large response: {resp_result.block_reason}")
                         continue
+                        
+                    # Requirement 3.1: Apply 1 byte/sec throttle if governor is empty
+                    state = behavioral.get_state(self._session.session_id)
+                    if state.is_throttled:
+                        # Sleep 1 second per byte (simulated via 1 second per message for now, 
+                        # or 1 second per byte loop if we wanted to be literal)
+                        # We'll do 1 second per chunk to start as a 'soft' but effective throttle
+                        await asyncio.sleep(len(line)) 
                 except Exception:
                     pass
 

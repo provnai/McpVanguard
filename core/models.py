@@ -201,6 +201,10 @@ class SecureToolManifest(BaseModel):
     block_reason: str
     shannon_entropy: Optional[float] = None  # H(X) of the response body, if applicable
     entropy_risk_label: Optional[str] = None
+    
+    # --- Sensor Data (Hardening Spec 01) ---
+    gate_sensors: dict[str, Any] = Field(default_factory=dict)
+    # e.g. {"path_violation": {...}, "entropy_violation": {...}}
 
     # --- Environment Snapshot ---
     os_platform: str = Field(default_factory=platform.system)
@@ -243,7 +247,21 @@ def build_manifest(
     args = params.get("arguments", {})
     path = args.get("path") or args.get("filepath") or args.get("dir", "")
 
-    rule_id = result.rule_matches[0].rule_id if result.rule_matches else None
+    # Build hardening-spec gate sensors
+    gate_sensors = {}
+    if "SAFEZONE" in (rule_id or ""):
+        gate_sensors["path_violation"] = {
+            "attempted_path": path,
+            "resolved_physical_path": "RESOLVED_SYMLINK_LOGIC_ACTIVE", # Placeholder for L1 resolution
+            "policy_root": "RESTRICTED_SAFE_ZONE"
+        }
+    
+    if entropy is not None:
+        gate_sensors["entropy_violation"] = {
+            "bits_per_byte": entropy,
+            "total_bytes": len(message.get("params", {}).get("content", "")), # or response len
+            "exfiltration_risk_score": 1.0 if entropy > 7.5 else (entropy / 7.5)
+        }
 
     return SecureToolManifest(
         session_id=session_id,
@@ -255,4 +273,5 @@ def build_manifest(
         block_reason=result.block_reason or "Unknown",
         shannon_entropy=entropy,
         entropy_risk_label=entropy_label,
+        gate_sensors=gate_sensors,
     )

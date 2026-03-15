@@ -46,7 +46,7 @@ VANGUARD_BLOCK_ENUMERATION = os.getenv("VANGUARD_BLOCK_ENUMERATION", "false").lo
 ENTROPY_SCAN_BYTES = 8192          # Scan first 8KB only (performance limit)
 ENTROPY_HIGH_THRESHOLD = float(os.getenv("VANGUARD_ENTROPY_HIGH", "6.0"))   # H > 6.0 = likely secret
 ENTROPY_BLOCK_THRESHOLD = float(os.getenv("VANGUARD_ENTROPY_BLOCK", "7.5")) # H > 7.5 = almost certainly encrypted/key
-ENTROPY_PENALTY_MULTIPLIER = float(os.getenv("VANGUARD_ENTROPY_PENALTY", "50"))  # virtual read cost multiplier
+ENTROPY_PENALTY_MULTIPLIER = float(os.getenv("VANGUARD_ENTROPY_PENALTY", "10.0"))  # virtual read cost multiplier
 
 REDIS_URL = os.getenv("VANGUARD_REDIS_URL", "")
 
@@ -109,6 +109,25 @@ class _Window:
 # ─── Per-session state ────────────────────────────────────────────────────────
 
 @dataclass
+class _TokenBucket:
+    """Requirement 3.1: Entropy-aware Token Bucket governor."""
+    capacity: float = 100.0
+    tokens: float = 100.0
+    last_update: float = field(default_factory=time.monotonic)
+    refill_rate: float = 10.0  # tokens per second
+
+    def consume(self, amount: float) -> bool:
+        now = time.monotonic()
+        delta = now - self.last_update
+        self.tokens = min(self.capacity, self.tokens + delta * self.refill_rate)
+        self.last_update = now
+        
+        if self.tokens >= amount:
+            self.tokens -= amount
+            return True
+        return False
+
+@dataclass
 class BehavioralState:
     """Tracks behavioral counters for a single proxy session."""
     session_id: str
@@ -120,6 +139,9 @@ class BehavioralState:
     write_after_sensitive: bool = False
     # Total bytes seen in responses
     total_response_bytes: int = 0
+    # Requirement 3.1: Entropy Governor
+    entropy_bucket: _TokenBucket = field(default_factory=_TokenBucket)
+    is_throttled: bool = False
 
     def window(self, tool: str):
         if tool not in self._windows:
@@ -387,6 +409,7 @@ def _inspect_response_sync(
 ) -> Optional[InspectionResult]:
     """
     Inspect a server response for large payload and high-entropy exfiltration attempts.
+    Requirement 3.1: Throttles high-entropy output to 1 byte/sec if bucket empties.
     """
     if not ENABLED:
         return None
@@ -396,28 +419,37 @@ def _inspect_response_sync(
     state = get_state(session_id)
 
     # ── Task 3: Entropy check (BEH-006) ──
-    # Compute entropy on the response body sample
     h = compute_shannon_entropy(byte_data)
+    
+    # Check if we should block immediately (critical keys)
     if h >= ENTROPY_BLOCK_THRESHOLD:
         logger.warning("High-entropy response blocked: H=%.4f session=%s", h, session_id)
-        return InspectionResult(
-            allowed=False,
-            action="BLOCK",
-            layer_triggered=3,
-            rule_matches=[RuleMatch(
-                rule_id="BEH-006",
-                description=f"Entropy scouter: H={h:.4f} — {entropy_risk_label(h)}",
-                severity="CRITICAL",
-            )],
-            block_reason=f"Entropy-based exfiltration block: H={h:.4f} ({entropy_risk_label(h)})",
+        return InspectionResult.block(
+            reason=f"Exfiltration Block: H={h:.4f} (Cryptographic Material Detected)",
+            layer=3,
+            rule_matches=[RuleMatch(rule_id="BEH-006", severity="CRITICAL")]
         )
 
-    # Apply virtual cost multiplier for high-entropy reads (clamps to rate limit faster)
+    # Apply Token Bucket consumption
+    cost = 1.0
     if h >= ENTROPY_HIGH_THRESHOLD:
-        virtual_reads = int(ENTROPY_PENALTY_MULTIPLIER)
-        logger.info("Entropy penalty applied: H=%.4f → +%d virtual reads session=%s", h, virtual_reads, session_id)
-        for _ in range(virtual_reads):
-            state.window("read_file").record()
+        cost = ENTROPY_PENALTY_MULTIPLIER # 10x drain as per spec
+    
+    if not state.entropy_bucket.consume(cost):
+        # Bucket empty: Apply 1 byte/sec throttle as per spec
+        logger.warning("Entropy bucket EMPTY. Throttling session %s to 1 byte/sec.", session_id)
+        state.is_throttled = True
+        return InspectionResult(
+            allowed=True,
+            action="WARN",
+            layer_triggered=3,
+            rule_matches=[RuleMatch(
+                rule_id="BEH-007",
+                description="Entropy bucket exhausted. Throttling active (1 byte/sec).",
+                severity="HIGH",
+            )],
+            block_reason="Automatic throttling engaged due to high-entropy extraction pattern.",
+        )
 
     # ── BEH-004: Large payload ──
     total_bytes = state.add_response_bytes(byte_len)

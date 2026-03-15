@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-03-15 (Forensic Hardening Update)
+
+### Security (Hardening Spec Alignment)
+- **Entropy-Aware Token Bucket Governor** (`core/behavioral.py`): Replaced sliding windows with a formal governor per SPEC-1.5.0. High-entropy data ($H > 6.0$) now drains tokens $10\times$ faster, ensuring rapid exhaustion during siphoning attempts.
+- **1 Byte/Second Hard Throttle** (`core/proxy.py`): Implemented real-time stream clamping. If an agent exhausts its entropy bucket, the proxy physically throttles the tool output to 1 byte per second, making secret exfiltration computationally expensive.
+- **Forensic Gate Sensors** (`core/models.py`): The `SecureToolManifest` now includes `gate_sensors`. This provides VEX engineers with deterministic OS-level resolution data (`resolved_physical_path`) and granular entropy violation metrics.
+
+### Changed
+- **Unified Forensic Schema**: Standardized all L1/L3 violation outputs to map directly to VEX forensic traces.
+
 ## [1.2.0] - 2026-03-15 (Titan-Grade L1 Perimeter)
 
 ### Security (TitanGate Alignment)

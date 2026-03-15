@@ -9,7 +9,7 @@ Hosting McpVanguard on Railway provides a cloud-native "Security Gateway" (SSE B
 ## Common Use Cases
 
 - **Secure Remote Access**: Allow mobile or web-based AI agents to connect to your local tools securely over the internet.
-- **Enterprise Governance**: Implement deterministic OS-Level Safe Zones to jail agent payloads, and deploy Shannon Entropy Scouters to catch data exfiltration thresholds.
+- **Enterprise Governance**: Implement deterministic OS-Level Safe Zones to jail agent payloads, and deploy Shannon Entropy Governors with 1 byte/sec hard throttling to stop data exfiltration.
 - **Audit & Compliance**: Integrate with the VEX Protocol to generate immutable, anchored receipts of every blocked attack for compliance auditing.
 - **Multi-Server Aggregation**: Use Vanguard as a central security hub for multiple MCP servers across different environments.
 

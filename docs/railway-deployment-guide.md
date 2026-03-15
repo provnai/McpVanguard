@@ -39,9 +39,9 @@ Fine-tune the behavior of the security engine:
 | `VANGUARD_WARN_THRESHOLD` | `0.5` | Semantic scoring threshold above which a request is flagged as a warning. |
 | `VANGUARD_MAX_STRING_LEN` | `65536` | Protection against ReDoS/Memory exhaustion. Strings longer than this are truncated before inspection. |
 
-### 3. Layer 3: Behavioral Analysis & Entropy Scouter (Optional)
+### 3. Layer 3: Behavioral Analysis & Entropy Governor (Optional)
 
-McpVanguard tracks per-session patterns to detect anomalous agent behavior (e.g., an agent that reads 500 files in a minute) and calculates Shannon Entropy to detect data exfiltration.
+McpVanguard tracks per-session patterns to detect anomalous agent behavior and calculates Shannon Entropy to detect data exfiltration.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -50,6 +50,7 @@ McpVanguard tracks per-session patterns to detect anomalous agent behavior (e.g.
 | `VANGUARD_BEH_LIST_LIMIT` | `20` | Maximum `list_dir` calls per session before flagging. |
 | `VANGUARD_ENTROPY_HIGH` | `6.0` | $H(X)$ Threshold to apply a massive virtual rate limit penalty to the session. |
 | `VANGUARD_ENTROPY_BLOCK` | `7.5` | $H(X)$ Threshold to immediately block a tool call (likely cryptographic keys/compressed data). |
+| `VANGUARD_THROTTLE_ENABLED` | `true` | Enable hard 1 byte/sec throttle when entropy bucket is empty. |
 
 ### 4. Horizontal Scaling: Redis (Optional)
 
@@ -81,7 +82,7 @@ Once deployed, Railway assigns you a public URL (e.g., `https://mcpvanguard-your
 Verify the service is running:
 ```bash
 curl https://your-project.up.railway.app/health
-# Expected: {"status": "ok", "version": "1.2.0"}
+# Expected: {"status": "ok", "version": "1.5.0"}
 ```
 
 ---
@@ -135,7 +136,7 @@ The template is pre-configured with a `/health` endpoint:
 
 ```bash
 GET /health
-→ {"status": "ok", "version": "1.2.0"}
+→ {"status": "ok", "version": "1.5.0"}
 ```
 
 Railway uses this for readiness checks before routing traffic to new deployments.

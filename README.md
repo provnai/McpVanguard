@@ -131,7 +131,7 @@ vanguard sse --server "..." --behavioral
 | **Phase 4** | Distribution (stable PyPI release) | ✅ Done |
 | **Phase 5** | Production Hardening (v1.1.3 stability) | ✅ Done |
 | **Phase 6** | Security Audit Remediation (v1.1.4 hardening) | ✅ Done |
-| **Phase 7** | Titan-Grade L1 Perimeter (v1.2.0 OS Isolation) | ✅ Done |
+| **Phase 7** | Titan-Grade L1 Perimeter (v1.5.0 Forensic Hardening) | ✅ Done |
 | **Phase 8** | Agent Identity & VEX v0.2 Spec | 🔄 In Progress |
 
 ---
