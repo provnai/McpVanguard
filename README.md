@@ -31,7 +31,7 @@ export VANGUARD_API_KEY="your-secret-key"
 vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
-[Deploy on Railway](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 > 📖 [Full Railway Deployment Guide](docs/railway-deployment-guide.md)
 

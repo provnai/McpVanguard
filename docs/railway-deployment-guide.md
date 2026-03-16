@@ -6,7 +6,7 @@ McpVanguard is a real-time AI security proxy for the Model Context Protocol (MCP
 
 Deploy the full McpVanguard stack in one click:
 
-[Deploy on Railway](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ## Prerequisites
 

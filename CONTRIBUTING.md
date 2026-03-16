@@ -4,7 +4,7 @@ First off — thanks for taking the time to contribute! McpVanguard is a communi
 
 ## Ways to Contribute
 
-### 🛡️ Write New Rules
+### Write New Rules
 While core filesystem isolation is handled deterministically via `safe_zones.yaml` and OS kernel features (`openat2`), we rely on the community to build Layer 1 regex signatures to catch malicious payloads and command injections.
 
 1. Open the relevant `rules/*.yaml` file (or create a new one)
@@ -24,17 +24,17 @@ While core filesystem isolation is handled deterministically via `safe_zones.yam
 4. Run `pytest tests/test_rules.py -v` — all tests must pass
 5. Open a PR with the new rule + test
 
-### 🐛 Report Bugs
+### Report Bugs (Issue Tracker)
 Open a GitHub issue with:
 - What you expected vs what happened
 - Minimal reproduction steps
 - Python version and OS
 
-### 🔒 Report Security Vulnerabilities
+### Report Security Vulnerabilities
 **Do NOT open a public issue.** Email **contact@provnai.com** instead.
 See [SECURITY.md](SECURITY.md) for the full disclosure policy.
 
-### 📚 Improve Documentation
+### Documentation Standards
 - Fix typos, improve clarity, add examples
 - Docs live in `docs/` and `README.md`
 
