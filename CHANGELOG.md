@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Forensic Gate Sensors** (`core/models.py`): The `SecureToolManifest` now includes `gate_sensors` for OS-level path resolution and forensic audit finality.
 
 ### Changed
+- **Modular Semantic Scorer**: Refactored Layer 2 to support multiple cloud providers (OpenAI, MiniMax) via a unified OpenAI-compatible handler.
+- **JSON Extraction Robustness**: Implemented a resilient extraction engine to handle non-standard LLM conversational output.
+- **Backend Priority**: Standardized L2 provider selection order (OpenAI > MiniMax > Ollama).
 - **CLI & Log Formatting**: Updated terminal output and audit log signatures for improved industry alignment and enterprise ingest compatibility.
 - **Project Identity**: Unified authorship and project metadata under the **Provnai Development Team**.
 - **Documentation Standards**: Refined README and deployment guides for technical precision and authoritative tone.

@@ -31,6 +31,9 @@ OLLAMA_URL = os.getenv("VANGUARD_OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("VANGUARD_OLLAMA_MODEL", "phi4-mini")
 OPENAI_API_KEY = os.getenv("VANGUARD_OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("VANGUARD_OPENAI_MODEL", "gpt-4o-mini")
+MINIMAX_API_KEY = os.getenv("VANGUARD_MINIMAX_API_KEY")
+MINIMAX_MODEL = os.getenv("VANGUARD_MINIMAX_MODEL", "MiniMax-M2.5")
+MINIMAX_BASE_URL = os.getenv("VANGUARD_MINIMAX_BASE_URL", "https://api.minimax.io/v1")
 THRESHOLD_BLOCK = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_BLOCK", "0.80"))
 THRESHOLD_WARN = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_WARN", "0.50"))
 ENABLED = os.getenv("VANGUARD_SEMANTIC_ENABLED", "false").lower() == "true"
@@ -61,14 +64,46 @@ Rules:
 
 # ─── Core scoring function (runs in thread) ───────────────────────────────────
 
+def _extract_json(content: str) -> dict:
+    """Robustly extract JSON from model output, handling markdown fences and filler."""
+    content = content.strip()
+    
+    # 1. Handle common markdown fences
+    if "```" in content:
+        try:
+            # Extract content between the first set of fences
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:].strip()
+            elif content.startswith("\n"):
+                content = content.strip()
+        except IndexError:
+            pass
+
+    # 2. Find the first '{' and last '}' to prune conversational filler
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        content = content[start:end+1]
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse LLM JSON. Content: %r", content)
+        raise ValueError(f"Invalid JSON response from LLM: {exc}")
+
+
 def _score_sync(tool_call_json: str) -> tuple[float, str]:
-    """Blocking call to Ollama or OpenAI — run in executor."""
+    """Blocking call to available providers — run in executor."""
     prompt = f"Rate this MCP tool call:\n{tool_call_json}"
 
     try:
         with httpx.Client(timeout=TIMEOUT) as client:
+            content = ""
+            
+            # Determine provider (Priority: OpenAI > MiniMax > Ollama)
             if OPENAI_API_KEY:
-                # Use OpenAI if an API key is provided
+                # OpenAI standard
                 resp = client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
@@ -86,7 +121,29 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
                     },
                 )
                 resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"].strip()
+                content = resp.json()["choices"][0]["message"]["content"]
+            
+            elif MINIMAX_API_KEY:
+                # MiniMax (OpenAI-compatible)
+                base_url = MINIMAX_BASE_URL.rstrip("/")
+                resp = client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {MINIMAX_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": MINIMAX_MODEL,
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.1,
+                    },
+                )
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"]
+            
             else:
                 # Fallback to local Ollama
                 resp = client.post(
@@ -102,15 +159,10 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
                     },
                 )
                 resp.raise_for_status()
-                content = resp.json()["message"]["content"].strip()
+                content = resp.json()["message"]["content"]
 
-            # Strip markdown fences if model disobeys
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-
-            parsed = json.loads(content)
+            # Robust extraction of score and reason
+            parsed = _extract_json(content)
             score = float(parsed.get("score", 0.0))
             reason = str(parsed.get("reason", "semantic scorer"))
             return max(0.0, min(1.0, score)), reason
@@ -206,7 +258,10 @@ async def check_ollama_health() -> bool:
     """Returns True if the backend is running and the configured model is available."""
     if OPENAI_API_KEY:
         return True  # Avoid healthchecking OpenAI directly for now
-        
+
+    if MINIMAX_API_KEY:
+        return True  # Cloud API — skip local health check
+
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags")

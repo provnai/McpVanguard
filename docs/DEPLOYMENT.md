@@ -38,21 +38,28 @@ To expose Vanguard as an internet-reachable security gateway (e.g., on Railway),
 vanguard sse --server "npx -y @modelcontextprotocol/server-filesystem /var/data" --port 8080
 ```
 
-## 2. L2 Semantic Scalability (OpenAI Integration)
+## 2. L2 Semantic Scalability (Cloud LLM Integration)
 
 Running local LLMs (like Ollama) for Vanguard's L2 Semantic Intelligence is great for absolute privacy, but difficult to scale across thousands of concurrent agent sessions.
 
-Vanguard supports falling back to OpenAI's API for remote, high-throughput semantic scoring.
+Vanguard supports cloud LLM backends for remote, high-throughput semantic scoring. Provider priority: **OpenAI > MiniMax > Ollama** (first available API key wins).
 
-**Configuration:**
+**OpenAI Configuration:**
 ```bash
-# Enable Semantic Layer
 export VANGUARD_SEMANTIC_ENABLED=true
-
-# Provide OpenAI Credentials (Vanguard will automatically use this instead of Ollama)
 export VANGUARD_OPENAI_API_KEY="sk-..."
 export VANGUARD_OPENAI_MODEL="gpt-4o-mini"
 ```
+
+**MiniMax Configuration:**
+```bash
+export VANGUARD_SEMANTIC_ENABLED=true
+export VANGUARD_MINIMAX_API_KEY="your-minimax-key"
+export VANGUARD_MINIMAX_MODEL="MiniMax-M2.5"          # 204K context window
+# export VANGUARD_MINIMAX_BASE_URL="https://api.minimax.io/v1"  # default
+```
+
+> MiniMax provides an OpenAI-compatible API. See [MiniMax API docs](https://platform.minimax.io/docs/api-reference/text-openai-api) for details.
 
 ## 3. L3 Horizontal Scaling (Redis State Management)
 
@@ -99,7 +106,7 @@ export VANGUARD_LOG_FILE="/var/log/vanguard/audit.log"
 
 ## Summary
 
-With these environment variables configured, Vanguard can intercept threats via static rules, semantically score complex payloads via OpenAI, track behavior via Redis, and log all defense actions via VEX.
+With these environment variables configured, Vanguard can intercept threats via static rules, semantically score complex payloads via OpenAI/MiniMax/Ollama, track behavior via Redis, and log all defense actions via VEX.
 
 ---
 
