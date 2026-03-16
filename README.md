@@ -44,7 +44,7 @@ Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVangua
 | Layer | What it checks | Latency |
 |-------|---------------|---------|
 | **L1 — Safe Zones & Rules** | Kernel-level isolation (`openat2` / Windows canonicalization) and 50+ deterministic signatures | ~16ms |
-| **L2 — Semantic** | LLM-based intent scoring for ambiguous requests | Async |
+| **L2 — Semantic** | LLM-based intent scoring via [OpenAI](https://openai.com), [MiniMax](https://www.minimax.io), or [Ollama](https://ollama.com) | Async |
 | **L3 — Behavioral** | Shannon Entropy ($H(X)$) scouter and sliding-window anomaly detection | Stateful |
 
 > **Performance Note**: The 16ms overhead is measured at peak concurrent load. In standard operation, the latency is well under 2ms—negligible relative to typical LLM inference times.
@@ -95,7 +95,7 @@ vanguard sse --server "..." --behavioral
       │               │                   │ pass                         │
       │               │  ┌────────────────▼──────────────────────────┐  │
       │               │  │ L2 — Semantic Scorer (optional)           │  │
-      │               │  │  Ollama / OpenAI intent scoring 0.0→1.0   │  │
+      │               │  │  OpenAI / MiniMax / Ollama scoring 0.0→1.0│  │
       │               │  │  Async — never blocks the proxy loop      │  │
       │               │  └────────────────┬──────────────────────────┘  │
       │               │                   │ pass                         │
@@ -117,6 +117,25 @@ vanguard sse --server "..." --behavioral
       │   (on BLOCK)
       └──────────────▶ VEX API ──▶ CHORA Gate ──▶ Bitcoin Anchor
                        (async, fire-and-forget audit receipt)
+```
+
+---
+
+## L2 Semantic Backend Options
+
+The Layer 2 semantic scorer supports three LLM backends. Set the corresponding API key to activate a backend — the first available key wins (priority: OpenAI > MiniMax > Ollama):
+
+| Backend | Env Vars | Notes |
+|---------|----------|-------|
+| **OpenAI** | `VANGUARD_OPENAI_API_KEY`, `VANGUARD_OPENAI_MODEL` | Default model: `gpt-4o-mini` |
+| **[MiniMax](https://www.minimax.io)** | `VANGUARD_MINIMAX_API_KEY`, `VANGUARD_MINIMAX_MODEL`, `VANGUARD_MINIMAX_BASE_URL` | Default model: `MiniMax-M2.5` (204K context). Also available: `MiniMax-M2.5-highspeed`. [API docs](https://platform.minimax.io/docs/api-reference/text-openai-api) |
+| **Ollama** (local) | `VANGUARD_OLLAMA_URL`, `VANGUARD_OLLAMA_MODEL` | Default model: `phi4-mini`. No API key required |
+
+```bash
+# Example: use MiniMax as semantic backend
+export VANGUARD_SEMANTIC_ENABLED=true
+export VANGUARD_MINIMAX_API_KEY="your-minimax-key"
+vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
 ---

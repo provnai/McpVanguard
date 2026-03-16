@@ -31,6 +31,9 @@ OLLAMA_URL = os.getenv("VANGUARD_OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("VANGUARD_OLLAMA_MODEL", "phi4-mini")
 OPENAI_API_KEY = os.getenv("VANGUARD_OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("VANGUARD_OPENAI_MODEL", "gpt-4o-mini")
+MINIMAX_API_KEY = os.getenv("VANGUARD_MINIMAX_API_KEY")
+MINIMAX_MODEL = os.getenv("VANGUARD_MINIMAX_MODEL", "MiniMax-M2.5")
+MINIMAX_BASE_URL = os.getenv("VANGUARD_MINIMAX_BASE_URL", "https://api.minimax.io/v1")
 THRESHOLD_BLOCK = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_BLOCK", "0.80"))
 THRESHOLD_WARN = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_WARN", "0.50"))
 ENABLED = os.getenv("VANGUARD_SEMANTIC_ENABLED", "false").lower() == "true"
@@ -62,7 +65,7 @@ Rules:
 # ─── Core scoring function (runs in thread) ───────────────────────────────────
 
 def _score_sync(tool_call_json: str) -> tuple[float, str]:
-    """Blocking call to Ollama or OpenAI — run in executor."""
+    """Blocking call to OpenAI, MiniMax, or Ollama — run in executor."""
     prompt = f"Rate this MCP tool call:\n{tool_call_json}"
 
     try:
@@ -83,6 +86,26 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
                         ],
                         "temperature": 0.0,
                         "response_format": {"type": "json_object"},
+                    },
+                )
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"].strip()
+            elif MINIMAX_API_KEY:
+                # Use MiniMax via OpenAI-compatible API
+                base_url = MINIMAX_BASE_URL.rstrip("/")
+                resp = client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {MINIMAX_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": MINIMAX_MODEL,
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.1,
                     },
                 )
                 resp.raise_for_status()
@@ -206,7 +229,10 @@ async def check_ollama_health() -> bool:
     """Returns True if the backend is running and the configured model is available."""
     if OPENAI_API_KEY:
         return True  # Avoid healthchecking OpenAI directly for now
-        
+
+    if MINIMAX_API_KEY:
+        return True  # Cloud API — skip local health check
+
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags")
