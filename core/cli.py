@@ -34,7 +34,10 @@ app = typer.Typer(
     help="McpVanguard — Real-time AI security proxy for MCP agents.",
     add_completion=False,
 )
-console = Console(stderr=True)
+# For UI-only commands (stdout)
+console = Console()
+# For proxy/server commands (stderr) to avoid corrupting MCP stdio
+proxy_console = Console(stderr=True)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +102,16 @@ def start(
     # Load config from options + environment
     config = ProxyConfig()
     config.rules_dir = rules_dir
-    config.log_file = log_file
+    
+    # Only override if the user explicitly provided the option,
+    # otherwise respect what's already in config (which loads from env)
+    # Typer doesn't easily tell us if it's a default, so we check if 
+    # the env var exists, otherwise use the option value.
+    if os.getenv("VANGUARD_LOG_FILE") and log_file == "audit.log":
+        pass # use env var
+    else:
+        config.log_file = log_file
+
     config.semantic_enabled = semantic
     config.behavioral_enabled = behavioral
 
@@ -112,7 +124,7 @@ def start(
     # Check semantic health if enabled
     semantic_ready = False
     if semantic:
-        with console.status("[bold yellow]Checking Ollama health..."):
+        with proxy_console.status("[bold yellow]Checking Ollama health..."):
             import asyncio
             from core import semantic as semantic_mod
             semantic_ready = asyncio.run(semantic_mod.check_ollama_health())
@@ -120,28 +132,28 @@ def start(
     # Load and display rules summary
     engine = RulesEngine(rules_dir=rules_dir)
 
-    console.print(Panel.fit(
+    proxy_console.print(Panel.fit(
         f"[bold green]McpVanguard v{__version__}[/bold green]\n"
         f"[dim]Real-time security layer for MCP agents[/dim]",
         border_style="green",
     ))
-    console.print(f"[bold]Server:[/bold]    {server}")
-    console.print(f"[bold]Rules:[/bold]     {engine.rule_count} loaded from '{rules_dir}/'")
-    console.print(f"[bold]Layer 1:[/bold]    [green]Enabled[/green] (Static rules)")
+    proxy_console.print(f"[bold]Server:[/bold]    {server}")
+    proxy_console.print(f"[bold]Rules:[/bold]     {engine.rule_count} loaded from '{rules_dir}/'")
+    proxy_console.print(f"[bold]Layer 1:[/bold]    [green]Enabled[/green] (Static rules)")
     
     if behavioral:
-        console.print(f"[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
+        proxy_console.print(f"[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
     else:
-        console.print(f"[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
-
+        proxy_console.print(f"[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
+    
     if semantic:
         status = "Ready" if semantic_ready else "Offline (Scoring will be skipped)"
-        console.print(f"[bold]Layer 2:[/bold]    {status} — Ollama ({ollama_model})")
+        proxy_console.print(f"[bold]Layer 2:[/bold]    {status} — Ollama ({ollama_model})")
     else:
-        console.print(f"[bold]Layer 2:[/bold]    [dim]Disabled[/dim] (Semantic scoring)")
-
-    console.print(f"[bold]Audit log:[/bold]  {log_file}\n")
-    console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+        proxy_console.print(f"[bold]Layer 2:[/bold]    [dim]Disabled[/dim] (Semantic scoring)")
+    
+    proxy_console.print(f"[bold]Audit log:[/bold]  {log_file}\n")
+    proxy_console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
     # Parse the server command string into a list
     import shlex
@@ -191,7 +203,12 @@ def sse(
     # Load config
     config = ProxyConfig()
     config.rules_dir = rules_dir
-    config.log_file = log_file
+    
+    if os.getenv("VANGUARD_LOG_FILE") and log_file == "audit.log":
+        pass 
+    else:
+        config.log_file = log_file
+
     config.semantic_enabled = semantic
     config.behavioral_enabled = behavioral
 
@@ -442,8 +459,8 @@ def ui(
     Provides a real-time visual feed of security events.
     """
     from core.dashboard import start_dashboard
-    console.print(f"[bold green]Starting McpVanguard Dashboard on http://{host}:{port}...[/bold green]")
-    console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+    proxy_console.print(f"[bold green]Starting McpVanguard Dashboard on http://{host}:{port}...[/bold green]")
+    proxy_console.print("[dim]Press Ctrl+C to stop[/dim]\n")
     start_dashboard(host=host, port=port)
 
 

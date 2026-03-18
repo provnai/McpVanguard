@@ -235,12 +235,17 @@ class VanguardProxy:
                 )
 
             # Audit logging
+            is_audit = (self.config.mode == "audit")
+            effective_action = result.action
+            if not result.allowed and is_audit:
+                effective_action = "SHADOW-BLOCK"
+
             event = AuditEvent(
-                session_id=self._session.session_id if self._session else "no-session",
+                session_id=self._session.session_id if self._session else "N/A",
                 direction="agent→server",
                 method=method,
                 tool_name=tool_name,
-                action=result.action,
+                action=effective_action,
                 layer_triggered=result.layer_triggered,
                 rule_id=result.rule_matches[0].rule_id if result.rule_matches else None,
                 semantic_score=result.semantic_score,
