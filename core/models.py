@@ -140,7 +140,10 @@ class AuditEvent(BaseModel):
     latency_ms: Optional[float] = None
     blocked_reason: Optional[str] = None
 
-    def to_log_line(self) -> str:
+    def to_log_line(self, format: str = "text") -> str:
+        if format == "json":
+            return self.model_dump_json()
+        
         from datetime import datetime
         ts = datetime.fromtimestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         tag = f"[{self.action}]"

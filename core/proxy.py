@@ -59,12 +59,16 @@ class ProxyConfig:
         self.behavioral_enabled: bool = os.getenv("VANGUARD_BEHAVIORAL_ENABLED", "true").lower() == "true"
         self.block_threshold: float = float(os.getenv("VANGUARD_BLOCK_THRESHOLD", "0.8"))
         self.warn_threshold: float = float(os.getenv("VANGUARD_WARN_THRESHOLD", "0.5"))
+        # Mode: "enforce" (default) or "audit" (log but don't block)
+        self.mode: str = os.getenv("VANGUARD_MODE", "enforce").lower()
         # SSE auth key — also read by sse_server.py directly for early validation
         self.api_key: str = os.getenv("VANGUARD_API_KEY", "")
         # Off by default in production to avoid leaking rule internals.
         self.expose_block_reason: bool = os.getenv("VANGUARD_EXPOSE_BLOCK_REASON", "false").lower() == "true"
         # Maximum string length allowed in incoming tool calls (prevents memory exhaustion)
         self.max_string_len: int = int(os.getenv("VANGUARD_MAX_STRING_LEN", "65536")) # 64KB default
+        # Audit format: "text" (human-readable) or "json" (SIEM ingest)
+        self.audit_format: str = os.getenv("VANGUARD_AUDIT_FORMAT", "text").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -243,9 +247,15 @@ class VanguardProxy:
                 latency_ms=round(latency_ms, 2),
                 blocked_reason=result.block_reason,
             )
-            self.audit.info(event.to_log_line())
+            self.audit.info(event.to_log_line(format=self.config.audit_format))
 
-            if result.allowed:
+            is_audit = (self.config.mode == "audit")
+
+            if result.allowed or is_audit:
+                if not result.allowed:
+                    logger.info(f"[Vanguard] [SHADOW-BLOCK] Audit mode allowing violation: {tool_name or method}")
+                    self._stats["shadow_blocked"] = self._stats.get("shadow_blocked", 0) + 1
+
                 self._stats["allowed"] += 1
                 telemetry.metrics.record_status("allowed")
                 if result.action == "WARN":
@@ -302,12 +312,18 @@ class VanguardProxy:
                     # Requirement 3.1: Apply 1 byte/sec throttle if governor is empty
                     state = behavioral.get_state(self._session.session_id)
                     if state.is_throttled:
-                        # Sleep 1 second per byte (simulated via 1 second per message for now, 
-                        # or 1 second per byte loop if we wanted to be literal)
-                        # We'll do 1 second per chunk to start as a 'soft' but effective throttle
-                        await asyncio.sleep(len(line)) 
-                except Exception:
-                    pass
+                        # Improved Throttling: Partition line into 1KB chunks with 1s delay
+                        # This prevents hanging the main thread indefinitely on large messages.
+                        chunk_size = 1024
+                        total_len = len(line)
+                        for i in range(0, total_len, chunk_size):
+                            chunk = line[i : i + chunk_size]
+                            await self._write_to_agent(chunk)
+                            if i + chunk_size < total_len:
+                                await asyncio.sleep(1.0) # 1KB/sec effective throughput
+                        continue # Already wrote the line in chunks
+                except Exception as e:
+                    logger.error(f"[Vanguard] Error in behavioral response inspection: {e}")
 
             await self._write_to_agent(line)
 

@@ -1,0 +1,4 @@
+# McpVanguard: Safe Zones
+# Define absolute paths that the agent is allowed to access.
+allowed_prefixes:
+  - C:\Users\  # Adjust as needed for your system

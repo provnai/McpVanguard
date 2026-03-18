@@ -317,6 +317,137 @@ def update(
 
 
 # ---------------------------------------------------------------------------
+# vanguard init
+# ---------------------------------------------------------------------------
+
+@app.command()
+def init():
+    """
+    Initialize a new McpVanguard workspace.
+    Creates a .env template and default security rules.
+    """
+    console.print(Panel.fit(
+        "[bold green]Initializing McpVanguard Workspace[/bold green]",
+        border_style="green"
+    ))
+
+    # 1. Create .env if missing
+    env_path = ".env"
+    if not os.path.exists(env_path):
+        console.print("[dim]Creating .env from template...[/dim]")
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write("# McpVanguard Configuration\n")
+            f.write("VANGUARD_LOG_LEVEL=INFO\n")
+            f.write("VANGUARD_MODE=audit  # Recommended for new setups\n")
+            f.write("VANGUARD_RULES_DIR=rules\n")
+            f.write("# VANGUARD_OPENAI_API_KEY=\n")
+            f.write("# VANGUARD_REDIS_URL=\n")
+        console.print(f"  [green]SUCCESS:[/green] Created {env_path}")
+    else:
+        console.print(f"  [yellow]SKIP:[/yellow] {env_path} already exists")
+
+    # 2. Ensure rules directory exists
+    rules_path = "rules"
+    if not os.path.exists(rules_path):
+        console.print("[dim]Initializing default rules directory...[/dim]")
+        os.makedirs(rules_path, exist_ok=True)
+        # Create a dummy safe_zones.yaml
+        safe_zones_content = """# McpVanguard: Safe Zones
+# Define absolute paths that the agent is allowed to access.
+allowed_prefixes:
+  - C:\\Users\\  # Adjust as needed for your system
+"""
+        with open(os.path.join(rules_path, "safe_zones.yaml"), "w", encoding="utf-8") as f:
+            f.write(safe_zones_content)
+        console.print(f"  [green]SUCCESS:[/green] Created {rules_path}/safe_zones.yaml")
+    else:
+        console.print(f"  [yellow]SKIP:[/yellow] {rules_path}/ already exists")
+
+    console.print("\n[bold green]Workspace ready![/bold green]")
+    console.print("1. Edit .env to add your API keys.")
+    console.print("2. Run 'vanguard info' to verify rules.")
+    console.print("3. Run 'vanguard start --server <cmd>' to protect your server.")
+
+
+# ---------------------------------------------------------------------------
+# vanguard configure-claude
+# ---------------------------------------------------------------------------
+
+@app.command()
+def configure_claude():
+    """
+    Automatically inject McpVanguard into your Claude Desktop configuration.
+    This wraps all your existing MCP servers with Vanguard security.
+    """
+    import json
+    
+    # Path logic for Windows
+    appdata = os.getenv("APPDATA")
+    if not appdata:
+        console.print("[bold red]Error:[/bold red] Could not find APPDATA environment variable.")
+        return
+        
+    config_path = os.path.join(appdata, "Claude", "claude_desktop_config.json")
+    
+    if not os.path.exists(config_path):
+        console.print(f"[bold red]Error:[/bold red] Claude Desktop config not found at: {config_path}")
+        return
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+            
+        mcp_servers = config.get("mcpServers", {})
+        if not mcp_servers:
+            console.print("[yellow]Warning:[/yellow] No MCP servers found in Claude config.")
+            return
+
+        updated_count = 0
+        for name, server_cfg in mcp_servers.items():
+            command = server_cfg.get("command")
+            args = server_cfg.get("args", [])
+            
+            # Skip if already wrapped
+            if command == "vanguard" or (command == "npx" and "mcp-vanguard" in args):
+                continue
+                
+            # Wrap it
+            full_cmd = f"{command} {' '.join(args)}"
+            server_cfg["command"] = "vanguard"
+            server_cfg["args"] = ["start", "--server", full_cmd]
+            updated_count += 1
+            
+        if updated_count > 0:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+            console.print(f"[bold green]SUCCESS:[/bold green] Wrapped {updated_count} servers with Vanguard security.")
+        else:
+            console.print("[green]All servers are already protected by Vanguard.[/green]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] Failed to update Claude config: {e}")
+
+
+# ---------------------------------------------------------------------------
+# vanguard ui
+# ---------------------------------------------------------------------------
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Binding host for the dashboard."),
+    port: int = typer.Option(4040, "--port", help="Port to listen on."),
+):
+    """
+    Open the McpVanguard Audit Dashboard in your browser.
+    Provides a real-time visual feed of security events.
+    """
+    from core.dashboard import start_dashboard
+    console.print(f"[bold green]Starting McpVanguard Dashboard on http://{host}:{port}...[/bold green]")
+    console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+    start_dashboard(host=host, port=port)
+
+
+# ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
 

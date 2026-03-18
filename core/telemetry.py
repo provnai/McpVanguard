@@ -43,6 +43,10 @@ class Telemetry:
             "error_fail_closed": 0,
         }
 
+    def reset(self):
+        """Reset all metrics for testing/isolation."""
+        self._init_metrics()
+
     def record_latency(self, layer: str, duration_ms: float):
         if layer in self.layers:
             self.layers[layer].latencies.append(duration_ms)

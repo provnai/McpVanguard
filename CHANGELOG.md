@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-03-17 (Production Hardening Release)
+
+### Added
+- **Interactive Initializer**: New `vanguard init` command for rapid developer onboarding and `.env` generation.
+- **Claude Desktop Integration**: New `vanguard configure-claude` command to automatically protect your local agents.
+- **Security Dashboard**: Real-time, HTMX-powered visual monitor via `vanguard ui`.
+
+### Security
+- **Shadow Mode (Audit Only)**: Non-blocking policy assessment via `VANGUARD_MODE=audit`. Log security violations without disrupting workflows.
+- **Universal Cloud Provider Support**: Native integration for DeepSeek, Groq, Mistral, and vLLM via `VANGUARD_SEMANTIC_CUSTOM_URL`.
+- **Deep Health Probes**: `/health` now performs live connectivity checks against Redis and Semantic LLMs for cloud-native reliability.
+- **SIEM-Ready JSON Logging**: Optional structured output via `VANGUARD_AUDIT_FORMAT=json` for enterprise SOC ingestion.
+
+### Fixed
+- **Partitioned Throttling**: Fixed proxy hangs on high-entropy data by implementing chunked streaming in `core/proxy.py`.
+
 ## [1.5.0] - 2026-03-15 (Forensic Hardening Update)
 
 ### Security (Spec Alignment)

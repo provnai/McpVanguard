@@ -232,6 +232,20 @@ def clear_state(session_id: str) -> None:
     _states.pop(session_id, None)
 
 
+def clear_all_states() -> None:
+    """Clear all session states for testing/isolation."""
+    _states.clear()
+    if _redis_client:
+        try:
+            # Dangerous in production, but we don't use it there for 'clear'
+            # In tests, we use a dedicated Redis DB if possible
+            keys = _redis_client.keys("vguard:beh:*")
+            if keys:
+                _redis_client.delete(*keys)
+        except Exception:
+            pass
+
+
 # ─── Write detection helpers ──────────────────────────────────────────────────
 
 _WRITE_TOOLS = frozenset({"write_file", "create_file", "append_file", "edit_file",
@@ -467,3 +481,15 @@ def _inspect_response_sync(
         )
 
     return None
+
+async def check_redis_health() -> bool:
+    """Returns True if Redis is reachable (or not configured)."""
+    if not REDIS_URL or not _redis_client:
+        return True
+    
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _redis_client.ping)
+        return True
+    except Exception:
+        return False

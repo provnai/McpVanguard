@@ -128,3 +128,32 @@ def test_semantic_ollama_offline(mock_ollama_client):
     assert res is not None
     assert res.action == "BLOCK"
     assert "api unreachable" in res.block_reason.lower()
+def test_semantic_custom_provider(mock_ollama_client):
+    """Generic custom provider should be used when CUSTOM_API_KEY is set."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": json.dumps({"score": 0.88, "reason": "Custom backend match"})}}]
+    }
+    mock_ollama_client.post.return_value = mock_resp
+
+    import asyncio
+    msg = {
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "/etc/shadow"}}
+    }
+
+    with patch("core.semantic.OPENAI_API_KEY", None), \
+         patch("core.semantic.MINIMAX_API_KEY", None), \
+         patch("core.semantic.CUSTOM_API_KEY", "custom-key"), \
+         patch("core.semantic.CUSTOM_MODEL", "custom-model"), \
+         patch("core.semantic.CUSTOM_BASE_URL", "https://api.groq.com/openai/v1"):
+        res = asyncio.run(semantic.score_intent(msg))
+
+    assert res is not None
+    assert res.action == "BLOCK"
+    assert res.semantic_score == 0.88
+    
+    # Verify custom endpoint was called correctly
+    args, kwargs = mock_ollama_client.post.call_args
+    assert args[0] == "https://api.groq.com/openai/v1/chat/completions"
+    assert kwargs["json"]["model"] == "custom-model"

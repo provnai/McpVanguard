@@ -26,15 +26,21 @@ You **must** set the following variables for McpVanguard to start successfully:
 |----------|-------------|
 | `MCP_SERVER_COMMAND` | The MCP server command Vanguard will wrap and protect. e.g. `npx @modelcontextprotocol/server-filesystem /app/data` |
 | `VANGUARD_API_KEY` | A secret key to protect your SSE endpoint. Clients must send this in the `X-Api-Key` header. Generate a strong random string. |
+| `VANGUARD_MODE` | `enforce` | Set to `audit` for **Shadow Mode**. This logs violations without blocking them, perfect for initial testing. |
 
-### 2. Security & Proxy Settings (Optional)
+### 2. Security & AI Intelligence (Optional)
 
-Fine-tune the behavior of the security engine:
+Fine-tune the behavior of the security engine and connect your AI brain:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VANGUARD_LOG_LEVEL` | `INFO` | Logging verbosity. Set to `DEBUG` for full request traces. |
-| `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. Leave `false` in production to avoid leaking rule internals. |
+| `VANGUARD_AUDIT_FORMAT` | `text` | Choose `json` for direct ingestion into SIEM tools like ELK or Splunk. |
+| `VANGUARD_SEMANTIC_ENABLED` | `true` | Enable Layer 2 semantic intent scoring. |
+| `VANGUARD_SEMANTIC_CUSTOM_URL`| - | Use any OpenAI-compatible backend (DeepSeek, Groq, Mistral, vLLM). |
+| `VANGUARD_SEMANTIC_CUSTOM_KEY`| - | Your API key for the custom provider. |
+| `VANGUARD_SEMANTIC_CUSTOM_MODEL`| - | e.g., `deepseek-chat` or `llama3-70b-8192`. |
+| `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. |
 | `VANGUARD_BLOCK_THRESHOLD` | `0.8` | Semantic scoring threshold above which a request is blocked (Layer 2, requires Ollama). |
 | `VANGUARD_WARN_THRESHOLD` | `0.5` | Semantic scoring threshold above which a request is flagged as a warning. |
 | `VANGUARD_MAX_STRING_LEN` | `65536` | Protection against ReDoS/Memory exhaustion. Strings longer than this are truncated before inspection. |
@@ -82,7 +88,12 @@ Once deployed, Railway assigns you a public URL (e.g., `https://mcpvanguard-your
 Verify the service is running:
 ```bash
 curl https://your-project.up.railway.app/health
-# Expected: {"status": "ok", "version": "1.5.0"}
+# Expected: {
+#   "status": "ok",
+#   "version": "1.6.0",
+#   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
+#   "timestamp": 1710662400.0
+# }
 ```
 
 ---
@@ -136,7 +147,12 @@ The instance is pre-configured with a `/health` endpoint:
 
 ```bash
 GET /health
-→ {"status": "ok", "version": "1.5.0"}
+→ {
+  "status": "ok",
+  "version": "1.6.0",
+  "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
+  "timestamp": 1710662400.0
+}
 ```
 
 Railway uses this for readiness checks during deployment orchestration.

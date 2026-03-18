@@ -9,6 +9,15 @@ from core.session import SessionManager, SessionState
 from core.models import InspectionResult
 
 
+@pytest.fixture(autouse=True)
+def reset_global_state():
+    """Reset all singletons and global registries between tests."""
+    from core import telemetry, behavioral
+    telemetry.metrics.reset()
+    behavioral.clear_all_states()
+    yield
+
+
 @pytest.fixture
 def rules_engine():
     """Load the real rules engine with the real rules/ directory."""

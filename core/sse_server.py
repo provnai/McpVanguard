@@ -225,10 +225,34 @@ async def run_sse_server(
         await sse_transport.handle_post_message(scope, receive, send)
 
     async def health_check_handler(scope, receive, send):
-        """Standard health check for Railway/Cloud readiness. No auth required."""
+        """Deep health check for Railway/Cloud readiness."""
         assert scope["type"] == "http"
-        # Security: Remove version leak
-        response = Response(json.dumps({"status": "ok"}), media_type="application/json")
+        
+        from core.behavioral import check_redis_health
+        from core.semantic import check_semantic_health
+        from core import __version__
+        
+        redis_ok = await check_redis_health()
+        semantic_ok = await check_semantic_health()
+        
+        status = "ok" if redis_ok and semantic_ok else "degraded"
+        
+        health_data = {
+            "status": status,
+            "version": __version__,
+            "layers": {
+                "l1_rules": "ok", 
+                "l2_semantic": "ok" if semantic_ok else "unreachable",
+                "l3_behavioral": "ok" if redis_ok else "redis_disconnected"
+            },
+            "timestamp": time.time()
+        }
+        
+        response = Response(
+            json.dumps(health_data), 
+            status_code=200 if status == "ok" else 503,
+            media_type="application/json"
+        )
         await response(scope, receive, send)
 
     class AsgiAppWrapper:

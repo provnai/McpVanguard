@@ -29,11 +29,21 @@ logger = logging.getLogger("vanguard.semantic")
 
 OLLAMA_URL = os.getenv("VANGUARD_OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("VANGUARD_OLLAMA_MODEL", "phi4-mini")
+# OpenAI / Cloud Config
 OPENAI_API_KEY = os.getenv("VANGUARD_OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("VANGUARD_OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_BASE_URL = os.getenv("VANGUARD_OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+# MiniMax Config
 MINIMAX_API_KEY = os.getenv("VANGUARD_MINIMAX_API_KEY")
 MINIMAX_MODEL = os.getenv("VANGUARD_MINIMAX_MODEL", "MiniMax-M2.5")
 MINIMAX_BASE_URL = os.getenv("VANGUARD_MINIMAX_BASE_URL", "https://api.minimax.io/v1")
+
+# Generic / Custom Provider (Mistral, DeepSeek, Groq, local vLLM, etc.)
+CUSTOM_API_KEY = os.getenv("VANGUARD_SEMANTIC_CUSTOM_KEY")
+CUSTOM_MODEL = os.getenv("VANGUARD_SEMANTIC_CUSTOM_MODEL")
+CUSTOM_BASE_URL = os.getenv("VANGUARD_SEMANTIC_CUSTOM_URL")
+
 THRESHOLD_BLOCK = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_BLOCK", "0.80"))
 THRESHOLD_WARN = float(os.getenv("VANGUARD_SEMANTIC_THRESHOLD_WARN", "0.50"))
 ENABLED = os.getenv("VANGUARD_SEMANTIC_ENABLED", "false").lower() == "true"
@@ -93,6 +103,39 @@ def _extract_json(content: str) -> dict:
         raise ValueError(f"Invalid JSON response from LLM: {exc}")
 
 
+def _call_cloud_provider(client: httpx.Client, base_url: str, api_key: str, model: str, prompt: str) -> str:
+    """Helper to call any OpenAI-compatible cloud provider."""
+    # Ensure base_url doesn't end in /chat/completions
+    url = base_url.rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url = f"{url}/chat/completions"
+    
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+    }
+    
+    # OpenAI supports response_format: json_object, others might not
+    if "openai.com" in url:
+        payload["response_format"] = {"type": "json_object"}
+        payload["temperature"] = 0.0
+
+    resp = client.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
 def _score_sync(tool_call_json: str) -> tuple[float, str]:
     """Blocking call to available providers — run in executor."""
     prompt = f"Rate this MCP tool call:\n{tool_call_json}"
@@ -101,51 +144,22 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
         with httpx.Client(timeout=TIMEOUT) as client:
             content = ""
             
-            # Determine provider (Priority: OpenAI > MiniMax > Ollama)
-            if OPENAI_API_KEY:
-                # OpenAI standard
-                resp = client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENAI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": _SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.0,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
+            # Provider Selection Priority
+            if CUSTOM_API_KEY and CUSTOM_BASE_URL and CUSTOM_MODEL:
+                logger.debug("Using Custom Provider: %s", CUSTOM_BASE_URL)
+                content = _call_cloud_provider(client, CUSTOM_BASE_URL, CUSTOM_API_KEY, CUSTOM_MODEL, prompt)
+            
+            elif OPENAI_API_KEY:
+                logger.debug("Using OpenAI Provider")
+                content = _call_cloud_provider(client, OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, prompt)
             
             elif MINIMAX_API_KEY:
-                # MiniMax (OpenAI-compatible)
-                base_url = MINIMAX_BASE_URL.rstrip("/")
-                resp = client.post(
-                    f"{base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {MINIMAX_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": MINIMAX_MODEL,
-                        "messages": [
-                            {"role": "system", "content": _SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.1,
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
+                logger.debug("Using MiniMax Provider")
+                content = _call_cloud_provider(client, MINIMAX_BASE_URL, MINIMAX_API_KEY, MINIMAX_MODEL, prompt)
             
             else:
                 # Fallback to local Ollama
+                logger.debug("Using Ollama Fallback")
                 resp = client.post(
                     f"{OLLAMA_URL}/api/chat",
                     json={
@@ -254,19 +268,16 @@ async def score_intent(message: dict) -> Optional[InspectionResult]:
     return None  # Below thresholds — pass-through
 
 
-async def check_ollama_health() -> bool:
-    """Returns True if the backend is running and the configured model is available."""
-    if OPENAI_API_KEY:
-        return True  # Avoid healthchecking OpenAI directly for now
+async def check_semantic_health() -> bool:
+    """Returns True if the configured backend is responsive."""
+    # Cloud providers: assume healthy if keys are set (minimal check)
+    if CUSTOM_API_KEY or OPENAI_API_KEY or MINIMAX_API_KEY:
+        return True
 
-    if MINIMAX_API_KEY:
-        return True  # Cloud API — skip local health check
-
+    # Local Ollama: verify connectivity
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags")
-            data = resp.json()
-            models = [m["name"] for m in data.get("models", [])]
-            return any(OLLAMA_MODEL in m for m in models)
+            return resp.status_code == 200
     except Exception:
         return False

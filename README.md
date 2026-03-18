@@ -37,6 +37,23 @@ vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 
 ---
 
+## 🛡️ Getting Started (New Users)
+
+Bootstrap your security workspace with a single command:
+
+```bash
+# 1. Initialize safe zones and .env template
+vanguard init
+
+# 2. (Optional) Protect your Claude Desktop servers
+vanguard configure-claude
+
+# 3. Launch the visual security dashboard
+vanguard ui --port 4040
+```
+
+---
+
 ## 🧠 How it works
 
 Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVanguard inspects the request across three layers before it reaches the underlying server:
@@ -44,12 +61,14 @@ Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVangua
 | Layer | What it checks | Latency |
 |-------|---------------|---------|
 | **L1 — Safe Zones & Rules** | Kernel-level isolation (`openat2` / Windows canonicalization) and 50+ deterministic signatures | ~16ms |
-| **L2 — Semantic** | LLM-based intent scoring via [OpenAI](https://openai.com), [MiniMax](https://www.minimax.io), or [Ollama](https://ollama.com) | Async |
+| **L2 — Semantic** | LLM-based intent scoring via [OpenAI](https://openai.com), [DeepSeek](https://deepseek.com), [Groq](https://groq.com) or [Ollama](https://ollama.com) | Async |
 | **L3 — Behavioral** | Shannon Entropy ($H(X)$) scouter and sliding-window anomaly detection | Stateful |
 
 > **Performance Note**: The 16ms overhead is measured at peak concurrent load. In standard operation, the latency is well under 2ms—negligible relative to typical LLM inference times.
 
 If a request is blocked, the agent receives a standard JSON-RPC error response. The underlying server never sees it.
+
+> **Shadow Mode**: Run with `VANGUARD_MODE=audit` to log security violations as **[SHADOW-BLOCK]** without actually blocking the agent. Perfect for assessing risk in existing production workflows.
 
 ---
 
@@ -59,9 +78,24 @@ If a request is blocked, the agent receives a standard JSON-RPC error response. 
 - **Data Exfiltration**: High-entropy payloads (H > 7.5 cryptographic keys) and velocity-based secret scraping
 - **Filesystem attacks**: Path traversal (`../../etc/passwd`), null bytes, restricted paths (`~/.ssh`), Unicode homograph evasion
 - **Command injection**: Pipe-to-shell, reverse shells, command chaining via `;` `&&` `\n`, expansion bypasses
-- **Network abuse**: SSRF, cloud metadata endpoints (AWS/GCP/Azure), hex/octal encoded IPs
-- **Prompt injection**: Jailbreak patterns, instruction-ignore sequences, hidden unicode characters
-- **Privilege escalation**: SUID binary creation, `LD_PRELOAD` injection, crontab manipulation
+- **SSRF & Metadata Protection**: Blocks access to cloud metadata endpoints (AWS/GCP/Azure) and hex/octal encoded IPs.
+- **Jailbreak Detection**: Actively identifies prompt injection patterns and instruction-ignore sequences.
+- **Continuous Monitoring**: Visualize all of the above in real-time with the built-in **Security Dashboard**.
+
+---
+
+## 📊 Security Dashboard
+
+Launch the visual monitor to see your agent's activity and security status in real-time.
+
+```bash
+vanguard ui --port 4040
+```
+
+The dashboard provides a low-latency, HTMX-powered feed of:
+- **Real-time Blocks**: Instantly see which rule or layer triggered a rejection.
+- **Entropy Scores**: Pulse-check the $H(X)$ levels of your agent's data streams.
+- **Audit History**: Contextual log fragments for rapid incident response.
 
 ---
 
@@ -76,6 +110,7 @@ This means an auditor can independently verify *exactly what was blocked, the en
 ```bash
 export VANGUARD_VEX_URL="https://api.vexprotocol.com"
 export VANGUARD_VEX_KEY="your-agent-jwt"
+export VANGUARD_AUDIT_FORMAT="json" # Optional: Route JSON logs directly into SIEM (ELK, Splunk)
 vanguard sse --server "..." --behavioral
 ```
 
@@ -123,18 +158,21 @@ vanguard sse --server "..." --behavioral
 
 ## L2 Semantic Backend Options
 
-The Layer 2 semantic scorer supports three LLM backends. Set the corresponding API key to activate a backend — the first available key wins (priority: OpenAI > MiniMax > Ollama):
+The Layer 2 semantic scorer supports a Universal Provider Architecture. Set the corresponding API keys to activate a backend — the first available key wins (priority: Custom > OpenAI > MiniMax > Ollama):
 
 | Backend | Env Vars | Notes |
 |---------|----------|-------|
+| **Universal Custom** (DeepSeek, Groq, Mistral, vLLM) | `VANGUARD_SEMANTIC_CUSTOM_KEY`, `VANGUARD_SEMANTIC_CUSTOM_MODEL`, `VANGUARD_SEMANTIC_CUSTOM_URL` | Fast, cheap inference. Examples: <br> Groq: `https://api.groq.com/openai/v1` <br> DeepSeek: `https://api.deepseek.com/v1` |
 | **OpenAI** | `VANGUARD_OPENAI_API_KEY`, `VANGUARD_OPENAI_MODEL` | Default model: `gpt-4o-mini` |
-| **[MiniMax](https://www.minimax.io)** | `VANGUARD_MINIMAX_API_KEY`, `VANGUARD_MINIMAX_MODEL`, `VANGUARD_MINIMAX_BASE_URL` | Default model: `MiniMax-M2.5` (204K context). Also available: `MiniMax-M2.5-highspeed`. [API docs](https://platform.minimax.io/docs/api-reference/text-openai-api) |
+| **MiniMax** | `VANGUARD_MINIMAX_API_KEY`, `VANGUARD_MINIMAX_MODEL`, `VANGUARD_MINIMAX_BASE_URL` | Default model: `MiniMax-M2.5` |
 | **Ollama** (local) | `VANGUARD_OLLAMA_URL`, `VANGUARD_OLLAMA_MODEL` | Default model: `phi4-mini`. No API key required |
 
 ```bash
-# Example: use MiniMax as semantic backend
+# Example: Use Groq for ultra-fast L2 scoring
 export VANGUARD_SEMANTIC_ENABLED=true
-export VANGUARD_MINIMAX_API_KEY="your-minimax-key"
+export VANGUARD_SEMANTIC_CUSTOM_KEY="your-groq-key"
+export VANGUARD_SEMANTIC_CUSTOM_MODEL="llama3-8b-8192"
+export VANGUARD_SEMANTIC_CUSTOM_URL="https://api.groq.com/openai/v1"
 vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
@@ -151,7 +189,8 @@ vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 | **Phase 5** | Production Hardening (v1.1.3 stability) | [DONE] |
 | **Phase 6** | Security Audit Remediation (v1.1.4 hardening) | [DONE] |
 | **Phase 7** | Titan-Grade L1 Perimeter (v1.5.0 Forensic Hardening) | [DONE] |
-| **Phase 8** | Agent Identity & VEX v0.2 Spec | [IN PROGRESS] |
+| **Phase 8** | Production Hardening & Cloud Scaling (v1.6.0 Release) | [DONE] |
+| **Phase 9** | Agent Identity & VEX v0.2 Spec | [IN PROGRESS] |
 
 ---
 

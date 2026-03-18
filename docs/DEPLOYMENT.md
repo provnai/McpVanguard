@@ -1,5 +1,5 @@
 # McpVanguard — Deployment Guide
-**Version**: v1.5.0 (Forensic Hardening Update)
+**Version**: v1.6.0 (Production Hardening)
 
 McpVanguard is a transparent security proxy that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
@@ -42,7 +42,15 @@ vanguard sse --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
 
 Running local LLMs (like Ollama) for Vanguard's L2 Semantic Intelligence is great for absolute privacy, but difficult to scale across thousands of concurrent agent sessions.
 
-Vanguard supports cloud LLM backends for remote, high-throughput semantic scoring. Provider priority: **OpenAI > MiniMax > Ollama** (first available API key wins).
+Vanguard supports cloud LLM backends for remote, high-throughput semantic scoring. Provider priority: **Universal Custom > OpenAI > MiniMax > Ollama** (first available API key wins).
+
+**Universal Custom Provider (e.g. DeepSeek, Groq):**
+```bash
+export VANGUARD_SEMANTIC_ENABLED=true
+export VANGUARD_SEMANTIC_CUSTOM_KEY="your-api-key"
+export VANGUARD_SEMANTIC_CUSTOM_MODEL="deepseek-chat"
+export VANGUARD_SEMANTIC_CUSTOM_URL="https://api.deepseek.com/v1"
+```
 
 **OpenAI Configuration:**
 ```bash
@@ -55,8 +63,7 @@ export VANGUARD_OPENAI_MODEL="gpt-4o-mini"
 ```bash
 export VANGUARD_SEMANTIC_ENABLED=true
 export VANGUARD_MINIMAX_API_KEY="your-minimax-key"
-export VANGUARD_MINIMAX_MODEL="MiniMax-M2.5"          # 204K context window
-# export VANGUARD_MINIMAX_BASE_URL="https://api.minimax.io/v1"  # default
+export VANGUARD_MINIMAX_MODEL="MiniMax-M2.5"
 ```
 
 > MiniMax provides an OpenAI-compatible API. See [MiniMax API docs](https://platform.minimax.io/docs/api-reference/text-openai-api) for details.
@@ -102,6 +109,7 @@ Logs are automatically rotated when they reach 10MB to prevent disk exhaustion (
 **Configuration:**
 ```bash
 export VANGUARD_LOG_FILE="/var/log/vanguard/audit.log"
+export VANGUARD_AUDIT_FORMAT="json" # Set to 'json' for SIEM ingest (Elastic, Splunk)
 ```
 
 ## Summary
@@ -126,6 +134,8 @@ Authorization: Bearer your-long-random-secret
 ```
 
 The `/health` endpoint is exempt and always accessible for Railway/cloud health-checks.
+
+> **Deep Health Probes**: The `/health` endpoint performs live connectivity checks against Redis and the configured Semantic LLM backend, returning a `200 OK` only if all critical layers are accessible. It falls back to `503 Service Unavailable` if dependencies fail, enabling Railway to safely kill unresponsive containers during a rolling deploy.
 
 ---
 
