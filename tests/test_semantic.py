@@ -127,7 +127,7 @@ def test_semantic_ollama_offline(mock_ollama_client):
     
     assert res is not None
     assert res.action == "BLOCK"
-    assert "api unreachable" in res.block_reason.lower()
+    assert "fail-closed" in res.block_reason.lower()
 def test_semantic_custom_provider(mock_ollama_client):
     """Generic custom provider should be used when CUSTOM_API_KEY is set."""
     mock_resp = MagicMock()

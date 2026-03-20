@@ -2,8 +2,9 @@ import pytest
 import json
 import asyncio
 import os
+import time
 from unittest.mock import MagicMock, patch, AsyncMock
-from core.proxy import ProxyConfig, run_proxy
+from core.proxy import ProxyConfig, VanguardProxy
 from core import behavioral, rules_engine, jail, models
 
 # ---------------------------------------------------------------------------
@@ -21,33 +22,44 @@ async def test_v171_bypass_prevention():
     config.mode = "enforce"
     
     # Mock proxy instance
-    from core.proxy import ProxySession
+    # VanguardProxy is the combined class in 1.7.0
     mock_server = MagicMock()
     mock_server.stdin = MagicMock()
     mock_server.stdin.write = MagicMock()
     mock_server.stdin.drain = AsyncMock()
     
-    session = ProxySession(mock_server, config)
+    proxy = VanguardProxy(["dummy"], config)
     
     # Malicious raw message with extra content that would be stripped by _normalize_message
     # but could be executed by a vulnerable server if forwarded raw.
     raw_payload = '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "/tmp/safe"}}} \n MALICIOUS_EXTRA_DATA'
     
     # We need to mock _inspect_message to return ALLOW
-    with patch.object(session, '_inspect_message', new_callable=AsyncMock) as mock_inspect:
+    with patch.object(proxy, '_inspect_message', new_callable=AsyncMock) as mock_inspect:
         mock_inspect.return_value = models.InspectionResult.allow()
         
         # Manually trigger the pump logic (simplified)
-        normalized = session._normalize_message(raw_payload)
+        raw_message = json.loads(raw_payload.split("\n")[0]) # Extract JSON part like the real proxy
+        normalized = proxy._normalize_message(raw_message)
         assert "MALICIOUS_EXTRA_DATA" not in json.dumps(normalized)
         
         # Test the forwarding logic (line 269 fix)
-        import json
         forward_data = json.dumps(normalized)
-        await session._write_to_server(forward_data)
+        # In VanguardProxy, we need to mock the writer
+        proxy.agent_writer = MagicMock() 
+        proxy.agent_writer.write = MagicMock()
+        proxy.agent_writer.drain = AsyncMock()
+        
+        # Actually _write_to_server in VanguardProxy writes to self._server_process.stdin
+        proxy._server_process = MagicMock()
+        proxy._server_process.stdin = MagicMock()
+        proxy._server_process.stdin.write = MagicMock()
+        proxy._server_process.stdin.drain = AsyncMock()
+
+        await proxy._write_to_server(forward_data)
         
         # Verify that ONLY the JSON was written, not the raw 'line'
-        call_args = mock_server.stdin.write.call_args[0][0]
+        call_args = proxy._server_process.stdin.write.call_args[0][0]
         assert b"MALICIOUS_EXTRA_DATA" not in call_args
         assert b"/tmp/safe" in call_args
 
@@ -63,7 +75,7 @@ async def test_v171_sse_rate_limiting():
     from core.sse_server import RateLimiter
     import time
     
-    limiter = RateLimiter(requests_per_sec=1, capacity=2)
+    limiter = RateLimiter(rate=1, capacity=2)
     
     # First two should pass (burst)
     assert await limiter.consume() is True

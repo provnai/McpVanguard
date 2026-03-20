@@ -156,42 +156,68 @@ def check_path_jail(path: str, allowed_prefixes: List[str], recursive: bool = Tr
             return False  # Always block bypass patterns, no exceptions
 
         # Use GetFinalPathNameByHandleW for true handle-based canonicalization
-        # This defeats 8.3 shortnames, symlinks and junction points
         final_path = _get_final_path_windows(path)
         if final_path is None:
-            # File doesn't exist yet (e.g. write_file to a new path) — fall back
-            final_path = str(Path(path).expanduser().resolve())
+            final_path = os.path.abspath(path)
 
         for prefix in allowed_prefixes:
             final_prefix = _get_final_path_windows(prefix)
             if final_prefix is None:
-                final_prefix = str(Path(prefix).expanduser().resolve())
+                final_prefix = os.path.abspath(prefix)
             
-            logger.debug(f"[Vanguard-Jail] Checking: {repr(final_path.lower())} starts with {repr(final_prefix.lower())}")
-            if final_path.lower().startswith(final_prefix.lower()):
-                # If non-recursive, ensure there are no additional path separators
-                # after the prefix (other than the immediate file/dir name)
+            # Standardize Windows separators and strip extended prefixes for comparison
+            p_final = final_path.replace("/", "\\")
+            pref_final = final_prefix.replace("/", "\\")
+
+            if p_final.startswith("\\\\?\\"):
+                p_final = p_final[4:]
+            if p_final.startswith("UNC\\"): 
+                p_final = "\\\\" + p_final[4:]
+            if pref_final.startswith("\\\\?\\"):
+                pref_final = pref_final[4:]
+            if pref_final.startswith("UNC\\"):
+                pref_final = "\\\\" + pref_final[4:]
+
+            lower_p = p_final.lower()
+            lower_pref = pref_final.lower()
+            if not lower_pref.endswith("\\"):
+                lower_pref += "\\"
+
+            # If path matches prefix (as directory) or is exactly the prefix
+            if lower_p.startswith(lower_pref) or lower_p == lower_pref[:-1]:
                 if not recursive:
-                    rel = os.path.relpath(final_path, final_prefix)
-                    if "\\" in rel or "/" in rel:
-                        continue # Nested, block if non-recursive
+                    # Non-recursive: must be an immediate child or the dir itself
+                    try:
+                        rel = os.path.relpath(p_final, pref_final.rstrip("\\"))
+                        if rel != "." and ("\\" in rel or "/" in rel):
+                            continue # Deeper subpath, block if non-recursive
+                    except (ValueError, RuntimeError):
+                        continue
                 return True
         return False
 
-    # --- Task 1: Linux kernel-level path ---
-    canonical_path = _canonicalize(path)
-    for prefix in allowed_prefixes:
-        can_prefix = _canonicalize(prefix)
-        if str(canonical_path).startswith(str(can_prefix)):
-            # Recursive check for Linux fallback
-            if not recursive:
-                rel = os.path.relpath(str(canonical_path), str(can_prefix))
-                if "/" in rel or "\\" in rel:
-                    continue
+    # --- Task 1: Linux fallback path ---
+    try:
+        canonical_path = _canonicalize(path)
+        for prefix in allowed_prefixes:
+            try:
+                can_prefix = _canonicalize(prefix)
+                # Check if canonical_path is a subpath of can_prefix
+                rel = canonical_path.relative_to(can_prefix)
+                
+                # Recursive check
+                if not recursive:
+                    if len(rel.parts) > 1:
+                        continue # Nested, block if non-recursive
 
-            if _is_openat2_available():
-                return _check_path_jail_linux(path, can_prefix)
-            return True
+                if _is_openat2_available():
+                    return _check_path_jail_linux(path, str(can_prefix))
+                return True
+            except (ValueError, RuntimeError):
+                continue
+    except Exception as e:
+        logger.error(f"[Vanguard-Jail] Critical error in Linux jail logic: {e}")
+        return False
 
     return False
 
