@@ -112,6 +112,8 @@ def _get_final_path_windows(path: str) -> Optional[str]:
             kernel32.GetFinalPathNameByHandleW(handle, buf, buf_size + 1, VOLUME_NAME_DOS)
             # Strip the \\?\ prefix added by GetFinalPathNameByHandleW
             final = buf.value
+            if not final:
+                return None
             if final.startswith("\\\\?\\"):
                 final = final[4:]
             return final
@@ -210,7 +212,7 @@ def check_path_jail(path: str, allowed_prefixes: List[str], recursive: bool = Tr
                     if len(rel.parts) > 1:
                         continue # Nested, block if non-recursive
 
-                if _is_openat2_available():
+                if _is_openat2_available() and os.path.exists(str(can_prefix)):
                     return _check_path_jail_linux(path, str(can_prefix))
                 return True
             except (ValueError, RuntimeError):
