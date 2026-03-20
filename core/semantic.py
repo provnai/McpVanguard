@@ -140,62 +140,69 @@ def _score_sync(tool_call_json: str) -> tuple[float, str]:
     """Blocking call to available providers — run in executor."""
     prompt = f"Rate this MCP tool call:\n{tool_call_json}"
 
-    try:
-        with httpx.Client(timeout=TIMEOUT) as client:
-            content = ""
-            
-            # Provider Selection Priority
-            if CUSTOM_API_KEY and CUSTOM_BASE_URL and CUSTOM_MODEL:
-                logger.debug("Using Custom Provider: %s", CUSTOM_BASE_URL)
-                content = _call_cloud_provider(client, CUSTOM_BASE_URL, CUSTOM_API_KEY, CUSTOM_MODEL, prompt)
-            
-            elif OPENAI_API_KEY:
-                logger.debug("Using OpenAI Provider")
-                content = _call_cloud_provider(client, OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, prompt)
-            
-            elif MINIMAX_API_KEY:
-                logger.debug("Using MiniMax Provider")
-                content = _call_cloud_provider(client, MINIMAX_BASE_URL, MINIMAX_API_KEY, MINIMAX_MODEL, prompt)
-            
-            else:
-                # Fallback to local Ollama
-                logger.debug("Using Ollama Fallback")
-                resp = client.post(
-                    f"{OLLAMA_URL}/api/chat",
-                    json={
-                        "model": OLLAMA_MODEL,
-                        "messages": [
-                            {"role": "system", "content": _SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "stream": False,
-                        "options": {"temperature": 0.0},
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["message"]["content"]
+    retries = 3
+    last_exc = None
+    
+    for attempt in range(retries):
+        try:
+            with httpx.Client(timeout=TIMEOUT) as client:
+                content = ""
+                
+                # Provider Selection Priority
+                if CUSTOM_API_KEY and CUSTOM_BASE_URL and CUSTOM_MODEL:
+                    logger.debug("Using Custom Provider (Attempt %d): %s", attempt + 1, CUSTOM_BASE_URL)
+                    content = _call_cloud_provider(client, CUSTOM_BASE_URL, CUSTOM_API_KEY, CUSTOM_MODEL, prompt)
+                
+                elif OPENAI_API_KEY:
+                    logger.debug("Using OpenAI Provider (Attempt %d)", attempt + 1)
+                    content = _call_cloud_provider(client, OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, prompt)
+                
+                elif MINIMAX_API_KEY:
+                    logger.debug("Using MiniMax Provider (Attempt %d)", attempt + 1)
+                    content = _call_cloud_provider(client, MINIMAX_BASE_URL, MINIMAX_API_KEY, MINIMAX_MODEL, prompt)
+                
+                else:
+                    # Fallback to local Ollama
+                    logger.debug("Using Ollama Fallback (Attempt %d)", attempt + 1)
+                    resp = client.post(
+                        f"{OLLAMA_URL}/api/chat",
+                        json={
+                            "model": OLLAMA_MODEL,
+                            "messages": [
+                                {"role": "system", "content": _SYSTEM_PROMPT},
+                                {"role": "user", "content": prompt},
+                            ],
+                            "stream": False,
+                            "options": {"temperature": 0.0},
+                        },
+                    )
+                    resp.raise_for_status()
+                    content = resp.json()["message"]["content"]
 
-            # Robust extraction of score and reason
-            parsed = _extract_json(content)
-            score = float(parsed.get("score", 0.0))
-            reason = str(parsed.get("reason", "semantic scorer"))
-            return max(0.0, min(1.0, score)), reason
+                # Robust extraction of score and reason
+                parsed = _extract_json(content)
+                score = float(parsed.get("score", 0.0))
+                reason = str(parsed.get("reason", "semantic scorer"))
+                return max(0.0, min(1.0, score)), reason
 
-    except httpx.ConnectError:
-        logger.warning("Remote API not reachable")
-        if ENABLE_FAIL_CLOSED:
-            return 1.0, "semantic api unreachable (fail-closed)"
-        return 0.0, "api unreachable"
-    except httpx.TimeoutException:
-        logger.warning("Remote API timeout after %.1fs", TIMEOUT)
-        if ENABLE_FAIL_CLOSED:
-            return 1.0, "semantic api timeout (fail-closed)"
-        return 0.0, "api timeout"
-    except Exception as exc:
-        logger.warning("Semantic scorer error: %s", exc)
-        if ENABLE_FAIL_CLOSED:
-             return 1.0, f"FAIL-CLOSED: {exc}"
-        return 0.0, f"scorer error: {exc}"
+        except (httpx.ConnectError, httpx.TimeoutException, json.JSONDecodeError, ValueError) as exc:
+            last_exc = exc
+            logger.warning("Semantic scorer attempt %d failed: %s", attempt + 1, exc)
+            if attempt < retries - 1:
+                # Exponential backoff: 0.5s, 1.0s
+                time.sleep(0.5 * (2 ** attempt))
+            continue
+        except Exception as exc:
+            # Critical unrecoverable error
+            logger.error("Critical semantic scorer error: %s", exc)
+            if ENABLE_FAIL_CLOSED:
+                 return 1.0, f"FAIL-CLOSED: {exc}"
+            return 0.0, f"scorer error: {exc}"
+
+    # If all retries fail
+    if ENABLE_FAIL_CLOSED:
+        return 1.0, f"FAIL-CLOSED: All {retries} semantic attempts failed. Final error: {last_exc}"
+    return 0.0, f"scorer error: {last_exc}"
 
 
 # ─── Public async API ─────────────────────────────────────────────────────────

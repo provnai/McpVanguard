@@ -61,13 +61,13 @@ def start(
         "--log-file", "-l",
         help="Path to write the audit log.",
     ),
-    semantic: bool = typer.Option(
-        False,
+    semantic: Optional[bool] = typer.Option(
+        None,
         "--semantic/--no-semantic",
         help="Enable Layer 2 semantic scoring via Ollama (requires Ollama running).",
     ),
-    behavioral: bool = typer.Option(
-        True,
+    behavioral: Optional[bool] = typer.Option(
+        None,
         "--behavioral/--no-behavioral",
         help="Enable Layer 3 behavioral analysis.",
     ),
@@ -112,8 +112,10 @@ def start(
     else:
         config.log_file = log_file
 
-    config.semantic_enabled = semantic
-    config.behavioral_enabled = behavioral
+    if semantic is not None:
+        config.semantic_enabled = semantic
+    if behavioral is not None:
+        config.behavioral_enabled = behavioral
 
     # Phase 5 overrides
     if semantic:
@@ -188,8 +190,8 @@ def sse(
     ),
     rules_dir: str = typer.Option("rules", "--rules-dir", "-r"),
     log_file: str = typer.Option("audit.log", "--log-file", "-l"),
-    semantic: bool = typer.Option(False, "--semantic/--no-semantic"),
-    behavioral: bool = typer.Option(True, "--behavioral/--no-behavioral"),
+    semantic: Optional[bool] = typer.Option(None, "--semantic/--no-semantic"),
+    behavioral: Optional[bool] = typer.Option(None, "--behavioral/--no-behavioral"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
     """
@@ -209,8 +211,10 @@ def sse(
     else:
         config.log_file = log_file
 
-    config.semantic_enabled = semantic
-    config.behavioral_enabled = behavioral
+    if semantic is not None:
+        config.semantic_enabled = semantic
+    if behavioral is not None:
+        config.behavioral_enabled = behavioral
 
     import shlex
     server_cmd = shlex.split(server)
@@ -289,6 +293,7 @@ def update(
         "--repo",
         help="GitHub repository to fetch signatures from.",
     ),
+    rules_dir: str = typer.Option("rules", "--rules-dir", help="Directory for rules."),
 ):
     """
     Fetch the latest security signatures from the official registry.
@@ -338,7 +343,9 @@ def update(
 # ---------------------------------------------------------------------------
 
 @app.command()
-def init():
+def init(
+    rules_dir: str = typer.Option("rules", "--rules-dir", help="Directory for rules."),
+):
     """
     Initialize a new McpVanguard workspace.
     Creates a .env template and default security rules.
@@ -364,15 +371,17 @@ def init():
         console.print(f"  [yellow]SKIP:[/yellow] {env_path} already exists")
 
     # 2. Ensure rules directory exists
-    rules_path = "rules"
+    rules_path = rules_dir
     if not os.path.exists(rules_path):
         console.print("[dim]Initializing default rules directory...[/dim]")
         os.makedirs(rules_path, exist_ok=True)
-        # Create a dummy safe_zones.yaml
+        # Create a dummy safe_zones.yaml (LIST OF OBJECTS FORMAT)
         safe_zones_content = """# McpVanguard: Safe Zones
-# Define absolute paths that the agent is allowed to access.
-allowed_prefixes:
-  - C:\\Users\\  # Adjust as needed for your system
+# Define absolute paths and tool-specific constraints.
+- tool: read_file
+  allowed_prefixes:
+    - C:\\Users\\  # Adjust as needed
+  recursive: true
 """
         with open(os.path.join(rules_path, "safe_zones.yaml"), "w", encoding="utf-8") as f:
             f.write(safe_zones_content)

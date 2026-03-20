@@ -49,8 +49,12 @@ class Rule:
 
     def _safe_search(self, value: str) -> bool:
         """Run pattern.search in a thread with a timeout to guard against ReDoS."""
+        # Mitigation (P2 Audit Finding): Cap input string length to 100KB to prevent 
+        # catastrophic backtracking on huge inputs that could exhaust the match pool.
+        safe_value = value[:100000]
+        
         try:
-            future = Rule._match_pool.submit(self.pattern.search, value)
+            future = Rule._match_pool.submit(self.pattern.search, safe_value)
             result = future.result(timeout=Rule._REGEX_TIMEOUT_SECS)
             return result is not None
         except FuturesTimeoutError:
@@ -207,7 +211,20 @@ class RulesEngine:
                 allowed = False
                 
                 for zone in relevant_zones:
-                    if check_path_jail(requested_path, zone.allowed_prefixes):
+                    if check_path_jail(requested_path, zone.allowed_prefixes, recursive=zone.recursive):
+                        # Task 2: Check entropy if restricted (P2 Audit Finding)
+                        if zone.max_entropy:
+                            content = args.get("content") or args.get("data")
+                            if content:
+                                from core.behavioral import compute_shannon_entropy
+                                h = compute_shannon_entropy(str(content).encode())
+                                if h > zone.max_entropy:
+                                    logger.warning(f"ENTROPY BREACH: {tool_name} content entropy {h} > limit {zone.max_entropy}")
+                                    return InspectionResult.block(
+                                        reason=f"Policy Block: High-entropy content ({h:.2f}) exceeds Safe Zone limit ({zone.max_entropy}) for path '{requested_path}'.",
+                                        layer=1,
+                                    )
+                        
                         allowed = True
                         break
                 

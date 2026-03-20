@@ -266,7 +266,10 @@ class VanguardProxy:
                 if result.action == "WARN":
                     self._stats["warned"] += 1
                     telemetry.metrics.record_status("warned")
-                await self._write_to_server(line)
+                # Forward the normalized message to ensure inspection/execution symmetry
+                # This prevents truncation-based bypasses (P2 Audit Finding)
+                forward_data = json.dumps(normalized_message)
+                await self._write_to_server(forward_data)
             else:
                 self._stats["blocked"] += 1
                 telemetry.metrics.record_status("blocked")
@@ -316,6 +319,10 @@ class VanguardProxy:
                         
                     # Requirement 3.1: Apply 1 byte/sec throttle if governor is empty
                     state = behavioral.get_state(self._session.session_id)
+                    
+                    # Periodic check: can we clear the throttle? (P2 Audit Finding)
+                    state.update_throttle_status()
+
                     if state.is_throttled:
                         # Improved Throttling: Partition line into 1KB chunks with 1s delay
                         # This prevents hanging the main thread indefinitely on large messages.
@@ -424,10 +431,11 @@ class VanguardProxy:
         if not self._server_process or not self._server_process.stdin:
             return
         try:
+            # Removed .strip() to prevent unintended payload mutation (P3 Audit Finding)
             if isinstance(data, str):
-                buf = (data.strip() + "\n").encode()
+                buf = (data if data.endswith("\n") else data + "\n").encode()
             else:
-                buf = data.strip() + b"\n"
+                buf = data if data.endswith(b"\n") else data + b"\n"
             
             self._server_process.stdin.write(buf)
             await self._server_process.stdin.drain()
@@ -436,8 +444,9 @@ class VanguardProxy:
 
     async def _write_to_agent(self, data: str | bytes):
         try:
+            # Preserve original whitespace for agent transport
             if isinstance(data, str):
-                buf = (data.strip() + "\n").encode("utf-8")
+                buf = (data if data.endswith("\n") else data + "\n").encode("utf-8")
             else:
                 buf = data.strip() + b"\n"
 

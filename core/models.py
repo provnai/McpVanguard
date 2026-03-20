@@ -266,6 +266,8 @@ def build_manifest(
             "exfiltration_risk_score": 1.0 if entropy > 7.5 else (entropy / 7.5)
         }
 
+    rule_id = result.rule_matches[0].rule_id if result.rule_matches else "VANGUARD-DENY"
+    
     return SecureToolManifest(
         session_id=session_id,
         blocked_by_layer=result.layer_triggered or 1,

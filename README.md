@@ -1,7 +1,7 @@
-# McpVanguard
-### A security proxy for AI agents that use MCP
+# McpVanguard 🛡️
+### Titan-Grade AI Firewall for MCP Agents (v1.7.0)
 
-MCP (Model Context Protocol) enables AI agents to interact with host-level tools. **McpVanguard interposes between the agent and the system**, provide real-time inspection and enforcement prefixing every tool call.
+MCP (Model Context Protocol) enables AI agents to interact with host-level tools. **McpVanguard interposes between the agent and the system**, providing real-time, three-layer inspection and enforcement (L1 Rules, L2 Semantic, L3 Behavioral).
 
 Transparent integration. Zero-configuration requirements for existing servers.
 

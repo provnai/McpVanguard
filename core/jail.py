@@ -123,16 +123,30 @@ def _get_final_path_windows(path: str) -> Optional[str]:
         return None
 
 
-def check_path_jail(path: str, allowed_prefixes: List[str]) -> bool:
+def check_path_jail(path: str, allowed_prefixes: List[str], recursive: bool = True) -> bool:
     """
     Main entry point for jailing checks.
     Uses kernel-level APIs to verify a path resides within allowed prefixes.
-    - Linux: openat2 with RESOLVE_BENEATH (kernel 5.6+)
-    - Windows: GetFinalPathNameByHandleW + DOS device / UNC bypass blocking
-    - Fallback: soft canonicalization via pathlib
+    
+    Args:
+        path: The requested path to validate.
+        allowed_prefixes: List of authorized directory/file root prefixes.
+        recursive: If False, only files directly inside the prefix are allowed (P2 Audit Finding).
     """
     if not allowed_prefixes:
         return True  # No jails defined, allow all (standard behavior)
+
+    import unicodedata
+    path = unicodedata.normalize("NFKC", path)
+    allowed_prefixes = [unicodedata.normalize("NFKC", p) for p in allowed_prefixes]
+
+    # Deterministic Traversal Protection (P2 Audit Finding + Research)
+    # Block any path that contains traversal tokens AFTER normalization.
+    # This prevents lookalike-character bypasses where resolve() fails to collapse them.
+    norm_path = path.replace("/", "\\")
+    if "..\\" in norm_path or "\\.." in norm_path or norm_path.startswith("..") or norm_path.endswith(".."):
+        logger.warning(f"TRAVERSAL ATTEMPT BLOCKED: Path {repr(path)} contains traversal tokens.")
+        return False
 
     system = platform.system()
 
@@ -152,7 +166,15 @@ def check_path_jail(path: str, allowed_prefixes: List[str]) -> bool:
             final_prefix = _get_final_path_windows(prefix)
             if final_prefix is None:
                 final_prefix = str(Path(prefix).expanduser().resolve())
+            
+            logger.debug(f"[Vanguard-Jail] Checking: {repr(final_path.lower())} starts with {repr(final_prefix.lower())}")
             if final_path.lower().startswith(final_prefix.lower()):
+                # If non-recursive, ensure there are no additional path separators
+                # after the prefix (other than the immediate file/dir name)
+                if not recursive:
+                    rel = os.path.relpath(final_path, final_prefix)
+                    if "\\" in rel or "/" in rel:
+                        continue # Nested, block if non-recursive
                 return True
         return False
 
@@ -161,6 +183,12 @@ def check_path_jail(path: str, allowed_prefixes: List[str]) -> bool:
     for prefix in allowed_prefixes:
         can_prefix = _canonicalize(prefix)
         if str(canonical_path).startswith(str(can_prefix)):
+            # Recursive check for Linux fallback
+            if not recursive:
+                rel = os.path.relpath(str(canonical_path), str(can_prefix))
+                if "/" in rel or "\\" in rel:
+                    continue
+
             if _is_openat2_available():
                 return _check_path_jail_linux(path, can_prefix)
             return True
@@ -169,8 +197,13 @@ def check_path_jail(path: str, allowed_prefixes: List[str]) -> bool:
 
 
 def _canonicalize(path_str: str) -> Path:
-    """Soft-canonicalization for baseline checks."""
-    return Path(path_str).expanduser().resolve()
+    """
+    Soft-canonicalization for baseline checks.
+    Includes Unicode NFKC normalization to prevent lookalike-character bypasses (P2 Audit Finding).
+    """
+    import unicodedata
+    normalized = unicodedata.normalize("NFKC", path_str)
+    return Path(normalized).expanduser().resolve()
 
 def _is_openat2_available() -> bool:
     """Check if the kernel supports openat2 (5.6+)."""

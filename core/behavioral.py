@@ -143,6 +143,26 @@ class BehavioralState:
     entropy_bucket: _TokenBucket = field(default_factory=_TokenBucket)
     is_throttled: bool = False
 
+    def update_throttle_status(self) -> bool:
+        """
+        Requirement 3.1: Check if the throttle should be cleared.
+        Clears if bucket has refilled to >50% capacity (P2 Audit Finding).
+        """
+        if not self.is_throttled:
+            return False
+            
+        # Trigger refill logic implicitly by calling tokens property/consumption
+        # if tokens > 50% capacity, clear throttle
+        now = time.monotonic()
+        delta = now - self.entropy_bucket.last_update
+        current_tokens = min(self.entropy_bucket.capacity, self.entropy_bucket.tokens + delta * self.entropy_bucket.refill_rate)
+        
+        if current_tokens > (self.entropy_bucket.capacity * 0.5):
+            self.is_throttled = False
+            logger.info("Entropy bucket refilled (>50%). Clearing session throttle for %s", self.session_id)
+            return True
+        return False
+
     def window(self, tool: str):
         if tool not in self._windows:
             if _redis_client:

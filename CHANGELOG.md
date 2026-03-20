@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-03-20 (The Hermetic Gate Release)
+
+### Security (Audit & Hardening)
+- **The Hermetic Gate (L1)**: Implemented NFKC Unicode normalization and deterministic "Dot-Dot" blocking in `core/jail.py`. This closes lookalike-character bypasses and protects against OS-level path resolution quirks.
+- **Global DoS Protection (Transport)**: Added a server-wide connection ceiling (`VANGUARD_MAX_GLOBAL_CONNECTIONS`) to prevent distributed resource exhaustion.
+- **Semantic Scorer Resilience (L2)**: Implemented 3-pass automated retries with exponential backoff and a strict **Fail-Closed** security posture for Ollama and Cloud LLM backends.
+- **SSE Bridge Hardening**: Resolved a critical rate-limiting gap in the `/messages` POST endpoint, ensuring inspection symmetry between streaming and non-streaming tool calls.
+- **Inspection Symmetry**: Guaranteed that the exact normalized payload inspected by Vanguard is what gets forwarded to the server, preventing "truncation" or "overflow" bypasses.
+
+### Fixed
+- **CLI Precedence**: Fixed a bug where CLI boolean defaults would unintentionally override `.env` security settings.
+- **Sticky Throttling**: The entropy-based behavioral governor now correctly clears the throttle state once the token bucket refills above 50%.
+- **Safe Zone Depth**: Fixed schema enforcement for `max_entropy` and `recursive` flags in safe_zones.yaml.
+
+### Changed
+- **Testability Refactor**: Promoted SSE and health handlers to module-level functions with a unified `ServerContext`, enabling direct unit testing of security logic.
+- **Diagnostic Logging**: Hardened security logs with `repr()` escaping to prevent Unicode console-injection or crash-loops.
+
+---
+
 ## [1.6.0] - 2026-03-17 (Production Hardening Release)
 
 ### Added
