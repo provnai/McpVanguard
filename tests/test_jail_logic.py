@@ -24,13 +24,15 @@ class TestJailLogic(unittest.TestCase):
         allowed = ["C:\\Users\\test\\projects"]
         self.assertFalse(check_path_jail("C:\\Windows\\System32\\config", allowed))
 
+    @patch("os.path.exists")
     @patch("platform.system")
     @patch("core.jail._is_openat2_available")
     @patch("ctypes.CDLL")
     @patch("os.open")
     @patch("os.close")
-    def test_linux_openat2_success(self, mock_close, mock_os_open, mock_cdll, mock_openat2_av, mock_system):
+    def test_linux_openat2_success(self, mock_close, mock_os_open, mock_cdll, mock_openat2_av, mock_system, mock_exists):
         """Test the Linux openat2 path where the syscall succeeds."""
+        mock_exists.return_value = True
         mock_system.return_value = "Linux"
         mock_openat2_av.return_value = True
         mock_libc = mock_cdll.return_value
@@ -41,13 +43,15 @@ class TestJailLogic(unittest.TestCase):
         self.assertTrue(check_path_jail("/home/user/project/file.txt", allowed))
         self.assertEqual(mock_libc.syscall.call_args[0][0], 437)
 
+    @patch("os.path.exists")
     @patch("platform.system")
     @patch("core.jail._is_openat2_available")
     @patch("ctypes.CDLL")
     @patch("os.open")
     @patch("os.close")
-    def test_linux_openat2_failure(self, mock_close, mock_os_open, mock_cdll, mock_openat2_av, mock_system):
+    def test_linux_openat2_failure(self, mock_close, mock_os_open, mock_cdll, mock_openat2_av, mock_system, mock_exists):
         """Test the Linux openat2 path where the syscall fails (jail breach)."""
+        mock_exists.return_value = True
         mock_system.return_value = "Linux"
         mock_openat2_av.return_value = True
         mock_libc = mock_cdll.return_value

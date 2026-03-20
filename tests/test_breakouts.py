@@ -39,13 +39,15 @@ class TestBreakoutSuite(unittest.TestCase):
         res = self.engine.check(msg)
         self.assertFalse(res.allowed, "Path traversal should be blocked")
 
+    @patch("os.path.exists")
     @patch("platform.system")
     @patch("core.jail._is_openat2_available")
     @patch("ctypes.CDLL")
     @patch("os.open")
     @patch("os.close")
-    def test_linux_symlink_toctou_blocked(self, mock_close, mock_open, mock_cdll, mock_openat2, mock_system):
+    def test_linux_symlink_toctou_blocked(self, mock_close, mock_open, mock_cdll, mock_openat2, mock_system, mock_exists):
         """If openat2 fails due to a symlink escaping the dirfd, block it."""
+        mock_exists.return_value = True
         mock_system.return_value = "Linux"
         mock_openat2.return_value = True
         mock_libc = mock_cdll.return_value

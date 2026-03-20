@@ -250,6 +250,8 @@ def build_manifest(
     args = params.get("arguments", {})
     path = args.get("path") or args.get("filepath") or args.get("dir", "")
 
+    rule_id = result.rule_matches[0].rule_id if result.rule_matches else "VANGUARD-DENY"
+
     # Build hardening-spec gate sensors
     gate_sensors = {}
     if "SAFEZONE" in (rule_id or ""):
@@ -258,15 +260,6 @@ def build_manifest(
             "resolved_physical_path": "RESOLVED_SYMLINK_LOGIC_ACTIVE", # Placeholder for L1 resolution
             "policy_root": "RESTRICTED_SAFE_ZONE"
         }
-    
-    if entropy is not None:
-        gate_sensors["entropy_violation"] = {
-            "bits_per_byte": entropy,
-            "total_bytes": len(message.get("params", {}).get("content", "")), # or response len
-            "exfiltration_risk_score": 1.0 if entropy > 7.5 else (entropy / 7.5)
-        }
-
-    rule_id = result.rule_matches[0].rule_id if result.rule_matches else "VANGUARD-DENY"
     
     return SecureToolManifest(
         session_id=session_id,
