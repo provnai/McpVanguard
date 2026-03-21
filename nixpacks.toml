@@ -2,14 +2,16 @@
 # Explicitly defines the environment for Railway/Nixpacks
 
 [phases.setup]
-nixPkgs = ["python311Full", "nodejs_20", "gcc"]
+nixPkgs = ["python311", "nodejs_20", "gcc"]
 
 [phases.install]
 cmds = [
   "npm install",
-  "python3 -m pip install -r requirements.txt",
-  "python3 -m pip install -e ."
+  "python3 -m venv /opt/venv",
+  "/opt/venv/bin/pip install --upgrade pip",
+  "/opt/venv/bin/pip install -r requirements.txt",
+  "/opt/venv/bin/pip install -e ."
 ]
 
 [deploy]
-startCommand = "python3 -m core.cli sse --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"
+startCommand = "/opt/venv/bin/python3 -m core.cli sse --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"
