@@ -90,9 +90,9 @@ Verify the service is running:
 curl https://your-project.up.railway.app/health
 # Expected: {
 #   "status": "ok",
-#   "version": "1.6.0",
+#   "version": "1.7.0",
 #   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
-#   "timestamp": 1710662400.0
+#   "timestamp": 1711022400.0
 # }
 ```
 
@@ -149,9 +149,9 @@ The instance is pre-configured with a `/health` endpoint:
 GET /health
 → {
   "status": "ok",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
-  "timestamp": 1710662400.0
+  "timestamp": 1711022400.0
 }
 ```
 

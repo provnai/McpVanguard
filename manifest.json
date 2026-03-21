@@ -1,0 +1,37 @@
+{
+  "manifest_version": "0.3.0",
+  "name": "mcp-vanguard",
+  "version": "1.8.0",
+  "description": "Titan-Grade AI Firewall for MCP Agents.",
+  "author": "provnai (https://github.com/provnai)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/provnai/McpVanguard"
+  },
+  "runtime": "node",
+  "entry": "index.js",
+  "commands": {
+    "start": "node index.js"
+  },
+  "icon": "assets/logo.png",
+  "privacy_policies": [
+    "PRIVACY.md"
+  ],
+  "configuration": {
+    "rules_dir": {
+      "type": "string",
+      "default": "rules",
+      "description": "Path to the YAML rules directory."
+    },
+    "no_semantic": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable Layer 2 semantic scoring."
+    }
+  },
+  "capabilities": {
+    "proxy": true,
+    "firewall": true,
+    "audit": true
+  }
+}

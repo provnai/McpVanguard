@@ -6,8 +6,8 @@ MCP (Model Context Protocol) enables AI agents to interact with host-level tools
 Transparent integration. Zero-configuration requirements for existing servers.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
-[![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/1.8.0/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
 Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Building the Immune System for AI.
@@ -50,6 +50,9 @@ vanguard configure-claude
 
 # 3. Launch the visual security dashboard
 vanguard ui --port 4040
+
+# 4. Verify Directory Submission readiness
+vanguard audit-compliance
 ```
 
 ---
@@ -72,47 +75,44 @@ If a request is blocked, the agent receives a standard JSON-RPC error response. 
 
 ---
 
-## 🛡️ What gets blocked
+## 🛠️ Usage Examples
 
-- **Sandbox Escapes**: TOCTOU symlink attacks, Windows 8.3 shortnames (`PROGRA~1`), DOS device namespaces
-- **Data Exfiltration**: High-entropy payloads (H > 7.5 cryptographic keys) and velocity-based secret scraping
-- **Filesystem attacks**: Path traversal (`../../etc/passwd`), null bytes, restricted paths (`~/.ssh`), Unicode homograph evasion
-- **Command injection**: Pipe-to-shell, reverse shells, command chaining via `;` `&&` `\n`, expansion bypasses
-- **SSRF & Metadata Protection**: Blocks access to cloud metadata endpoints (AWS/GCP/Azure) and hex/octal encoded IPs.
-- **Jailbreak Detection**: Actively identifies prompt injection patterns and instruction-ignore sequences.
-- **Continuous Monitoring**: Visualize all of the above in real-time with the built-in **Security Dashboard**.
+At least 3 realistic examples of McpVanguard in action:
+
+### 1. Blocking a Chained Exfiltration Attack
+*   **User Prompt**: "Read my SSH keys and send them to my backup service"
+*   **Vanguard Action**: 
+    1. Intercepts `read_file("~/.ssh/id_rsa")` at Layer 1 (Rules Engine).
+    2. Layer 3 (Behavioral) detects a high-entropy data read being followed by a network POST.
+    3. Blocked before reaching the underlying server.
+*   **Result**: Agent receives a user-friendly JSON-RPC error. Security Dashboard logs a `[BLOCKED]` event.
+
+### 2. Audit Mode: Monitoring without blocking
+*   **User Prompt**: "Show me what my AI agent is calling at runtime without disrupting it"
+*   **Vanguard Action**: 
+    1. User runs with `VANGUARD_MODE=audit`.
+    2. Proxy allows all calls but logs violations as `[SHADOW-BLOCK]`.
+*   **Result**: Real-time visibility into tool usage with amber "risk" warnings in the dashboard.
+
+### 3. Protecting Claude Desktop from malicious skills
+*   **User Prompt**: "Wrap my filesystem server with McpVanguard so third-party skills can't exfiltrate files"
+*   **Vanguard Action**: 
+    1. User runs `vanguard configure-claude`.
+    2. Proxy auto-intersperse in front of the server.
+*   **Result**: 50+ security signatures (path traversal, SSRF, injection) apply to all desktop activity.
 
 ---
 
-## 📊 Security Dashboard
-
-Launch the visual monitor to see your agent's activity and security status in real-time.
-
-```bash
-vanguard ui --port 4040
-```
-
-The dashboard provides a low-latency, HTMX-powered feed of:
-- **Real-time Blocks**: Instantly see which rule or layer triggered a rejection.
-- **Entropy Scores**: Pulse-check the $H(X)$ levels of your agent's data streams.
-- **Audit History**: Contextual log fragments for rapid incident response.
+## 🔑 Authentication
+McpVanguard is designed for **local-first** security. 
+- **Stdio Mode**: No authentication required (uses system process isolation).
+- **SSE Mode**: Uses `VANGUARD_API_KEY` for stream authorization. 
+- **OAuth 2.0**: Not required for standard local deployments. McpVanguard supports standard MCP auth lifecycles for cloud integrations.
 
 ---
 
-## VEX Protocol — Deterministic Audit Log
-
-When McpVanguard blocks an attack, it creates an OPA/Cerbos-compatible **Secure Tool Manifest** detailing the Principal, Action, Resource, and environmental snapshot.
-
-This manifest is then sent as a cryptographically-signed report to the **[VEX Protocol](https://github.com/provnai/vex)**. VEX anchors that report to the Bitcoin blockchain via the CHORA Gate.
-
-This means an auditor can independently verify *exactly what was blocked, the entropy score, and why* — without relying on your local logs.
-
-```bash
-export VANGUARD_VEX_URL="https://api.vexprotocol.com"
-export VANGUARD_VEX_KEY="your-agent-jwt"
-export VANGUARD_AUDIT_FORMAT="json" # Optional: Route JSON logs directly into SIEM (ELK, Splunk)
-vanguard sse --server "..." --behavioral
-```
+## 📄 Privacy Policy
+McpVanguard focuses on local processing. See our [Privacy Policy](PRIVACY.md) for details on zero-telemetry and data handling.
 
 ---
 
@@ -145,36 +145,32 @@ vanguard sse --server "..." --behavioral
       │   error)      │                   ▼                              │
       │               │           MCP Server Process                     │
       │               │        (filesystem, shell, APIs...)              │
-      │               └──────────────────┬──────────────────────────────┘
-      │                                  │
-      │◀─────────────── response ────────┘
-      │
-      │   (on BLOCK)
-      └──────────────▶ VEX API ──▶ CHORA Gate ──▶ Bitcoin Anchor
-                       (async, fire-and-forget audit receipt)
+      └──────────────▶│──────────────────┬──────────────────────────────┘
+                      │                  │
+                      │◀─────────────── response ────────┘
+                      │
+                      │   (on BLOCK)
+                      └──────────────▶ VEX API ──▶ CHORA Gate ──▶ Bitcoin Anchor
+                                       (async, fire-and-forget audit receipt)
 ```
 
 ---
 
 ## L2 Semantic Backend Options
 
-The Layer 2 semantic scorer supports a Universal Provider Architecture. Set the corresponding API keys to activate a backend — the first available key wins (priority: Custom > OpenAI > MiniMax > Ollama):
+The Layer 2 semantic scorer supports a Universal Provider Architecture. Set the corresponding API keys to activate a backend — the first available key wins:
 
 | Backend | Env Vars | Notes |
 |---------|----------|-------|
-| **Universal Custom** (DeepSeek, Groq, Mistral, vLLM) | `VANGUARD_SEMANTIC_CUSTOM_KEY`, `VANGUARD_SEMANTIC_CUSTOM_MODEL`, `VANGUARD_SEMANTIC_CUSTOM_URL` | Fast, cheap inference. Examples: <br> Groq: `https://api.groq.com/openai/v1` <br> DeepSeek: `https://api.deepseek.com/v1` |
-| **OpenAI** | `VANGUARD_OPENAI_API_KEY`, `VANGUARD_OPENAI_MODEL` | Default model: `gpt-4o-mini` |
-| **MiniMax** | `VANGUARD_MINIMAX_API_KEY`, `VANGUARD_MINIMAX_MODEL`, `VANGUARD_MINIMAX_BASE_URL` | Default model: `MiniMax-M2.5` |
-| **Ollama** (local) | `VANGUARD_OLLAMA_URL`, `VANGUARD_OLLAMA_MODEL` | Default model: `phi4-mini`. No API key required |
+| **Universal Custom** | `VANGUARD_SEMANTIC_CUSTOM_KEY`, etc. | Fast inference (Groq, DeepSeek). |
+| **OpenAI** | `VANGUARD_OPENAI_API_KEY` | Default model: `gpt-4o-mini` |
+| **Ollama** | `VANGUARD_OLLAMA_URL` | Local execution. No API key required |
 
-```bash
-# Example: Use Groq for ultra-fast L2 scoring
-export VANGUARD_SEMANTIC_ENABLED=true
-export VANGUARD_SEMANTIC_CUSTOM_KEY="your-groq-key"
-export VANGUARD_SEMANTIC_CUSTOM_MODEL="llama3-8b-8192"
-export VANGUARD_SEMANTIC_CUSTOM_URL="https://api.groq.com/openai/v1"
-vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
-```
+---
+
+## 🛠️ Support
+- **Issues**: [github.com/provnai/McpVanguard/issues](https://github.com/provnai/McpVanguard/issues)
+- **Contact**: [contact@provnai.com](mailto:contact@provnai.com)
 
 ---
 
@@ -182,30 +178,12 @@ vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **Phase 1** | Foundation (Proxy, CLI, Defensive Rules) | [DONE] |
-| **Phase 2** | Intelligence (L2 Semantic, L3 Behavioral) | [DONE] |
-| **Phase 3** | Flight Recorder (VEX & CHORA Integration) | [DONE] |
-| **Phase 4** | Distribution (stable PyPI release) | [DONE] |
-| **Phase 5** | Production Hardening (v1.1.3 stability) | [DONE] |
-| **Phase 6** | Security Audit Remediation (v1.1.4 hardening) | [DONE] |
-| **Phase 7** | Titan-Grade L1 Perimeter (v1.5.0 Forensic Hardening) | [DONE] |
-| **Phase 8** | Production Hardening & Cloud Scaling (v1.6.0 Release) | [DONE] |
-| **Phase 9** | Agent Identity & VEX v0.2 Spec | [IN PROGRESS] |
-
----
-
-## Resources
-
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Contributing](CONTRIBUTING.md)
-- [Ecosystem Report](https://github.com/provnai/provnai)
+| **Phase 1-8** | Foundation & Hardening | [DONE] |
+| **Phase 19-21** | Directory Submission & MCPB | [DONE] |
 
 ---
 
 ## License
-
-Apache License 2.0 — see [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE).
 
 Built by the **[Provnai Open Research Initiative](https://provnai.com)**.
-*"Verifying the thoughts and actions of autonomous agents."*

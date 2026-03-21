@@ -5,14 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.7.0] - 2026-03-20 (The Hermetic Gate Release)
+## [1.8.0] - 2026-03-21 (The Guardian Bundle Release)
 
-### Security (Audit & Hardening)
-- **The Hermetic Gate (L1)**: Implemented NFKC Unicode normalization and deterministic "Dot-Dot" blocking in `core/jail.py`. This closes lookalike-character bypasses and protects against OS-level path resolution quirks.
-- **Global DoS Protection (Transport)**: Added a server-wide connection ceiling (`VANGUARD_MAX_GLOBAL_CONNECTIONS`) to prevent distributed resource exhaustion.
-- **Semantic Scorer Resilience (L2)**: Implemented 3-pass automated retries with exponential backoff and a strict **Fail-Closed** security posture for Ollama and Cloud LLM backends.
-- **SSE Bridge Hardening**: Resolved a critical rate-limiting gap in the `/messages` POST endpoint, ensuring inspection symmetry between streaming and non-streaming tool calls.
-- **Inspection Symmetry**: Guaranteed that the exact normalized payload inspected by Vanguard is what gets forwarded to the server, preventing "truncation" or "overflow" bypasses.
+### Claude Desktop Directory Readiness (MCPB)
+- **MIT License Migration**: Transitioned from Apache 2.0 to MIT to satisfy Anthropic's strict directory requirements.
+- **MCPB Bundling**: Implemented the `.mcpb` (Model Context Protocol Bundle) specification for one-click installation.
+- **Node.js Bridge**: Added a lightweight Node.js wrapper (`index.js`) to satisfy host-side architectural preferences while maintaining the Python security core.
+- **Compliance Auditor**: New `vanguard audit-compliance` CLI command for instant verification against directory rules.
+- **Testing Guide**: Added `TESTING_GUIDE.md` for directory reviewers, providing sample prompts to verify all security layers.
+- **Native Management Tools**: Expanded the proxy with `get_vanguard_status` and `vanguard_apply_rule` for self-securing agent workflows.
+
+## [1.7.0] - 2026-03-20 (The Hermetic Gate Release)
 
 ### Fixed
 - **CLI Precedence**: Fixed a bug where CLI boolean defaults would unintentionally override `.env` security settings.

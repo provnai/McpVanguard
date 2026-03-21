@@ -158,16 +158,17 @@ class AuditEvent(BaseModel):
 # ---------------------------------------------------------------------------
 
 def make_block_response(request_id: Any, reason: str, rule_id: str = "VANGUARD") -> dict:
-    """Create a valid JSON-RPC error response for a blocked call."""
+    """Create a user-friendly JSON-RPC error response for a blocked call."""
     return {
         "jsonrpc": "2.0",
         "id": request_id,
         "error": {
             "code": -32600,
-            "message": f"[McpVanguard] BLOCKED — {reason}",
+            "message": f"McpVanguard Blocked: {reason}",
             "data": {
                 "blocked_by": "McpVanguard",
                 "rule": rule_id,
+                "remedy": "Visit https://provnai.com/vanguard/policy for help or check your rules configuration."
             }
         }
     }

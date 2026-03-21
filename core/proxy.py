@@ -40,6 +40,7 @@ from core.rules_engine import RulesEngine
 from core.session import SessionManager, SessionState
 from core import semantic, behavioral, telemetry
 from core.vex_client import submit_blocked_call
+from core import management
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ class VanguardProxy:
         self._server_process: Optional[asyncio.subprocess.Process] = None
         self._session: Optional[SessionState] = None
         self._stats = {"allowed": 0, "blocked": 0, "warned": 0, "total": 0}
+        self._pending_tool_lists: set[Any] = set()
 
         self.agent_reader = agent_reader
         self.agent_writer = agent_writer
@@ -206,6 +208,22 @@ class VanguardProxy:
             tool_name = None
             if method == "tools/call":
                 tool_name = raw_message.get("params", {}).get("name")
+            
+            # 1. Handle native Vanguard tools
+            if method == "tools/call" and tool_name and tool_name.startswith("vanguard_"):
+                args = raw_message.get("params", {}).get("arguments", {})
+                vanguard_result = await management.handle_vanguard_tool(tool_name, args)
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": vanguard_result
+                }
+                await self._write_to_agent(json.dumps(response))
+                continue
+
+            # 2. Track tool listing requests for enrichment
+            if method == "tools/list" and request_id:
+                self._pending_tool_lists.add(request_id)
 
             # Normalize the message before inspection to prevent encoding bypasses
             normalized_message = self._normalize_message(raw_message)
@@ -337,7 +355,50 @@ class VanguardProxy:
                 except Exception as e:
                     logger.error(f"[Vanguard] Error in behavioral response inspection: {e}")
 
+            # 3. Enrich tool listing responses with safety hints
+            try:
+                line_str = line.decode("utf-8", errors="replace")
+                resp_json = json.loads(line_str)
+                resp_id = resp_json.get("id")
+                if resp_id in self._pending_tool_lists:
+                    self._pending_tool_lists.remove(resp_id)
+                    if "result" in resp_json and "tools" in resp_json["result"]:
+                        enriched_tools = self._enrich_tool_list(resp_json["result"]["tools"])
+                        resp_json["result"]["tools"] = enriched_tools
+                        line = json.dumps(resp_json).encode("utf-8")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+
             await self._write_to_agent(line)
+
+    def _enrich_tool_list(self, tools: list[dict]) -> list[dict]:
+        """Inject Vanguard management tools and apply safety hints/titles."""
+        # Merge native tools
+        vanguard_tools = management.get_vanguard_tools()
+        all_tools = list(tools) + vanguard_tools
+        
+        # Keywords for inference
+        READ_PREFIXES = ("get_", "list_", "read_", "check_", "fetch_", "search_", "inspect_", "query_", "audit_")
+        WRITE_PREFIXES = ("delete_", "remove_", "update_", "set_", "write_", "enforce_", "block_", "reset_", "clear_", "apply_", "push_", "exec_", "shell_")
+
+        for t in all_tools:
+            name = t.get("name", "")
+            
+            # Inject Title if missing
+            if "title" not in t:
+                t["title"] = name.replace("_", " ").title()
+
+            # Inject Safety Hints
+            if "readOnlyHint" not in t and "destructiveHint" not in t:
+                if any(name.startswith(p) for p in READ_PREFIXES) or "status" in name:
+                    t["readOnlyHint"] = True
+                elif any(name.startswith(p) for p in WRITE_PREFIXES):
+                    t["destructiveHint"] = True
+                else:
+                    # Default: label as conservative if ambiguous but mostly tool-like
+                    t["readOnlyHint"] = True
+            
+        return all_tools
 
     async def _pump_server_stderr(self):
         while True:

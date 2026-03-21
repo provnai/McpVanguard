@@ -1,0 +1,16 @@
+{
+  "name": "mcp-vanguard",
+  "version": "1.8.0",
+  "description": "Titan-Grade AI Firewall for MCP Agents.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "provnai",
+  "license": "MIT",
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -136,9 +136,10 @@ class RulesEngine:
                 with open(yaml_file, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f)
 
+                if yaml_file.name == "safe_zones.yaml":
+                    continue
+
                 if not isinstance(data, list):
-                    if yaml_file.name == "safe_zones.yaml":
-                        continue
                     logger.warning(f"Skipping {yaml_file.name}: expected a list of rules")
                     continue
 
