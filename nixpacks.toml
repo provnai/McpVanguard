@@ -2,7 +2,7 @@
 # Explicitly defines the environment for Railway/Nixpacks
 
 [phases.setup]
-nixPkgs = ["python311", "nodejs-20_x", "gcc"]
+nixPkgs = ["python311", "nodejs_20", "gcc"]
 
 [phases.install]
 cmds = [
