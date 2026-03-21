@@ -10,8 +10,8 @@ cmds = [
   "python3 -m venv /opt/venv",
   "/opt/venv/bin/pip install --upgrade pip",
   "/opt/venv/bin/pip install -r requirements.txt",
-  "/opt/venv/bin/pip install -e ."
+  "/opt/venv/bin/pip install . "
 ]
 
-[deploy]
-startCommand = "/opt/venv/bin/python3 -m core.cli sse --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"
+[start]
+cmd = "/opt/venv/bin/python3 -m core.cli sse --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"

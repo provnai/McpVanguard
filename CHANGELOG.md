@@ -13,7 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Node.js Bridge**: Added a lightweight Node.js wrapper (`index.js`) to satisfy host-side architectural preferences while maintaining the Python security core.
 - **Compliance Auditor**: New `vanguard audit-compliance` CLI command for instant verification against directory rules.
 - **Testing Guide**: Added `TESTING_GUIDE.md` for directory reviewers, providing sample prompts to verify all security layers.
-- **Native Management Tools**: Expanded the proxy with `get_vanguard_status` and `vanguard_apply_rule` for self-securing agent workflows.
+
+### Test Architecture & Reliability
+- **In-Process E2E Testing**: Refactored major integration tests to use environment-aware threading, eliminating "Socket Connection Refused" flakes on Windows.
+- **Titan-Grade Certification**: Achieved a certified 94/94 green test state across hybrid Windows/Linux environments.
+
+### Cloud Deployment (Railway)
+- **Polyglot Nixpacks**: Added a custom `nixpacks.toml` to provision both Node.js and Python 3.11 in a single container.
+- **Bunkerized Build**: Implemented an isolated virtual environment (`/opt/venv`) and static versioning to eliminate `.git` dependencies during cloud deployment.
 
 ## [1.7.0] - 2026-03-20 (The Hermetic Gate Release)
 

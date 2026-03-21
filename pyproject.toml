@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "setuptools-scm>=8.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-vanguard"
-dynamic = ["version"]
+version = "1.8.0"
 description = "Security proxy and verification layer for the Model Context Protocol (MCP)"
 readme = "README.md"
 license = "MIT"
@@ -63,5 +63,3 @@ filterwarnings = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "rules*"]
-[tool.setuptools_scm]
-write_to = "core/_version.py"
