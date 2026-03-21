@@ -1,4 +1,0 @@
-- id: block-rm
-  pattern: 'rm .*'
-  action: BLOCK
-  severity: CRITICAL

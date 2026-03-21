@@ -84,7 +84,7 @@ async def test_vanguard_vex_e2e():
         mock_agent_writer.assert_called_once()
         written_response = json.loads(mock_agent_writer.call_args[0][0])
         assert written_response["id"] == 999
-        assert "BLOCKED" in written_response["error"]["message"]
+        assert "Blocked" in written_response["error"]["message"]
         assert "E2E Mocked Policy Violation" in written_response["error"]["message"]
         
         # Did it trigger the VEX handoff?

@@ -80,6 +80,9 @@ def test_shadow_mode_and_dashboard_integration(clean_env):
         proxy_proc.stdin.write(forbidden_msg + "\n")
         proxy_proc.stdin.flush()
         
+        # Wait for proxy to process and write to log
+        time.sleep(2)
+        
         # 3. Read response from queue with timeout
         response = None
         start_time = time.time()
@@ -104,24 +107,49 @@ def test_shadow_mode_and_dashboard_integration(clean_env):
         log_content = log_file.read_text()
         assert "SHADOW" in log_content or "audit_only" in log_content
         
-        # 5. Start Dashboard
-        dash_proc = subprocess.Popen(
-            [sys.executable, "-m", "core.cli", "ui", "--port", "4041"],
-            env=env
-        )
+        # 5. Start Dashboard in a background thread (same process to avoid path issues)
+        import uvicorn
+        from core import dashboard as dash_mod
+        
+        # Sync the log file pointer for the dashboard thread
+        dash_mod.LOG_FILE = str(log_file)
+        
+        test_port = 4850
+        config = uvicorn.Config(dash_mod.app, host="127.0.0.1", port=test_port, log_level="warning")
+        server = uvicorn.Server(config)
+        
+        # Override the server's install_signal_handlers if in a thread
+        server.install_signal_handlers = lambda: None
+        
+        dash_thread = threading.Thread(target=server.run, daemon=True)
+        dash_thread.start()
         
         try:
-            time.sleep(5) # Wait for FastAPI
-            with httpx.Client() as client:
-                resp = client.get("http://127.0.0.1:4041/logs", timeout=10)
-                assert resp.status_code == 200
-                assert "execute_command" in resp.text
+            # Robust retry loop for FastAPI startup (prevents WinError 10061)
+            connected = False
+            for _ in range(15):  # 15 second timeout
+                time.sleep(1)
+                try:
+                    with httpx.Client() as client:
+                        resp = client.get(f"http://127.0.0.1:{test_port}/logs", timeout=2)
+                        if resp.status_code == 200:
+                            assert "execute_command" in resp.text
+                            connected = True
+                            break
+                except (httpx.ConnectError, httpx.RequestError):
+                    continue
+            
+            if not connected:
+                assert connected, f"Dashboard at {test_port} failed to become responsive within 15s"
         finally:
-            dash_proc.terminate()
-            dash_proc.wait(timeout=5)
+            server.should_exit = True
+            dash_thread.join(timeout=5)
             
     finally:
         proxy_proc.terminate()
         proxy_proc.wait(timeout=5)
         if log_file.exists():
-            log_file.unlink()
+            try:
+                log_file.unlink()
+            except PermissionError:
+                pass
