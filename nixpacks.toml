@@ -1,0 +1,16 @@
+# McpVanguard Polyglot Deployment (Node + Python)
+# Explicitly defines the environment for Railway/Nixpacks
+
+[phases.setup]
+nixPkgs = ["python311", "nodejs-20_x", "gcc"]
+
+[phases.install]
+cmds = [
+  "npm install",
+  "python -m pip install --upgrade pip",
+  "python -m pip install -r requirements.txt",
+  "python -m pip install -e ."
+]
+
+[deploy]
+startCommand = "python -m core.cli sse --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"
