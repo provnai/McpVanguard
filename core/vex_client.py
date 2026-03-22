@@ -70,8 +70,16 @@ def submit_blocked_call(payload: dict, session_id: str = "vanguard-session") -> 
     if not VEX_JWT:
         return
 
-    # Spawn the async task independently
-    asyncio.create_task(_execute_and_listen(payload, session_id))
+    # Spawn the async task independently, handling both sync and async contexts
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_execute_and_listen(payload, session_id))
+    except RuntimeError:
+        # We are in a synchronous thread with no event loop
+        import threading
+        def run_in_thread():
+            asyncio.run(_execute_and_listen(payload, session_id))
+        threading.Thread(target=run_in_thread, daemon=True).start()
 
 
 async def _execute_and_listen(payload: dict, session_id: str):

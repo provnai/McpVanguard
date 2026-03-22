@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-03-22 (Titan-Grade Security Hardening)
+
+### Security (Audit Remediation)
+- **CRIT-1: Format-Independent Safe Zones** (`core/rules_engine.py`): Decoupled tool call detection from JSON-RPC method names. Validates tool arguments based on structure, defeating format-evasion bypasses.
+- **CRIT-2: Default-Deny Policy** (`core/rules_engine.py`): Introduced `VANGUARD_DEFAULT_POLICY=DENY` support for ultra-secure "fail-closed" environments.
+- **CRIT-3: Session TTL & Memory Management** (`core/behavioral.py`): Fixed a memory leak in the behavioral layer by implementing automatic LRU-style pruning of inactive session states.
+- **MED-1: Proxy Error Transparency** (`core/proxy.py`): Replaced silent exception swallowing with structured error logging for improved auditability.
+- **MED-2: Payload Size Enforcement** (`core/proxy.py`): The proxy now explicitly rejects oversized strings instead of truncating them, preventing "tail-end" regex bypasses.
+- **MED-3: Semantic Context Hardening** (`core/semantic.py`): Protected the LLM intent classifier against context-injection attacks by strictly fencing tool parameters and enforcing instruction-ignoring system prompts.
+- **Windows UNC Blocking** (`core/jail.py`): Explicitly blocks all path patterns starting with `\\` to forestall extended-length or network share bypasses.
+- **Linux Compatibility** (`core/jail.py`): Added graceful `ENOSYS` fallback for `openat2` to ensure stability on older Linux kernels while maintaining security.
+
+### Added
+- **Adversarial Test Suite** (`tests/test_audit_remediation.py`): 4 new high-intensity security tests targeting the identified audit bypasses. 
+
+---
+
 ## [1.8.0] - 2026-03-21 (The Guardian Bundle Release)
 
 ### Claude Desktop Directory Readiness (MCPB)

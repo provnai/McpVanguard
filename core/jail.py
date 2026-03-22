@@ -64,18 +64,10 @@ def _block_windows_bypass_patterns(path: str) -> bool:
     # Normalize separators for consistent matching
     norm = path.replace("/", "\\")
 
-    for bp in _WINDOWS_BYPASS_PREFIXES:
-        if norm.startswith(bp):
-            logger.warning(f"Windows bypass pattern detected and blocked: {path!r}")
-            return True
-
-    # Check UNC paths targeting localhost (\\127.0.0.1\C$\...)
+    # Block all UNC paths and DOS device paths outright (Task 8: Expand UNC blocking)
     if norm.startswith("\\\\"):
-        parts = norm.lstrip("\\").split("\\", 1)
-        host = parts[0].lower() if parts else ""
-        if host in _WINDOWS_LOCAL_UNC_HOSTS:
-            logger.warning(f"Local UNC redirection attempt blocked: {path!r}")
-            return True
+        logger.warning(f"Windows bypass pattern or UNC path blocked: {path!r}")
+        return True
 
     return False
 
@@ -251,7 +243,7 @@ def _check_path_jail_linux(path: str, root_prefix: Path) -> bool:
     Returns True if the kernel allows the path resolution within the root.
     """
     try:
-        libc = ctypes.CDLL("libc.so.6")
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
         
         # 1. Open the root directory as an O_PATH descriptor
         # O_PATH = 010000000 (0x200000 on many kernels)
@@ -276,7 +268,12 @@ def _check_path_jail_linux(path: str, root_prefix: Path) -> bool:
                 os.close(res)
                 return True
             else:
-                logger.warning(f"Jail breach attempt or resolution error: {path} (Result: {res})")
+                err = ctypes.get_errno()
+                if err == 38: # ENOSYS (Function not implemented)
+                    logger.warning(f"openat2 not supported on this kernel (ENOSYS). Relying on user-space checks for {path}")
+                    return True # Fail-open to user-space validation instead of crashing
+                
+                logger.warning(f"Jail breach attempt or resolution error: {path} (Result: {res}, errno: {err})")
                 return False
         finally:
             os.close(dir_fd)

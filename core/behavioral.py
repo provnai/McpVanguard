@@ -69,7 +69,8 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="vanguard-beh")
 _SENSITIVE_PATH_FRAGMENTS = tuple(
     os.getenv("VANGUARD_SENSITIVE_PATHS", 
               "/etc/,.ssh/,.env,passwd,shadow,id_rsa,authorized_keys,"
-              "System32/config/SAM,Microsoft/Credentials,NTDS.DIT").split(",")
+              "System32/config/SAM,Microsoft/Credentials,NTDS.DIT,"
+              ".aws/credentials,.kube/config,.config/gcloud,.bash_history,sqlite3").split(",")
 )
 
 # ─── Sliding window ───────────────────────────────────────────────────────────
@@ -111,10 +112,10 @@ class _Window:
 @dataclass
 class _TokenBucket:
     """Requirement 3.1: Entropy-aware Token Bucket governor."""
-    capacity: float = 100.0
-    tokens: float = 100.0
+    capacity: float = 50.0
+    tokens: float = 50.0
     last_update: float = field(default_factory=time.monotonic)
-    refill_rate: float = 10.0  # tokens per second
+    refill_rate: float = 5.0  # tokens per second
 
     def consume(self, amount: float) -> bool:
         now = time.monotonic()
@@ -142,6 +143,7 @@ class BehavioralState:
     # Requirement 3.1: Entropy Governor
     entropy_bucket: _TokenBucket = field(default_factory=_TokenBucket)
     is_throttled: bool = False
+    last_accessed: float = field(default_factory=time.monotonic)
 
     def update_throttle_status(self) -> bool:
         """
@@ -244,8 +246,15 @@ _states: dict[str, BehavioralState] = {}
 
 def get_state(session_id: str) -> BehavioralState:
     if session_id not in _states:
+        # CRIT-3 Fix: Prune old states if we're growing too large
+        if len(_states) > 1000:
+            prune_inactive_states(max_age_secs=3600)
+            
         _states[session_id] = BehavioralState(session_id=session_id)
-    return _states[session_id]
+    
+    state = _states[session_id]
+    state.last_accessed = time.monotonic()
+    return state
 
 
 def clear_state(session_id: str) -> None:
@@ -257,13 +266,25 @@ def clear_all_states() -> None:
     _states.clear()
     if _redis_client:
         try:
-            # Dangerous in production, but we don't use it there for 'clear'
-            # In tests, we use a dedicated Redis DB if possible
             keys = _redis_client.keys("vguard:beh:*")
             if keys:
                 _redis_client.delete(*keys)
         except Exception:
             pass
+
+def prune_inactive_states(max_age_secs: int = 3600) -> int:
+    """CRIT-3 Fix: Remove states that haven't been accessed in X seconds."""
+    now = time.monotonic()
+    to_remove = [
+        sid for sid, state in _states.items() 
+        if (now - state.last_accessed) > max_age_secs
+    ]
+    for sid in to_remove:
+        _states.pop(sid, None)
+    
+    if to_remove:
+        logger.info(f"Pruned {len(to_remove)} inactive behavioral states.")
+    return len(to_remove)
 
 
 # ─── Write detection helpers ──────────────────────────────────────────────────

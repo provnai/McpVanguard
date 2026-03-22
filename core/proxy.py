@@ -226,7 +226,18 @@ class VanguardProxy:
                 self._pending_tool_lists.add(request_id)
 
             # Normalize the message before inspection to prevent encoding bypasses
-            normalized_message = self._normalize_message(raw_message)
+            try:
+                normalized_message = self._normalize_message(raw_message)
+            except ValueError as e:
+                # MED-2 Fix: Reject oversized messages instead of truncating and allowing bypass
+                logger.warning(f"[Vanguard] REJECTED: Message contains oversized field: {e}")
+                block_response = make_block_response(
+                    request_id=request_id,
+                    reason=f"Security Policy: Message contains a field exceeding the {self.config.max_string_len} byte limit.",
+                    rule_id="VANGUARD-SIZE-001",
+                )
+                await self._write_to_agent(json.dumps(block_response))
+                continue
 
             # Inspect the message (with 5s Fail-Closed timeout)
             try:
@@ -477,9 +488,9 @@ class VanguardProxy:
                 if unicodedata.category(ch) not in ('Cf',)
             )
             # 4. Length safeguard (prevents memory/CPU exhaustion)
+            # MED-2 Fix: Raise error on oversize instead of truncating to prevent bypass
             if len(value) > self.config.max_string_len:
-                logger.warning(f"String exceeds max_string_len ({len(value)} > {self.config.max_string_len}). Truncating.")
-                value = value[:self.config.max_string_len] + "...[TRUNCATED]"
+                raise ValueError(f"String length {len(value)} exceeds limit {self.config.max_string_len}")
             
             return value
         return message
@@ -500,8 +511,9 @@ class VanguardProxy:
             
             self._server_process.stdin.write(buf)
             await self._server_process.stdin.drain()
-        except Exception:
-            pass
+        except Exception as e:
+            # MED-1 Fix: Log swallowed errors
+            logger.error(f"[Vanguard] Error writing to server: {e}")
 
     async def _write_to_agent(self, data: str | bytes):
         try:
@@ -517,8 +529,9 @@ class VanguardProxy:
             else:
                 sys.stdout.buffer.write(buf)
                 sys.stdout.buffer.flush()
-        except Exception:
-            pass
+        except Exception as e:
+            # MED-1 Fix: Log swallowed errors
+            logger.error(f"[Vanguard] Error writing to agent: {e}")
 
     # -----------------------------------------------------------------------
     # Shutdown

@@ -11,6 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Optional
+import os
 import yaml
 
 from core.models import InspectionResult, RuleMatch, RuleAction, RuleSeverity, SafeZone
@@ -191,13 +192,21 @@ class RulesEngine:
         Verify tool arguments against defined Safe Zones (Jails).
         Returns a BLOCK InspectionResult if a breach is detected.
         """
-        # Only check tools/call methods
-        if message.get("method") != "tools/call":
-            return None
-        
+        # Identify tool calls regardless of strictly formatted "tools/call" method
+        # CRIT-1 Fix: Support both standard and fallback tool call formats
         params = message.get("params", {})
         tool_name = params.get("name")
         args = params.get("arguments", {})
+
+        # Fallback for non-standard formats (e.g. from custom clients)
+        if not tool_name:
+            tool_name = message.get("name")
+        if not args:
+            args = message.get("arguments", {})
+
+        # If it doesn't look like a tool call at all, skip safe zones
+        if not tool_name or not isinstance(args, dict):
+            return None
 
         # Find any safe zones for this tool
         relevant_zones = [z for z in self.safe_zones if z.tool == tool_name]
@@ -297,6 +306,18 @@ class RulesEngine:
                 layer=1,
                 rule_matches=matches,
             )
+
+        # CRIT-2 Fix: Support VANGUARD_DEFAULT_POLICY=DENY
+        default_policy = os.getenv("VANGUARD_DEFAULT_POLICY", "ALLOW").upper()
+        if default_policy == "DENY":
+            # Only deny if it actually looks like a tool call or restricted method
+            method = message.get("method")
+            if method in ("tools/call", "tools/list", "resources/read", "resources/list") or message.get("name"):
+                logger.warning(f"DEFAULT-DENY: Blocking unmatched request for {method or message.get('name')}")
+                return InspectionResult.block(
+                    reason="Security Policy: Access denied by default (unrecognized or unauthorized tool/method).",
+                    layer=1,
+                )
 
         _log_latency(t_start, "Layer 1 ALLOW")
         return InspectionResult.allow()
