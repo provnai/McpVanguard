@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "rules": {
+    "commands.yaml": {
+      "sha256": "bd5c2843b88e87cb0ac23867ed91a0d52462635a24e34ffa3f1def3869071bcd"
+    },
+    "filesystem.yaml": {
+      "sha256": "e982d4d268e35cdbaee0f017a925c2d7f6c65f6c86fda7673ea2847986098536"
+    },
+    "network.yaml": {
+      "sha256": "55993d101db800d477f8312e7063491c3ec3841ede9469bd0eca00eeb483283d"
+    },
+    "privilege.yaml": {
+      "sha256": "eaf3f4e8d0ab629b2a4697620654182152ad7846152010f9115fffaace884ec7"
+    },
+    "jailbreak.yaml": {
+      "sha256": "bcece90fc87325367085dde330a77343046dc641aa4d842af08a38ba778aa28f"
+    }
+  }
+}

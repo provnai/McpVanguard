@@ -123,6 +123,15 @@ class RulesEngine:
         self.load_rules()
         self.load_safe_zones()
 
+    def _sort_rules(self) -> None:
+        severity_order = {
+            RuleSeverity.CRITICAL: 0,
+            RuleSeverity.HIGH: 1,
+            RuleSeverity.MEDIUM: 2,
+            RuleSeverity.LOW: 3,
+        }
+        self.rules.sort(key=lambda r: severity_order.get(r.severity, 99))
+
     def load_rules(self) -> int:
         """Load (or reload) all YAML files from the rules directory."""
         self.rules.clear()
@@ -152,14 +161,38 @@ class RulesEngine:
             except Exception as e:
                 logger.error(f"Failed to load {yaml_file.name}: {e}")
 
-        # Sort: CRITICAL first, then HIGH, MEDIUM, LOW
-        severity_order = {
-            RuleSeverity.CRITICAL: 0,
-            RuleSeverity.HIGH: 1,
-            RuleSeverity.MEDIUM: 2,
-            RuleSeverity.LOW: 3,
-        }
-        self.rules.sort(key=lambda r: severity_order.get(r.severity, 99))
+        self._sort_rules()
+        return loaded
+
+    def add_runtime_rules(self, yaml_text: str, source_file: str = "runtime") -> list[str]:
+        """
+        Parse one or more YAML rule definitions and append them to the active ruleset.
+        Returns the inserted rule IDs.
+        """
+        data = yaml.safe_load(yaml_text)
+        if isinstance(data, dict):
+            data = [data]
+
+        if not isinstance(data, list) or not data:
+            raise ValueError("Runtime rule payload must be a YAML rule object or a non-empty list of rules.")
+
+        added_ids: list[str] = []
+        existing_ids = {rule.rule_id for rule in self.rules}
+        for rule_data in data:
+            if not isinstance(rule_data, dict):
+                raise ValueError("Each runtime rule must be a YAML mapping.")
+            if "allowed_prefixes" in rule_data or rule_data.get("tool"):
+                raise ValueError("Safe Zone definitions are not supported by vanguard_apply_rule.")
+
+            rule = Rule(rule_data, source_file=source_file)
+            if rule.rule_id in existing_ids:
+                raise ValueError(f"Rule ID '{rule.rule_id}' already exists.")
+            self.rules.append(rule)
+            existing_ids.add(rule.rule_id)
+            added_ids.append(rule.rule_id)
+
+        self._sort_rules()
+        return added_ids
 
     def load_safe_zones(self) -> int:
         """Load safe zones configuration from safe_zones.yaml."""

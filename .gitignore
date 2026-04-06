@@ -30,6 +30,9 @@ audit.log
 *.txt
 run_tests_isolated.py
 
+# Local signing material
+.signing/
+
 # Arena temp files
 .arena_rules_tmp/
 arena/exploits/

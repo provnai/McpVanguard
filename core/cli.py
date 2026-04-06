@@ -9,11 +9,16 @@ Usage:
 """
 
 from __future__ import annotations
+import hashlib
+import json
 import logging
 import os
+import re
 import sys
+from pathlib import Path
 from typing import Optional
 
+import httpx
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
@@ -28,6 +33,7 @@ from core import __version__
 from core.proxy import ProxyConfig, run_proxy
 from core.rules_engine import RulesEngine
 from core import semantic, behavioral
+from core import signing
 
 app = typer.Typer(
     name="vanguard",
@@ -38,6 +44,88 @@ app = typer.Typer(
 console = Console()
 # For proxy/server commands (stderr) to avoid corrupting MCP stdio
 proxy_console = Console(stderr=True)
+
+RULE_FILES = [
+    "commands.yaml",
+    "filesystem.yaml",
+    "network.yaml",
+    "privilege.yaml",
+    "jailbreak.yaml",
+]
+RULE_MANIFEST = "manifest.json"
+RULE_SIGNATURE = signing.RULE_SIGNATURE
+REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def _validate_repo_slug(repo: str) -> str:
+    if not REPO_SLUG_RE.fullmatch(repo):
+        raise ValueError("Repository must be a GitHub slug like 'owner/repo'.")
+    return repo
+
+
+def _resolve_github_ref(client, repo: str, ref: str) -> str:
+    if re.fullmatch(r"[0-9a-fA-F]{40}", ref):
+        return ref
+
+    url = f"https://api.github.com/repos/{repo}/commits/{ref}"
+    resp = client.get(url, headers={"Accept": "application/vnd.github+json"})
+    resp.raise_for_status()
+    sha = resp.json().get("sha")
+    if not sha or not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+        raise ValueError(f"Could not resolve ref '{ref}' to an immutable commit SHA.")
+    return sha
+
+
+def _raw_rules_url(repo: str, ref: str, filename: str) -> str:
+    return f"https://raw.githubusercontent.com/{repo}/{ref}/rules/{filename}"
+
+
+def _fetch_rules_manifest(client, repo: str, ref: str) -> dict:
+    resp = client.get(_raw_rules_url(repo, ref, RULE_MANIFEST))
+    resp.raise_for_status()
+    manifest = resp.json()
+    rules = manifest.get("rules")
+    if not isinstance(rules, dict) or not rules:
+        raise ValueError("Signature manifest is missing the 'rules' mapping.")
+    return manifest
+
+
+def _fetch_manifest_signature(client, repo: str, ref: str) -> dict:
+    resp = client.get(_raw_rules_url(repo, ref, RULE_SIGNATURE))
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _verify_rule_bundle(
+    downloads: dict[str, str],
+    manifest: dict,
+    signature_doc: Optional[dict],
+    allow_unsigned: bool,
+    trusted_signers: dict[str, dict[str, str]],
+) -> None:
+    rules = manifest.get("rules") if manifest else None
+    if not rules and not allow_unsigned:
+        raise ValueError("Remote signature manifest is missing. Re-run with --allow-unsigned to bypass.")
+
+    if signature_doc:
+        signing.verify_manifest_signature(manifest, signature_doc, trusted_signers=trusted_signers)
+    elif not allow_unsigned:
+        raise ValueError("Remote detached manifest signature is missing. Re-run with --allow-unsigned to bypass.")
+
+    for filename, content in downloads.items():
+        if not rules:
+            continue
+        entry = rules.get(filename)
+        if not isinstance(entry, dict) or "sha256" not in entry:
+            raise ValueError(f"Manifest entry missing sha256 for {filename}.")
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if digest != entry["sha256"]:
+            raise ValueError(f"Integrity verification failed for {filename}.")
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +158,11 @@ def start(
         None,
         "--behavioral/--no-behavioral",
         help="Enable Layer 3 behavioral analysis.",
+    ),
+    management_tools: Optional[bool] = typer.Option(
+        None,
+        "--management-tools/--no-management-tools",
+        help="Expose native Vanguard management tools. Disabled by default.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -116,6 +209,8 @@ def start(
         config.semantic_enabled = semantic
     if behavioral is not None:
         config.behavioral_enabled = behavioral
+    if management_tools is not None:
+        config.management_tools_enabled = management_tools
 
     # Phase 5 overrides
     if semantic:
@@ -129,7 +224,7 @@ def start(
         with proxy_console.status("[bold yellow]Checking Ollama health..."):
             import asyncio
             from core import semantic as semantic_mod
-            semantic_ready = asyncio.run(semantic_mod.check_ollama_health())
+            semantic_ready = asyncio.run(semantic_mod.check_semantic_health())
 
     # Load and display rules summary
     engine = RulesEngine(rules_dir=rules_dir)
@@ -147,6 +242,11 @@ def start(
         proxy_console.print(f"[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
     else:
         proxy_console.print(f"[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
+
+    if config.management_tools_enabled:
+        proxy_console.print(f"[bold]Mgmt:[/bold]       [green]Enabled[/green] (Native Vanguard tools exposed)")
+    else:
+        proxy_console.print(f"[bold]Mgmt:[/bold]       [dim]Disabled[/dim] (Native Vanguard tools hidden)")
     
     if semantic:
         status = "Ready" if semantic_ready else "Offline (Scoring will be skipped)"
@@ -192,6 +292,11 @@ def sse(
     log_file: str = typer.Option("audit.log", "--log-file", "-l"),
     semantic: Optional[bool] = typer.Option(None, "--semantic/--no-semantic"),
     behavioral: Optional[bool] = typer.Option(None, "--behavioral/--no-behavioral"),
+    management_tools: Optional[bool] = typer.Option(
+        None,
+        "--management-tools/--no-management-tools",
+        help="Expose native Vanguard management tools. Disabled by default.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
     """
@@ -215,6 +320,8 @@ def sse(
         config.semantic_enabled = semantic
     if behavioral is not None:
         config.behavioral_enabled = behavioral
+    if management_tools is not None:
+        config.management_tools_enabled = management_tools
 
     import shlex
     server_cmd = shlex.split(server)
@@ -291,51 +398,141 @@ def update(
     repo: str = typer.Option(
         "ModelContextProtocol/McpVanguard",
         "--repo",
-        help="GitHub repository to fetch signatures from.",
+        help="GitHub repository slug to fetch signatures from.",
+    ),
+    ref: str = typer.Option(
+        "main",
+        "--ref",
+        help="Git ref to fetch from. Branches are resolved to an immutable commit SHA before download.",
     ),
     rules_dir: str = typer.Option("rules", "--rules-dir", help="Directory for rules."),
+    allow_unsigned: bool = typer.Option(
+        False,
+        "--allow-unsigned",
+        help="Allow updates without a remote rules manifest. This weakens integrity guarantees.",
+    ),
+    trust_key_file: Optional[Path] = typer.Option(
+        None,
+        "--trust-key-file",
+        help="Additional trusted signer public-key JSON file for private rule registries.",
+    ),
 ):
     """
     Fetch the latest security signatures from the official registry.
     This updates your local rules/ directory with the newest threats.
     """
-    import httpx
+    try:
+        repo = _validate_repo_slug(repo)
+    except ValueError as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise typer.Exit(code=1)
 
-    RULE_FILES = [
-        "commands.yaml",
-        "filesystem.yaml",
-        "network.yaml",
-        "privilege.yaml",
-        "jailbreak.yaml",
-    ]
-    base_url = f"https://raw.githubusercontent.com/{repo}/main/rules"
-    rules_dir_path = rules_dir
+    console.print(f"[bold blue]Syncing signatures from {repo}@{ref}...[/bold blue]")
 
-    console.print(f"[bold blue]Syncing signatures from {repo}...[/bold blue]")
+    try:
+        extra_signers = [signing.load_signer_file(trust_key_file)] if trust_key_file else None
+        trusted_signers = signing.load_trusted_signers(extra_signers=extra_signers)
+        with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+            resolved_ref = _resolve_github_ref(client, repo, ref)
+            console.print(f"[dim]Resolved ref:[/dim] {resolved_ref}")
 
-    updated = 0
-    failed = 0
-    with console.status("[bold yellow]Fetching latest rules...[/bold yellow]"):
-        for filename in RULE_FILES:
-            url = f"{base_url}/{filename}"
+            manifest = None
+            signature_doc = None
             try:
-                with httpx.Client(timeout=10.0) as client:
-                    resp = client.get(url)
-                    resp.raise_for_status()
-                dest = os.path.join(rules_dir_path, filename)
-                os.makedirs(rules_dir_path, exist_ok=True)
-                with open(dest, "w", encoding="utf-8") as f:
-                    f.write(resp.text)
-                console.print(f"  [green]SUCCESS:[/green] Updated {filename}")
-                updated += 1
-            except Exception as exc:
-                console.print(f"  [red]FAILURE:[/red] {filename}: {exc}")
-                failed += 1
+                manifest = _fetch_rules_manifest(client, repo, resolved_ref)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404 or not allow_unsigned:
+                    raise
+                console.print("[yellow]Warning:[/yellow] Remote rules manifest not found; proceeding unsigned.")
 
-    if failed == 0:
-        console.print(f"\n[bold green]All {updated} signature files updated successfully.[/bold green]")
-    else:
-        console.print(f"\n[yellow]Updated {updated} files, {failed} failed. Check your connection.[/yellow]")
+            if manifest is not None:
+                try:
+                    signature_doc = _fetch_manifest_signature(client, repo, resolved_ref)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 404:
+                        raise
+                    if allow_unsigned:
+                        console.print("[yellow]Warning:[/yellow] Remote detached signature not found; proceeding unsigned.")
+                    signature_doc = None
+
+            downloads: dict[str, str] = {}
+            for filename in RULE_FILES:
+                resp = client.get(_raw_rules_url(repo, resolved_ref, filename))
+                resp.raise_for_status()
+                downloads[filename] = resp.text
+
+            _verify_rule_bundle(
+                downloads,
+                manifest,
+                signature_doc,
+                allow_unsigned=allow_unsigned,
+                trusted_signers=trusted_signers,
+            )
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/bold red] Failed to fetch verified signatures: {exc}")
+        raise typer.Exit(code=1)
+
+    os.makedirs(rules_dir, exist_ok=True)
+    for filename, content in downloads.items():
+        dest = os.path.join(rules_dir, filename)
+        with open(dest, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+        console.print(f"  [green]SUCCESS:[/green] Updated {filename}")
+
+    if manifest is not None:
+        _write_json(Path(rules_dir) / RULE_MANIFEST, manifest)
+        console.print(f"  [green]SUCCESS:[/green] Updated {RULE_MANIFEST}")
+    if signature_doc is not None:
+        _write_json(Path(rules_dir) / RULE_SIGNATURE, signature_doc)
+        console.print(f"  [green]SUCCESS:[/green] Updated {RULE_SIGNATURE}")
+
+    console.print(f"\n[bold green]Verified and updated {len(downloads)} rule files successfully.[/bold green]")
+
+
+# ---------------------------------------------------------------------------
+# vanguard keygen
+# ---------------------------------------------------------------------------
+
+@app.command()
+def keygen(
+    key_id: str = typer.Option(..., "--key-id", help="Identifier embedded into the detached signature."),
+    private_key_out: Path = typer.Option(..., "--private-key-out", help="Output path for the private Ed25519 PEM key."),
+    public_key_out: Path = typer.Option(..., "--public-key-out", help="Output path for the public signer JSON document."),
+):
+    """Generate an Ed25519 keypair for signing detached rule manifests."""
+    private_pem, public_doc = signing.generate_signing_keypair(key_id)
+    private_key_out.parent.mkdir(parents=True, exist_ok=True)
+    private_key_out.write_bytes(private_pem)
+    try:
+        os.chmod(private_key_out, 0o600)
+    except OSError:
+        pass
+    _write_json(public_key_out, public_doc)
+    console.print(f"[green]SUCCESS:[/green] Wrote private key to {private_key_out}")
+    console.print(f"[green]SUCCESS:[/green] Wrote public signer document to {public_key_out}")
+
+
+# ---------------------------------------------------------------------------
+# vanguard sign-rules
+# ---------------------------------------------------------------------------
+
+@app.command()
+def sign_rules(
+    key_id: str = typer.Option(..., "--key-id", help="Signer key identifier to embed in the detached signature."),
+    private_key: Path = typer.Option(..., "--private-key", help="Path to the private Ed25519 PEM key."),
+    rules_dir: str = typer.Option("rules", "--rules-dir", help="Directory containing the signed rule bundle."),
+):
+    """Rebuild the local rules manifest and detached signature."""
+    manifest = signing.build_rules_manifest(rules_dir, RULE_FILES)
+    signature_doc = signing.sign_manifest(
+        manifest=manifest,
+        private_key_pem=private_key.read_bytes(),
+        key_id=key_id,
+    )
+    _write_json(Path(rules_dir) / RULE_MANIFEST, manifest)
+    _write_json(Path(rules_dir) / RULE_SIGNATURE, signature_doc)
+    console.print(f"[green]SUCCESS:[/green] Updated {Path(rules_dir) / RULE_MANIFEST}")
+    console.print(f"[green]SUCCESS:[/green] Updated {Path(rules_dir) / RULE_SIGNATURE}")
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +561,7 @@ def init(
             f.write("VANGUARD_LOG_LEVEL=INFO\n")
             f.write("VANGUARD_MODE=audit  # Recommended for new setups\n")
             f.write("VANGUARD_RULES_DIR=rules\n")
+            f.write("VANGUARD_MANAGEMENT_TOOLS_ENABLED=false\n")
             f.write("# VANGUARD_OPENAI_API_KEY=\n")
             f.write("# VANGUARD_REDIS_URL=\n")
         console.print(f"  [green]SUCCESS:[/green] Created {env_path}")
@@ -504,7 +702,7 @@ def audit_compliance(
             missing_hints.append(t["name"])
     
     if not missing_hints:
-        console.print("  [green]✓[/green] All tools (including Vanguard natives) have safety hints.")
+        console.print("  [green]✓[/green] All exposed tools have safety hints.")
     else:
         console.print(f"  [red]✗[/red] Missing hints for: {', '.join(missing_hints)}")
 

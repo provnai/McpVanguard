@@ -1,21 +1,22 @@
 """
 core/dashboard.py
-A lightweight FastAPI/HTMX dashboard for the McpVanguard proxy.
+A lightweight Starlette dashboard for the McpVanguard audit log.
 """
 
 import json
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.applications import Starlette
+from starlette.responses import HTMLResponse
+from starlette.routing import Route
 
-app = FastAPI(title="McpVanguard Audit Dashboard")
+from core import __version__
 
 LOG_FILE = os.getenv("VANGUARD_LOG_FILE", "audit.log")
+
 
 class AuditLogItem(BaseModel):
     timestamp: str
@@ -27,13 +28,13 @@ class AuditLogItem(BaseModel):
     reason: Optional[str]
     layer: Optional[int]
 
+
 def parse_log_line(line: str) -> Optional[AuditLogItem]:
     """Parse a text line or JSON line from the audit log."""
     line = line.strip()
     if not line:
         return None
-        
-    # Check if it is JSON
+
     if line.startswith("{"):
         try:
             data = json.loads(line)
@@ -46,19 +47,17 @@ def parse_log_line(line: str) -> Optional[AuditLogItem]:
                 method=data.get("method"),
                 tool_name=data.get("tool_name"),
                 reason=data.get("blocked_reason"),
-                layer=data.get("layer_triggered")
+                layer=data.get("layer_triggered"),
             )
         except Exception:
             return None
-            
-    # Text format: [2026-03-17 06:10:56] [ALLOW]   (Layer 1)  | session | agent→server [tool] — reason
+
     try:
-        # Very brittle parser for now, should ideally use JSON for the dashboard
         ts_part = line[1:20]
         action_start = line.find("[", 21)
         action_end = line.find("]", action_start)
-        action = line[action_start+1:action_end]
-        
+        action = line[action_start + 1 : action_end]
+
         return AuditLogItem(
             timestamp=ts_part,
             action=action,
@@ -67,125 +66,275 @@ def parse_log_line(line: str) -> Optional[AuditLogItem]:
             method=None,
             tool_name=None,
             reason=None,
-            layer=None
+            layer=None,
         )
     except Exception:
         return None
 
-@app.get("/", response_class=HTMLResponse)
-async def get_dashboard():
-    html_content = """
+
+async def get_dashboard(request):
+    html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>McpVanguard Audit Dashboard</title>
-        <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-        <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            .action-ALLOW { color: #10b981; }
-            .action-BLOCK { color: #ef4444; font-weight: bold; }
-            .action-WARN { color: #f59e0b; }
-            .action-SHADOW-BLOCK { color: #6366f1; font-style: italic; }
+            :root {{
+                --bg: #08111f;
+                --panel: #0e1a2b;
+                --panel-alt: #14233a;
+                --border: #28405f;
+                --text: #e2e8f0;
+                --muted: #8aa0ba;
+                --accent: #31c48d;
+                --danger: #fb7185;
+                --warn: #fbbf24;
+                --info: #60a5fa;
+                --shadow: #a78bfa;
+            }}
+            * {{ box-sizing: border-box; }}
+            body {{
+                margin: 0;
+                background:
+                    radial-gradient(circle at top, rgba(49, 196, 141, 0.12), transparent 32%),
+                    linear-gradient(180deg, #050b14 0%, var(--bg) 100%);
+                color: var(--text);
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            }}
+            .shell {{ max-width: 1180px; margin: 0 auto; padding: 32px 20px 48px; }}
+            .header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 16px;
+                padding-bottom: 18px;
+                margin-bottom: 24px;
+                border-bottom: 1px solid var(--border);
+            }}
+            .headline {{ margin: 0; font-size: 2.1rem; letter-spacing: 0.02em; color: var(--accent); }}
+            .subhead {{ margin: 6px 0 0; color: var(--muted); }}
+            .badge {{
+                border: 1px solid rgba(49, 196, 141, 0.3);
+                background: rgba(49, 196, 141, 0.12);
+                color: #9df2cd;
+                border-radius: 999px;
+                padding: 8px 12px;
+                font-size: 0.8rem;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                white-space: nowrap;
+            }}
+            .stats {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 14px;
+                margin-bottom: 24px;
+            }}
+            .card {{
+                background: linear-gradient(180deg, rgba(20, 35, 58, 0.96), rgba(10, 19, 32, 0.98));
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                padding: 16px;
+                box-shadow: 0 14px 40px rgba(0, 0, 0, 0.16);
+            }}
+            .card h3 {{
+                margin: 0 0 8px;
+                color: var(--muted);
+                font-size: 0.74rem;
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+            }}
+            .card p {{ margin: 0; font-size: 1.85rem; font-weight: 700; }}
+            .stat-danger {{ color: var(--danger); }}
+            .stat-warn {{ color: var(--warn); }}
+            .stat-info {{ color: var(--info); text-transform: uppercase; }}
+            .table-wrap {{
+                background: rgba(14, 26, 43, 0.94);
+                border: 1px solid var(--border);
+                border-radius: 16px;
+                overflow: hidden;
+                box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+            }}
+            table {{ width: 100%; border-collapse: collapse; }}
+            thead {{ background: rgba(21, 36, 60, 0.96); }}
+            th, td {{
+                padding: 14px 16px;
+                border-bottom: 1px solid rgba(40, 64, 95, 0.72);
+                text-align: left;
+                vertical-align: top;
+            }}
+            th {{
+                color: #b8c7d9;
+                font-size: 0.76rem;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+            }}
+            td {{ font-size: 0.92rem; }}
+            tbody tr:hover {{ background: rgba(20, 35, 58, 0.72); }}
+            .timestamp, .session {{ color: var(--muted); font-family: "Consolas", "Courier New", monospace; }}
+            .direction {{
+                display: block;
+                margin-bottom: 4px;
+                color: #6f89a6;
+                font-size: 0.72rem;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }}
+            .reason {{
+                max-width: 420px;
+                color: #c0cede;
+                word-break: break-word;
+            }}
+            .empty {{
+                padding: 28px 18px;
+                color: var(--muted);
+                text-align: center;
+                font-style: italic;
+            }}
+            .footer {{
+                margin-top: 22px;
+                color: #6f89a6;
+                font-size: 0.75rem;
+                letter-spacing: 0.12em;
+                text-align: center;
+                text-transform: uppercase;
+            }}
+            .action-ALLOW {{ color: var(--accent); }}
+            .action-BLOCK {{ color: var(--danger); font-weight: 700; }}
+            .action-WARN {{ color: var(--warn); font-weight: 700; }}
+            .action-SHADOW-BLOCK {{ color: var(--shadow); font-style: italic; font-weight: 700; }}
+            @media (max-width: 760px) {{
+                .header {{ align-items: flex-start; flex-direction: column; }}
+                th, td {{ padding: 12px; }}
+            }}
         </style>
     </head>
-    <body class="bg-slate-900 text-slate-100 font-sans">
-        <div class="max-w-6xl mx-auto p-8">
-            <header class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
+    <body>
+        <div class="shell">
+            <header class="header">
                 <div>
-                    <h1 class="text-3xl font-bold text-emerald-500">McpVanguard Audit</h1>
-                    <p class="text-slate-400">Real-time security monitoring for MCP agents</p>
+                    <h1 class="headline">McpVanguard Audit</h1>
+                    <p class="subhead">Real-time security monitoring for MCP agents</p>
                 </div>
-                <div class="text-right">
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-900 text-emerald-300">
-                        LIVE MONITORING
-                    </span>
-                </div>
+                <span class="badge">Live Monitoring</span>
             </header>
 
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 class="text-slate-400 text-sm mb-1 uppercase tracking-wider">Total Requests</h3>
-                    <p class="text-2xl font-bold" id="stat-total">--</p>
+            <div class="stats">
+                <div class="card">
+                    <h3>Total Requests</h3>
+                    <p id="stat-total">--</p>
                 </div>
-                <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 class="text-slate-400 text-sm mb-1 uppercase tracking-wider">Blocked</h3>
-                    <p class="text-2xl font-bold text-red-500" id="stat-blocked">--</p>
+                <div class="card">
+                    <h3>Blocked</h3>
+                    <p class="stat-danger" id="stat-blocked">--</p>
                 </div>
-                <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 class="text-slate-400 text-sm mb-1 uppercase tracking-wider">Entropy Violations</h3>
-                    <p class="text-2xl font-bold text-orange-500" id="stat-entropy">--</p>
+                <div class="card">
+                    <h3>Entropy Violations</h3>
+                    <p class="stat-warn" id="stat-entropy">--</p>
                 </div>
-                <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 class="text-slate-400 text-sm mb-1 uppercase tracking-wider">Mode</h3>
-                    <p class="text-2xl font-bold text-blue-500 uppercase">Audit Only</p>
+                <div class="card">
+                    <h3>Mode</h3>
+                    <p class="stat-info" id="stat-mode">Audit Only</p>
                 </div>
             </div>
 
-            <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-                <table class="w-full text-left">
-                    <thead class="bg-slate-700 text-slate-300 border-b border-slate-600">
+            <div class="table-wrap">
+                <table>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-3 text-sm font-semibold uppercase tracking-wider">Timestamp</th>
-                            <th class="px-4 py-3 text-sm font-semibold uppercase tracking-wider">Action</th>
-                            <th class="px-4 py-3 text-sm font-semibold uppercase tracking-wider">Session</th>
-                            <th class="px-4 py-3 text-sm font-semibold uppercase tracking-wider">Tool / Method</th>
-                            <th class="px-4 py-3 text-sm font-semibold uppercase tracking-wider">Reason</th>
+                            <th>Timestamp</th>
+                            <th>Action</th>
+                            <th>Session</th>
+                            <th>Tool / Method</th>
+                            <th>Reason</th>
                         </tr>
                     </thead>
-                    <tbody id="logs-container" hx-get="/logs" hx-trigger="load, every 3s" hx-swap="innerHTML">
+                    <tbody id="logs-container">
                         <tr>
-                            <td colspan="5" class="px-4 py-8 text-center text-slate-500 italic">Connecting to audit log...</td>
+                            <td colspan="5" class="empty">Connecting to audit log...</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-            
-            <footer class="mt-8 text-center text-slate-500 text-xs uppercase tracking-widest">
-                Provnai Open Research Initiative — McpVanguard v1.6.0
+
+            <footer class="footer">
+                Provnai Open Research Initiative - McpVanguard v{__version__}
             </footer>
         </div>
+        <script>
+            async function refreshLogs() {{
+                const container = document.getElementById("logs-container");
+                try {{
+                    const response = await fetch("/logs", {{
+                        headers: {{"x-requested-with": "mcpvanguard-dashboard"}}
+                    }});
+                    if (!response.ok) {{
+                        throw new Error("HTTP " + response.status);
+                    }}
+                    container.innerHTML = await response.text();
+                }} catch (error) {{
+                    container.innerHTML = "<tr><td colspan='5' class='empty'>Dashboard refresh failed: " + error.message + "</td></tr>";
+                }}
+            }}
+
+            window.addEventListener("load", function () {{
+                refreshLogs();
+                window.setInterval(refreshLogs, 3000);
+            }});
+        </script>
     </body>
     </html>
     """
     return HTMLResponse(content=html_content)
 
-@app.get("/logs")
-async def get_logs_fragment():
+
+async def get_logs_fragment(request):
     if not os.path.exists(LOG_FILE):
         return HTMLResponse("<tr><td colspan='5' class='px-4 py-4 text-center'>Log file not found</td></tr>")
-        
+
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
-            lines = f.readlines()[-20:] # Last 20 lines
-            
+            lines = f.readlines()[-20:]
+
         rows = []
         for line in reversed(lines):
             item = parse_log_line(line)
             if not item:
                 continue
-                
+
             row = f"""
-            <tr class="border-b border-slate-700 hover:bg-slate-700/50 transition-colors">
-                <td class="px-4 py-3 text-sm text-slate-400 font-mono">{item.timestamp}</td>
-                <td class="px-4 py-3 text-sm font-bold action-{item.action}">{item.action}</td>
-                <td class="px-4 py-3 text-sm text-slate-400 font-mono">{item.session_id}</td>
-                <td class="px-4 py-3 text-sm font-medium text-slate-200">
-                    <span class="text-slate-500 text-xs block uppercase tracking-tighter">{item.direction}</span>
+            <tr>
+                <td class="timestamp">{item.timestamp}</td>
+                <td class="action-{item.action}">{item.action}</td>
+                <td class="session">{item.session_id}</td>
+                <td>
+                    <span class="direction">{item.direction}</span>
                     {item.tool_name or item.method or '---'}
                 </td>
-                <td class="px-4 py-3 text-xs text-slate-400 max-w-xs truncate">
+                <td class="reason">
                     {item.reason or '---'}
                 </td>
             </tr>
             """
             rows.append(row)
-            
+
         return HTMLResponse(content="".join(rows))
     except Exception as e:
         return HTMLResponse(f"<tr><td colspan='5' class='px-4 py-4 text-center text-red-500'>Error reading logs: {e}</td></tr>")
 
+
+app = Starlette(
+    debug=False,
+    routes=[
+        Route("/", get_dashboard, methods=["GET"]),
+        Route("/logs", get_logs_fragment, methods=["GET"]),
+    ],
+)
+
+
 def start_dashboard(host: str = "127.0.0.1", port: int = 4040):
     import uvicorn
+
     uvicorn.run(app, host=host, port=port, log_level="warning")

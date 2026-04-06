@@ -4,7 +4,7 @@ tests/test_semantic.py — Tests for Layer 2 semantic analysis using mocks.
 
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from core import semantic
 
 @pytest.fixture
@@ -157,3 +157,21 @@ def test_semantic_custom_provider(mock_ollama_client):
     args, kwargs = mock_ollama_client.post.call_args
     assert args[0] == "https://api.groq.com/openai/v1/chat/completions"
     assert kwargs["json"]["model"] == "custom-model"
+
+
+@pytest.mark.asyncio
+async def test_semantic_runtime_enable_override():
+    """CLI/runtime overrides should be able to enable semantic scoring post-import."""
+    message = {
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "/etc/shadow"}}
+    }
+
+    with patch("core.semantic.ENABLED", False), \
+         patch("core.semantic._score_sync", return_value=(0.91, "runtime override")):
+        result = await semantic.score_intent(message, enabled=True)
+
+    assert result is not None
+    assert result.action == "BLOCK"
+    assert result.semantic_score == 0.91
+    assert "runtime override" in result.block_reason

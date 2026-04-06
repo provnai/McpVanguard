@@ -43,7 +43,7 @@ Execute the following prompts in Claude Desktop to trigger Vanguard security lay
 ## 📊 Monitoring
 During testing, you can monitor live events in two ways:
 1.  **CLI Console**: Vanguard prints colored block notifications to `stderr`.
-2.  **Visual Dashboard**: Run `vanguard ui --port 4040` to see the real-time HTMX security feed.
+2.  **Visual Dashboard**: Run `vanguard ui --port 4040` to see the real-time self-hosted security feed.
 
 ## 🔍 Troubleshooting
 If the server fails to start, ensure:

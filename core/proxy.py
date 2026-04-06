@@ -58,6 +58,7 @@ class ProxyConfig:
         self.rules_dir: str = os.getenv("VANGUARD_RULES_DIR", "rules")
         self.semantic_enabled: bool = os.getenv("VANGUARD_SEMANTIC_ENABLED", "false").lower() == "true"
         self.behavioral_enabled: bool = os.getenv("VANGUARD_BEHAVIORAL_ENABLED", "true").lower() == "true"
+        self.management_tools_enabled: bool = os.getenv("VANGUARD_MANAGEMENT_TOOLS_ENABLED", "false").lower() == "true"
         self.block_threshold: float = float(os.getenv("VANGUARD_BLOCK_THRESHOLD", "0.8"))
         self.warn_threshold: float = float(os.getenv("VANGUARD_WARN_THRESHOLD", "0.5"))
         # Mode: "enforce" (default) or "audit" (log but don't block)
@@ -81,17 +82,31 @@ def setup_audit_logger(log_file: str) -> logging.Logger:
     audit = logging.getLogger("vanguard.audit")
     audit.setLevel(logging.INFO)
     audit.propagate = False
+    desired_path = os.path.abspath(log_file)
 
-    fh = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
-    )
-    fh.setFormatter(logging.Formatter("%(message)s"))
+    existing_file = False
+    existing_stderr = False
+    for handler in list(audit.handlers):
+        if isinstance(handler, logging.handlers.RotatingFileHandler):
+            if os.path.abspath(handler.baseFilename) == desired_path:
+                existing_file = True
+            else:
+                audit.removeHandler(handler)
+                handler.close()
+        elif isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stderr:
+            existing_stderr = True
 
-    ch = logging.StreamHandler(sys.stderr)
-    ch.setFormatter(logging.Formatter("%(message)s"))
+    if not existing_file:
+        fh = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
+        fh.setFormatter(logging.Formatter("%(message)s"))
+        audit.addHandler(fh)
 
-    audit.addHandler(fh)
-    audit.addHandler(ch)
+    if not existing_stderr:
+        ch = logging.StreamHandler(sys.stderr)
+        ch.setFormatter(logging.Formatter("%(message)s"))
+        audit.addHandler(ch)
     return audit
 
 
@@ -208,11 +223,61 @@ class VanguardProxy:
             tool_name = None
             if method == "tools/call":
                 tool_name = raw_message.get("params", {}).get("name")
-            
+
             # 1. Handle native Vanguard tools
             if method == "tools/call" and tool_name and tool_name.startswith("vanguard_"):
+                self._stats["total"] += 1
+                if self._session:
+                    self._session.record_call(
+                        tool_name=tool_name,
+                        method=method,
+                        params=raw_message.get("params", {}),
+                        action="ALLOW" if self.config.management_tools_enabled else "BLOCK",
+                    )
+
+                if not self.config.management_tools_enabled:
+                    telemetry.metrics.record_status("blocked")
+                    self._stats["blocked"] += 1
+                    self.audit.info(
+                        AuditEvent(
+                            session_id=self._session.session_id if self._session else "N/A",
+                            direction="agent→server",
+                            method=method,
+                            tool_name=tool_name,
+                            action="BLOCK",
+                            rule_id="VANGUARD-MGMT-DISABLED",
+                            blocked_reason="Management tools are disabled on this McpVanguard instance.",
+                        ).to_log_line(format=self.config.audit_format)
+                    )
+                    block_response = make_block_response(
+                        request_id=request_id,
+                        reason="Management tools are disabled on this McpVanguard instance.",
+                        rule_id="VANGUARD-MGMT-DISABLED",
+                    )
+                    await self._write_to_agent(json.dumps(block_response))
+                    continue
+
+                telemetry.metrics.record_status("allowed")
+                self._stats["allowed"] += 1
+                self.audit.info(
+                    AuditEvent(
+                        session_id=self._session.session_id if self._session else "N/A",
+                        direction="agent→server",
+                        method=method,
+                        tool_name=tool_name,
+                        action="ALLOW",
+                    ).to_log_line(format=self.config.audit_format)
+                )
                 args = raw_message.get("params", {}).get("arguments", {})
-                vanguard_result = await management.handle_vanguard_tool(tool_name, args)
+                vanguard_result = await management.handle_vanguard_tool(
+                    tool_name,
+                    args,
+                    context=management.ManagementContext(
+                        session_id=self._session.session_id if self._session else None,
+                        log_file=self.config.log_file,
+                        rules_engine=self.rules_engine,
+                    ),
+                )
                 response = {
                     "jsonrpc": "2.0",
                     "id": request_id,
@@ -335,6 +400,7 @@ class VanguardProxy:
             if not line:
                 break
 
+            throttle_delay = 0.0
             if self.config.behavioral_enabled and self._session:
                 try:
                     line_str = line.decode("utf-8", errors="replace")
@@ -344,6 +410,26 @@ class VanguardProxy:
                     
                     if resp_result and not resp_result.allowed:
                         logger.warning(f"[Vanguard] Blocking large response: {resp_result.block_reason}")
+                        request_id = None
+                        try:
+                            request_id = json.loads(line_str).get("id")
+                        except json.JSONDecodeError:
+                            pass
+
+                        if self.config.expose_block_reason:
+                            agent_reason = resp_result.block_reason or "Response blocked by security policy."
+                        else:
+                            agent_reason = "Response blocked by McpVanguard security policy."
+
+                        rule_id = resp_result.rule_matches[0].rule_id if resp_result.rule_matches else "VANGUARD-RESP"
+                        block_response = make_block_response(
+                            request_id=request_id,
+                            reason=agent_reason,
+                            rule_id=rule_id,
+                        )
+                        self._stats["blocked"] += 1
+                        telemetry.metrics.record_status("blocked")
+                        await self._write_to_agent(json.dumps(block_response))
                         continue
                         
                     # Requirement 3.1: Apply 1 byte/sec throttle if governor is empty
@@ -353,16 +439,10 @@ class VanguardProxy:
                     state.update_throttle_status()
 
                     if state.is_throttled:
-                        # Improved Throttling: Partition line into 1KB chunks with 1s delay
-                        # This prevents hanging the main thread indefinitely on large messages.
-                        chunk_size = 1024
+                        # Preserve JSON-RPC framing by delaying the full frame instead
+                        # of fragmenting one message into multiple newline-delimited chunks.
                         total_len = len(line)
-                        for i in range(0, total_len, chunk_size):
-                            chunk = line[i : i + chunk_size]
-                            await self._write_to_agent(chunk)
-                            if i + chunk_size < total_len:
-                                await asyncio.sleep(1.0) # 1KB/sec effective throughput
-                        continue # Already wrote the line in chunks
+                        throttle_delay = max(0.0, (total_len - 1024) / 1024.0)
                 except Exception as e:
                     logger.error(f"[Vanguard] Error in behavioral response inspection: {e}")
 
@@ -380,13 +460,16 @@ class VanguardProxy:
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
 
+            if throttle_delay > 0:
+                await asyncio.sleep(throttle_delay)
+
             await self._write_to_agent(line)
 
     def _enrich_tool_list(self, tools: list[dict]) -> list[dict]:
         """Inject Vanguard management tools and apply safety hints/titles."""
-        # Merge native tools
-        vanguard_tools = management.get_vanguard_tools()
-        all_tools = list(tools) + vanguard_tools
+        all_tools = list(tools)
+        if self.config.management_tools_enabled:
+            all_tools.extend(management.get_vanguard_tools())
         
         # Keywords for inference
         READ_PREFIXES = ("get_", "list_", "read_", "check_", "fetch_", "search_", "inspect_", "query_", "audit_")
@@ -449,7 +532,7 @@ class VanguardProxy:
 
         if self.config.semantic_enabled:
             t_start = time.monotonic()
-            sem_result = await semantic.score_intent(message)
+            sem_result = await semantic.score_intent(message, enabled=self.config.semantic_enabled)
             telemetry.metrics.record_latency("L2", (time.monotonic() - t_start) * 1000)
             if sem_result:
                 if not sem_result.allowed:
@@ -521,7 +604,7 @@ class VanguardProxy:
             if isinstance(data, str):
                 buf = (data if data.endswith("\n") else data + "\n").encode("utf-8")
             else:
-                buf = data.strip() + b"\n"
+                buf = data if data.endswith(b"\n") else data + b"\n"
 
             if self.agent_writer:
                 self.agent_writer.write(buf)
@@ -540,11 +623,23 @@ class VanguardProxy:
     async def _shutdown(self):
         if self._server_process:
             try:
-                if sys.platform == "win32":
-                    self._server_process.kill()
-                else:
-                    self._server_process.terminate()
-                await asyncio.wait_for(self._server_process.wait(), timeout=2.0)
+                if self._server_process.stdin:
+                    try:
+                        self._server_process.stdin.close()
+                        await asyncio.wait_for(self._server_process.stdin.wait_closed(), timeout=0.5)
+                    except Exception:
+                        pass
+
+                if self._server_process.returncode is None:
+                    if sys.platform == "win32":
+                        self._server_process.kill()
+                    else:
+                        self._server_process.terminate()
+                    await asyncio.wait_for(self._server_process.wait(), timeout=2.0)
+
+                transport = getattr(self._server_process, "_transport", None)
+                if transport is not None:
+                    transport.close()
             except Exception:
                 pass
 

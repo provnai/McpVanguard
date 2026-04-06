@@ -1,4 +1,6 @@
 import unittest
+import platform
+import tempfile
 from unittest.mock import patch, MagicMock
 from core.jail import check_path_jail, RESOLVE_BENEATH, _block_windows_bypass_patterns
 from pathlib import Path
@@ -42,6 +44,7 @@ class TestJailLogic(unittest.TestCase):
         allowed = ["/home/user/project"]
         self.assertTrue(check_path_jail("/home/user/project/file.txt", allowed))
         self.assertEqual(mock_libc.syscall.call_args[0][0], 437)
+        self.assertEqual(mock_libc.syscall.call_args[0][2], b"file.txt")
 
     @patch("os.path.exists")
     @patch("platform.system")
@@ -60,6 +63,13 @@ class TestJailLogic(unittest.TestCase):
 
         allowed = ["/home/user/project"]
         self.assertFalse(check_path_jail("/home/user/project/../../../etc/passwd", allowed))
+
+    @unittest.skipUnless(platform.system() == "Linux", "Linux-only real filesystem test")
+    def test_linux_absolute_path_within_zone_real_fs(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "file.txt"
+            path.write_text("ok", encoding="utf-8")
+            self.assertTrue(check_path_jail(str(path), [root]))
 
 
 class TestWindowsHardening(unittest.TestCase):

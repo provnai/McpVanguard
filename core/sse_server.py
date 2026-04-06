@@ -52,7 +52,30 @@ def _get_sse_config():
         "MAX_CONCURRENCY": int(os.getenv("VANGUARD_MAX_CONCURRENT_SSE", "5")),
         "MAX_GLOBAL_CONNECTIONS": int(os.getenv("VANGUARD_MAX_GLOBAL_CONNECTIONS", "50")),
         "RATE_LIMIT_PER_SEC": float(os.getenv("VANGUARD_SSE_RATE_LIMIT", "1.0")),
+        "MAX_BODY_BYTES": int(os.getenv("VANGUARD_SSE_MAX_BODY_BYTES", "131072")),
     }
+
+
+def _scope_headers(scope) -> dict[bytes, bytes]:
+    return dict(scope.get("headers", []))
+
+
+def _validate_message_request(scope, cfg: dict[str, Any]) -> tuple[bool, int, str]:
+    headers = _scope_headers(scope)
+    raw_type = headers.get(b"content-type", b"").decode("utf-8", errors="replace").lower()
+    if raw_type and "application/json" not in raw_type:
+        return False, 415, "Unsupported Content-Type. Use application/json."
+
+    raw_len = headers.get(b"content-length", b"").decode("utf-8", errors="replace").strip()
+    if raw_len:
+        try:
+            content_len = int(raw_len)
+        except ValueError:
+            return False, 400, "Invalid Content-Length header."
+        if content_len > cfg["MAX_BODY_BYTES"]:
+            return False, 413, f"Request body too large. Limit is {cfg['MAX_BODY_BYTES']} bytes."
+
+    return True, 200, ""
 
 def _check_auth(scope) -> tuple[bool, str]:
     """Returns (is_authed, error_message). Module-level for testing."""
@@ -236,6 +259,11 @@ async def handle_messages(scope, receive, send, ctx: ServerContext):
     
     if not await limiter.consume():
         await _send_error(send, 429, "Too Many Requests. Message rate limit exceeded.")
+        return
+
+    ok, status, message = _validate_message_request(scope, ctx.cfg)
+    if not ok:
+        await _send_error(send, status, message)
         return
 
     await ctx.sse_transport.handle_post_message(scope, receive, send)

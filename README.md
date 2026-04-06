@@ -1,12 +1,12 @@
 # McpVanguard 🛡️
-### Titan-Grade AI Firewall for MCP Agents (v1.7.0)
+### Titan-Grade AI Firewall for MCP Agents
 
 MCP (Model Context Protocol) enables AI agents to interact with host-level tools. **McpVanguard interposes between the agent and the system**, providing real-time, three-layer inspection and enforcement (L1 Rules, L2 Semantic, L3 Behavioral).
 
 Transparent integration. Zero-configuration requirements for existing servers.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
-[![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/1.8.0/)
+[![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
@@ -57,7 +57,44 @@ vanguard audit-compliance
 
 ---
 
+## Signed Rule Updates
+
+`vanguard update` now verifies two things before it accepts a remote rules bundle:
+
+1. `rules/manifest.json` hashes still match the downloaded rule files.
+2. `rules/manifest.sig.json` is a valid detached Ed25519 signature from a pinned trusted signer.
+
+Release workflow:
+
+```bash
+# Generate an offline signing keypair once
+vanguard keygen \
+  --key-id provnai-rules-2026q2 \
+  --private-key-out .signing/provnai-rules-2026q2.pem \
+  --public-key-out .signing/provnai-rules-2026q2.pub.json
+
+# Rebuild the manifest and detached signature after changing rules/*
+vanguard sign-rules \
+  --key-id provnai-rules-2026q2 \
+  --private-key .signing/provnai-rules-2026q2.pem \
+  --rules-dir rules
+```
+
+Keep the private key offline or in a secret manager. `--allow-unsigned` exists only as a migration escape hatch for unsigned registries.
+
+---
+
 ## 🧠 How it works
+
+### Operational Defaults
+
+- Native `vanguard_*` management tools are disabled by default.
+- Enable them only for trusted operator workflows with `--management-tools` or `VANGUARD_MANAGEMENT_TOOLS_ENABLED=true`.
+- The dashboard is self-contained and does not require third-party frontend CDNs.
+
+---
+
+### Runtime Flow
 
 Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVanguard inspects the request across three layers before it reaches the underlying server:
 

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-04-06 (The Trust Anchor Release)
+
+### Security
+- **Detached Rule Signatures** (`core/signing.py`, `core/cli.py`): `vanguard update` now requires a detached Ed25519 signature over `rules/manifest.json` by default, closing the remaining unsigned-update supply-chain gap. Added built-in trusted signer pinning plus `--trust-key-file` support for private registries.
+- **Management Surface Default-Off** (`core/proxy.py`, `core/cli.py`): Native `vanguard_*` tools are no longer exposed by default. They must be explicitly enabled with `VANGUARD_MANAGEMENT_TOOLS_ENABLED=true` or CLI flags, and disabled calls now fail closed with audit coverage.
+- **Management Audit Coverage** (`core/proxy.py`): Native Vanguard tool calls now enter the audit trail instead of bypassing it.
+- **Response-Path Integrity** (`core/proxy.py`): Response blocking now returns valid JSON-RPC errors and throttling preserves whole-frame JSON-RPC output instead of fragmenting messages.
+
+### Changed
+- **Self-Contained Dashboard** (`core/dashboard.py`): Removed third-party CDN dependencies for the dashboard frontend. The UI is now fully self-hosted and no longer depends on HTMX or Tailwind CDNs.
+- **Packaging Cleanup** (`pyproject.toml`, `requirements.txt`): Added `cryptography` for detached signature verification and removed the unused `fastapi` dependency from the runtime package manifest.
+- **Release Tooling** (`core/cli.py`): Added `vanguard keygen` and `vanguard sign-rules` commands for rule-signing workflows.
+
+### Added
+- **Signed Manifest Artifacts** (`rules/manifest.json`, `rules/manifest.sig.json`): The repo now ships a verified manifest plus detached signature for the current rule bundle.
+- **Regression Coverage** (`tests/test_cli_update.py`, `tests/test_rules_manifest.py`, `tests/test_dashboard_assets.py`, `tests/test_proxy_enrichment.py`): Added tests for detached signatures, trusted signer verification, dashboard self-containment, and management-tool default-off behavior.
+
 ## [1.8.1] - 2026-03-22 (Titan-Grade Security Hardening)
 
 ### Security (Audit Remediation)

@@ -8,6 +8,8 @@ import os
 import ctypes
 import logging
 import platform
+import errno
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, List
 
@@ -205,7 +207,11 @@ def check_path_jail(path: str, allowed_prefixes: List[str], recursive: bool = Tr
                         continue # Nested, block if non-recursive
 
                 if _is_openat2_available() and os.path.exists(str(can_prefix)):
-                    return _check_path_jail_linux(path, str(can_prefix))
+                    rel_path = rel.as_posix() if rel.parts else "."
+                    kernel_result = _check_path_jail_linux(rel_path, can_prefix)
+                    if kernel_result is None:
+                        return True
+                    return kernel_result
                 return True
             except (ValueError, RuntimeError):
                 continue
@@ -225,22 +231,25 @@ def _canonicalize(path_str: str) -> Path:
     normalized = unicodedata.normalize("NFKC", path_str)
     return Path(normalized).expanduser().resolve()
 
+@lru_cache(maxsize=1)
 def _is_openat2_available() -> bool:
     """Check if the kernel supports openat2 (5.6+)."""
     if platform.system() != "Linux":
         return False
-    # Simple check: try to call syscall -1 (non-destructive)
     try:
-        libc = ctypes.CDLL("libc.so.6")
-        # syscall(-1) usually returns -1 with errno set
-        return True # Assume available if we can talk to libc
-    except:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        how = OpenHow()
+        libc.syscall(SYS_OPENAT2, -1, ctypes.c_char_p(b"."), ctypes.byref(how), ctypes.sizeof(how))
+        return ctypes.get_errno() != errno.ENOSYS
+    except Exception:
         return False
 
-def _check_path_jail_linux(path: str, root_prefix: Path) -> bool:
+def _check_path_jail_linux(path: str, root_prefix: Path) -> Optional[bool]:
     """
     Task 1: Use openat2 with RESOLVE_BENEATH to strictly enforce the jail.
     Returns True if the kernel allows the path resolution within the root.
+    Returns None if openat2 is unavailable and the caller should fall back to
+    the already-computed user-space canonical check.
     """
     try:
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
@@ -269,9 +278,9 @@ def _check_path_jail_linux(path: str, root_prefix: Path) -> bool:
                 return True
             else:
                 err = ctypes.get_errno()
-                if err == 38: # ENOSYS (Function not implemented)
+                if err == errno.ENOSYS:
                     logger.warning(f"openat2 not supported on this kernel (ENOSYS). Relying on user-space checks for {path}")
-                    return True # Fail-open to user-space validation instead of crashing
+                    return None
                 
                 logger.warning(f"Jail breach attempt or resolution error: {path} (Result: {res}, errno: {err})")
                 return False
