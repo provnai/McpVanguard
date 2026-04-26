@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 # Ensure project root is in path
@@ -28,6 +29,7 @@ class TestAuditRemediation(unittest.IsolatedAsyncioTestCase):
             "pattern": "test"
         }
         rule = Rule(rule_data, "test.yaml")
+        rule.pattern = SimpleNamespace(backend="python", search=lambda value: None)
         
         # Patch the match pool's result to raise TimeoutError
         from concurrent.futures import TimeoutError as FuturesTimeoutError

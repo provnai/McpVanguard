@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0-rc1] - 2026-04-26 (The Integrity Gateway Release)
+
+### Security and Platform
+
+- **Transport and gateway hardening** (`core/sse_server.py`, `core/session.py`, `core/proxy.py`): Added a hardened Streamable HTTP `/mcp` path alongside the existing SSE bridge, tightened session validation and lifecycle handling, added safer bind and proxy-header trust behavior, and strengthened gateway-side request ownership checks.
+- **Metadata trust-boundary inspection** (`core/metadata_inspection.py`, `core/proxy.py`): Added server-to-agent inspection for `initialize.result.instructions` and `tools/list` metadata, with `block`, `warn`, and selective tool-filtering behavior to stop poisoned metadata before it reaches downstream models.
+- **Cross-server isolation** (`core/session_isolation.py`, `core/behavioral.py`, `core/session.py`, `core/models.py`): Added deterministic `server_id` tracking, partitioned behavioral state by `(session_id, server_id)`, and surfaced cross-server boundaries in audit and session state so one upstream can no longer pollute another's decisions.
+- **Server integrity and capability drift controls** (`core/server_integrity.py`, `core/capability_fingerprint.py`, `core/proxy.py`, `core/cli.py`): Added upstream server manifests, runtime drift enforcement, passive capability fingerprinting, baseline bundle workflows, and warn/block handling for capability drift.
+- **Supply-chain trust verification** (`core/provenance.py`, `core/supplier_signatures.py`, `core/sigstore_bundle.py`, `core/proxy.py`, `core/cli.py`): Added signed upstream manifests, provenance verification hooks, detached artifact-signature checks, Sigstore bundle verification, identity-aware Sigstore certificate checks using allowed certificate identities and OIDC issuers, provider-style Fulcio claim verification for build/source metadata, GitHub-compatible repository/ref/SHA/trigger/workflow-name verification, and offline transparency-evidence validation for tlog entries, trusted `logId.keyId` allowlisting, inclusion promises/proofs, hashedrekord consistency, and certificate-validity time insertion.
+- **Authorization maturity** (`core/auth.py`, `core/sse_server.py`, `core/proxy.py`): Added a principal-aware auth model, verified JWT/JWKS support for configured bearer auth, issuer/audience/claim/scope checks, JWKS URL and OIDC discovery support, cache and refresh-on-`kid`-miss behavior, Bearer challenge handling at the HTTP boundary, and auth-aware destructive-tool enforcement.
+- **Benchmark and taxonomy coverage** (`core/benchmarks.py`, `core/taxonomy.py`, `rules/mcp38_coverage.yaml`): Added MCP-38 coverage mapping, an executable benchmark corpus, CLI benchmark reporting, and runnable benchmark evaluation to make security coverage measurable instead of purely descriptive.
+- **Risk, fleet, and assurance work** (`core/risk.py`, `core/fleet.py`): Added risk scoring and tiered degrade/block behavior, plus fleet-oriented signed-rule sync plumbing and expanded assurance coverage.
+
+### Added
+
+- **New core modules**:
+  - `core/auth.py`
+  - `core/benchmarks.py`
+  - `core/capability_fingerprint.py`
+  - `core/fleet.py`
+  - `core/metadata_inspection.py`
+  - `core/risk.py`
+  - `core/server_integrity.py`
+  - `core/session_isolation.py`
+  - `core/taxonomy.py`
+- **New rule and taxonomy assets**:
+  - `rules/mcp38_coverage.yaml`
+
+### Changed
+
+- **Release verification baseline**: The repository now has an accuracy-first verification baseline with the full repository suite passing in the current recovery state.
+- **Management and operator tooling**: Auth cache management, rule reload, and integrity workflows are now part of the verified management surface instead of being treated as informal helpers.
+- **Release posture**: The project now has a clearer split between shipped platform/security work and longer-horizon research-track ideas, reducing ambiguity in public release claims.
+
+### Operator Notes
+
+- Management and integrity features should be described using **server integrity**, **baseline verification**, and **capability drift** language, not full SBOM language.
+- JWT/JWKS support in this release covers the verified bearer-auth path described in the implementation and tests, including Ed25519 / EdDSA JWT verification.
+- Regex safety in this release includes RE2-backed matching through the shared safe-regex backend, with explicit fallback behavior for environments without the wheel.
+
+### Verification
+
+- **Full repository verification baseline**: `308 passed`
+- **Release scope validation**: Transport, metadata, auth, integrity, benchmark, cross-server isolation, and management/integrity recovery paths all have dedicated test coverage in the current tree.
+
+---
+
+## [1.9.0] - 2026-04-12 (The Isolation Gate Release)
+
+### Security — Phase 6: Cross-Server Isolation
+
+- **Cross-Server Behavioral Partitioning** (`core/behavioral.py`): The behavioral state registry (`_states`) is now keyed on `(session_id, server_id)` tuples instead of plain `session_id` strings. This guarantees that sliding-window counters (BEH-001 scraping, BEH-002 enumeration, BEH-005 flooding), sensitive read histories (BEH-003 privilege escalation), and Shannon entropy token buckets are fully isolated per upstream MCP server identity. One server's traffic can no longer pollute the security decisions made for another.
+- **Deterministic Server Identity** (`core/session_isolation.py`): New module providing `derive_server_id(server_command)` — a stable 12-character SHA-256 fingerprint of the upstream command argv. Derives the same ID on every restart with no configuration required. Stable for single-upstream deployments (zero behavior change).
+- **Session-Level Server Tracking** (`core/session.py`): `SessionState` now carries a `server_id` field. `SessionManager.create()` accepts and persists it. `session.summary()` exposes it for management tools and dashboards.
+- **Audit Trail Traceability** (`core/models.py`): `AuditEvent` gains a `server_id` field. Text log format includes `[srv:xxx]` when set; JSON format includes the full field. Every blocked or warned event is now traceable to the specific upstream server that triggered it.
+- **Cross-Server Boundary Detection** (`core/session_isolation.py`): `check_server_boundary()` emits `CrossServerTransitionEvent` and a `WARNING`-level log when an incoming server identity differs from the session's recorded identity. Prepares for future multi-upstream gateway enforcement.
+- **Bonus: Metadata Inspection ReDoS Guard** (`core/metadata_inspection.py`): The four META-001–004 prompt-injection pattern searches are now executed inside a `ThreadPoolExecutor` with a 100ms timeout (matching `rules_engine.py`). On timeout, the inspection fails-closed with a `META-REDOS` block. Closes the last bare-regex execution path in the codebase.
+
+### Added
+
+- **`core/session_isolation.py`** (NEW): `derive_server_id()`, `CrossServerTransitionEvent`, `check_server_boundary()`.
+- **`tests/test_cross_server_isolation.py`** (NEW): 15 tests proving partition guarantees, boundary detection, server ID derivation stability, audit event formatting, and positive-control intra-server detection.
+- **Redis key partitioning**: All Redis keys for behavioral state (`vguard:beh:*`) now include `server_id` in their namespace (`vguard:beh:{session_id}:{server_id}:*`).
+
+### Changed
+
+- `VanguardProxy.__init__` gains an optional `server_id` parameter; defaults to `derive_server_id(server_command)`.
+- `SessionManager.create()` gains `server_id` optional parameter.
+- `behavioral.inspect_request()`, `inspect_response()`, `get_state()`, `clear_state()` all gain `server_id: str = "default"` parameter — fully backwards compatible.
+- `VanguardStreamableSessionManager._run_session()` and `handle_sse()` in `sse_server.py` now derive and pass `server_id` to `VanguardProxy`.
+- `test_management_tools.py` and `test_proxy_response_path.py` updated to use tuple key format and `derive_server_id` respectively.
+
+### Test Results
+
+- **204 passed, 1 skipped** (previously 125+ on core suite; 15 new isolation tests added).
+- The 1 skipped is a pre-existing platform-conditional test. Zero regressions.
+
+---
+
 ## [1.8.2] - 2026-04-06 (The Trust Anchor Release)
 
 ### Security

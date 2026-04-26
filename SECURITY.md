@@ -6,8 +6,9 @@ Currently, only the latest major release of McpVanguard is supported with securi
 
 | Version | Supported |
 | ------- | --------- |
-| 1.1.x   | ✅ Yes |
-| 1.0.x   | ⚠️ Critical fixes only |
+| 2.0.x   | ✅ Yes |
+| 1.1.x   | ⚠️ Critical fixes only |
+| 1.0.x   | ❌ No |
 | < 1.0   | ❌ No |
 
 ## Reporting a Vulnerability

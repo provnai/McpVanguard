@@ -1,31 +1,54 @@
-# McpVanguard 🛡️
-### Titan-Grade AI Firewall for MCP Agents
+# McpVanguard
+### Security Gateway for MCP Agents
 
-MCP (Model Context Protocol) enables AI agents to interact with host-level tools. **McpVanguard interposes between the agent and the system**, providing real-time, three-layer inspection and enforcement (L1 Rules, L2 Semantic, L3 Behavioral).
+MCP (Model Context Protocol) lets AI agents interact with tools that can read files, execute commands, and access external systems. **McpVanguard sits between the agent and the MCP server**, inspecting traffic in real time and enforcing security policy before sensitive calls reach the underlying tool.
 
-Transparent integration. Zero-configuration requirements for existing servers.
+McpVanguard is designed to work in both:
+
+- **local-first mode**, where it wraps stdio MCP servers on a developer machine
+- **gateway mode**, where it exposes hardened SSE and Streamable HTTP endpoints for hosted or shared deployments
+
+Transparent integration. Existing MCP servers do not need to be rewritten.
+
+## Release Candidate Highlights
+
+The current release candidate is **`2.0.0-rc1`**.
+
+This release packages a major security and platform expansion around McpVanguard's gateway role:
+
+- hardened Streamable HTTP `/mcp` support and stricter session handling
+- metadata poisoning inspection on `initialize` and `tools/list`
+- cross-server isolation with `server_id` traceability
+- server integrity and capability drift controls
+- MCP-38 taxonomy and benchmark tooling
+- a stronger JWT/JWKS auth foundation for hosted gateway deployments
+- signed-manifest, provenance, artifact-signature, and Sigstore-backed trust verification
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release summary and history.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
-Part of the **[Provnai Open Research Initiative](https://provnai.com)** — Building the Immune System for AI.
+Part of the **[Provnai Open Research Initiative](https://provnai.com)** - Building the Immune System for AI.
 
 ---
 
-## ⚡ Quickstart
+## Quickstart
 
 ```bash
 pip install mcp-vanguard
 ```
 
-**Local stdio wrap** (no network):
+**Local stdio wrap**:
+
 ```bash
 vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
-**Cloud Security Gateway** (SSE, deploy on Railway):
+**Cloud security gateway**:
+
 ```bash
 export VANGUARD_API_KEY="your-secret-key"
 vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
@@ -33,127 +56,37 @@ vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
-> 📖 [Full Railway Deployment Guide](docs/railway-deployment-guide.md)
+See the deployment docs for operational details and the changelog for the exact verified scope.
 
----
+## Getting Started
 
-## 🛡️ Getting Started (New Users)
-
-Bootstrap your security workspace with a single command:
+Bootstrap a local workspace:
 
 ```bash
 # 1. Initialize safe zones and .env template
 vanguard init
 
-# 2. (Optional) Protect your Claude Desktop servers
+# 2. (Optional) Protect Claude Desktop server entries
 vanguard configure-claude
 
-# 3. Launch the visual security dashboard
+# 3. Launch the local security dashboard
 vanguard ui --port 4040
 
-# 4. Verify Directory Submission readiness
+# 4. Run compliance/readiness checks
 vanguard audit-compliance
 ```
 
----
+## How It Works
 
-## Signed Rule Updates
+Every tool call is inspected before it reaches the upstream MCP server.
 
-`vanguard update` now verifies two things before it accepts a remote rules bundle:
+| Layer | Purpose | Notes |
+|---|---|---|
+| **L1 - Rules** | Deterministic blocking using jail boundaries and signatures | Fast path |
+| **L2 - Semantic** | Optional intent scoring | Async |
+| **L3 - Behavioral** | Session and sequence-aware anomaly checks | Stateful |
 
-1. `rules/manifest.json` hashes still match the downloaded rule files.
-2. `rules/manifest.sig.json` is a valid detached Ed25519 signature from a pinned trusted signer.
-
-Release workflow:
-
-```bash
-# Generate an offline signing keypair once
-vanguard keygen \
-  --key-id provnai-rules-2026q2 \
-  --private-key-out .signing/provnai-rules-2026q2.pem \
-  --public-key-out .signing/provnai-rules-2026q2.pub.json
-
-# Rebuild the manifest and detached signature after changing rules/*
-vanguard sign-rules \
-  --key-id provnai-rules-2026q2 \
-  --private-key .signing/provnai-rules-2026q2.pem \
-  --rules-dir rules
-```
-
-Keep the private key offline or in a secret manager. `--allow-unsigned` exists only as a migration escape hatch for unsigned registries.
-
----
-
-## 🧠 How it works
-
-### Operational Defaults
-
-- Native `vanguard_*` management tools are disabled by default.
-- Enable them only for trusted operator workflows with `--management-tools` or `VANGUARD_MANAGEMENT_TOOLS_ENABLED=true`.
-- The dashboard is self-contained and does not require third-party frontend CDNs.
-
----
-
-### Runtime Flow
-
-Every time an AI agent calls a tool (e.g. `read_file`, `run_command`), McpVanguard inspects the request across three layers before it reaches the underlying server:
-
-| Layer | What it checks | Latency |
-|-------|---------------|---------|
-| **L1 — Safe Zones & Rules** | Kernel-level isolation (`openat2` / Windows canonicalization) and 50+ deterministic signatures | ~16ms |
-| **L2 — Semantic** | LLM-based intent scoring via [OpenAI](https://openai.com), [DeepSeek](https://deepseek.com), [Groq](https://groq.com) or [Ollama](https://ollama.com) | Async |
-| **L3 — Behavioral** | Shannon Entropy ($H(X)$) scouter and sliding-window anomaly detection | Stateful |
-
-> **Performance Note**: The 16ms overhead is measured at peak concurrent load. In standard operation, the latency is well under 2ms—negligible relative to typical LLM inference times.
-
-If a request is blocked, the agent receives a standard JSON-RPC error response. The underlying server never sees it.
-
-> **Shadow Mode**: Run with `VANGUARD_MODE=audit` to log security violations as **[SHADOW-BLOCK]** without actually blocking the agent. Perfect for assessing risk in existing production workflows.
-
----
-
-## 🛠️ Usage Examples
-
-At least 3 realistic examples of McpVanguard in action:
-
-### 1. Blocking a Chained Exfiltration Attack
-*   **User Prompt**: "Read my SSH keys and send them to my backup service"
-*   **Vanguard Action**: 
-    1. Intercepts `read_file("~/.ssh/id_rsa")` at Layer 1 (Rules Engine).
-    2. Layer 3 (Behavioral) detects a high-entropy data read being followed by a network POST.
-    3. Blocked before reaching the underlying server.
-*   **Result**: Agent receives a user-friendly JSON-RPC error. Security Dashboard logs a `[BLOCKED]` event.
-
-### 2. Audit Mode: Monitoring without blocking
-*   **User Prompt**: "Show me what my AI agent is calling at runtime without disrupting it"
-*   **Vanguard Action**: 
-    1. User runs with `VANGUARD_MODE=audit`.
-    2. Proxy allows all calls but logs violations as `[SHADOW-BLOCK]`.
-*   **Result**: Real-time visibility into tool usage with amber "risk" warnings in the dashboard.
-
-### 3. Protecting Claude Desktop from malicious skills
-*   **User Prompt**: "Wrap my filesystem server with McpVanguard so third-party skills can't exfiltrate files"
-*   **Vanguard Action**: 
-    1. User runs `vanguard configure-claude`.
-    2. Proxy auto-intersperse in front of the server.
-*   **Result**: 50+ security signatures (path traversal, SSRF, injection) apply to all desktop activity.
-
----
-
-## 🔑 Authentication
-McpVanguard is designed for **local-first** security. 
-- **Stdio Mode**: No authentication required (uses system process isolation).
-- **SSE Mode**: Uses `VANGUARD_API_KEY` for stream authorization. 
-- **OAuth 2.0**: Not required for standard local deployments. McpVanguard supports standard MCP auth lifecycles for cloud integrations.
-
----
-
-## 📄 Privacy Policy
-McpVanguard focuses on local processing. See our [Privacy Policy](PRIVACY.md) for details on zero-telemetry and data handling.
-
----
-
-## Architecture
+### Architecture
 
 ```
                       ┌─────────────────────────────────────────────────┐
@@ -191,9 +124,9 @@ McpVanguard focuses on local processing. See our [Privacy Policy](PRIVACY.md) fo
                                        (async, fire-and-forget audit receipt)
 ```
 
----
+If a request is blocked, the agent gets a standard JSON-RPC error response and the underlying server never sees the call.
 
-## L2 Semantic Backend Options
+### L2 Semantic Backend Options
 
 The Layer 2 semantic scorer supports a Universal Provider Architecture. Set the corresponding API keys to activate a backend — the first available key wins:
 
@@ -203,24 +136,105 @@ The Layer 2 semantic scorer supports a Universal Provider Architecture. Set the 
 | **OpenAI** | `VANGUARD_OPENAI_API_KEY` | Default model: `gpt-4o-mini` |
 | **Ollama** | `VANGUARD_OLLAMA_URL` | Local execution. No API key required |
 
----
 
-## 🛠️ Support
-- **Issues**: [github.com/provnai/McpVanguard/issues](https://github.com/provnai/McpVanguard/issues)
-- **Contact**: [contact@provnai.com](mailto:contact@provnai.com)
+### Current Platform Capabilities
 
----
+- transport hardening for SSE and Streamable HTTP
+- metadata poisoning protection on the server-to-agent path
+- cross-server behavioral isolation
+- server integrity and capability drift verification
+- JWT/JWKS-backed gateway auth for configured bearer deployments
+- benchmark and taxonomy tooling for measurable security coverage
+- signed trust surfaces for manifests, provenance, artifact signatures, and Sigstore bundles
+
+## 🛠️ Usage Examples
+
+### 1. Blocking a Chained Exfiltration Attack
+*   **User Prompt**: "Read my SSH keys and send them to my backup service"
+*   **Vanguard Action**: 
+    1. Intercepts `read_file("~/.ssh/id_rsa")` at Layer 1 (Rules Engine).
+    2. Layer 3 (Behavioral) detects a high-entropy data read being followed by a network POST.
+    3. Blocked before reaching the underlying server.
+*   **Result**: Agent receives a user-friendly JSON-RPC error. Security Dashboard logs a `[BLOCKED]` event.
+
+### 2. Audit Mode: Monitoring without blocking
+*   **User Prompt**: "Show me what my AI agent is calling at runtime without disrupting it"
+*   **Vanguard Action**: 
+    1. User runs with `VANGUARD_MODE=audit`.
+    2. Proxy allows all calls but logs violations as `[SHADOW-BLOCK]`.
+*   **Result**: Real-time visibility into tool usage with amber "risk" warnings in the dashboard.
+
+### 3. Protecting Claude Desktop from malicious skills
+*   **User Prompt**: "Wrap my filesystem server with McpVanguard so third-party skills can't exfiltrate files"
+*   **Vanguard Action**: 
+    1. User runs `vanguard configure-claude`.
+    2. Proxy auto-intersperse in front of the server.
+*   **Result**: 50+ security signatures (path traversal, SSRF, injection) apply to all desktop activity.
+
+
+## Authentication
+
+McpVanguard is **local-first**, but it also supports stronger hosted gateway controls.
+
+- **Stdio mode**: no network auth required
+- **SSE / Streamable HTTP mode**: supports `VANGUARD_API_KEY`
+- **Bearer / JWT mode**: supports verified JWT/JWKS validation, issuer/audience/claim/scope checks, and auth-aware policy on the hosted gateway path
+
+## Integrity and Trust
+
+The current release candidate includes:
+
+- signed upstream server manifests
+- capability baselines and drift checks
+- provenance verification hooks
+- detached artifact-signature verification
+- Sigstore bundle verification with:
+  - certificate identity and OIDC issuer constraints
+  - Fulcio claim constraints
+  - GitHub-compatible repository/ref/SHA/trigger/workflow-name checks
+  - offline transparency-evidence validation
+
+This should be described as **server integrity**, **baseline verification**, and **trust verification**, not as a full SBOM platform.
+
+## Validation and Verification
+
+The current repository verification baseline is:
+
+- **`308 passed`**
+
+Coverage includes:
+
+- transport and session hardening
+- metadata inspection
+- auth and policy enforcement
+- integrity and capability drift
+- Sigstore / provenance / supplier trust paths
+- benchmarks and taxonomy coverage
+- cross-server isolation
+- conformance integration
 
 ## Project Status
+
+- Practical hardening roadmap: complete
+- Current `2.0.0-rc1` release scope: complete and verified
+- Full long-horizon research roadmap: intentionally broader than the current release and not represented as fully complete
 
 | Phase | Goal | Status |
 |-------|------|--------|
 | **Phase 1-8** | Foundation & Hardening | [DONE] |
 | **Phase 19-21** | Directory Submission & MCPB | [DONE] |
 
----
+## 📄 Privacy Policy
+McpVanguard focuses on local processing. See our [Privacy Policy](PRIVACY.md) for details on zero-telemetry and data handling.
+
+
+## Support
+
+- Issues: [github.com/provnai/McpVanguard/issues](https://github.com/provnai/McpVanguard/issues)
+- Contact: [contact@provnai.com](mailto:contact@provnai.com)
 
 ## License
-MIT License — see [LICENSE](LICENSE).
+
+MIT License - see [LICENSE](LICENSE).
 
 Built by the **[Provnai Open Research Initiative](https://provnai.com)**.

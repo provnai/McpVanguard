@@ -1,0 +1,335 @@
+- id: MCP-01
+  title: Identity Spoofing
+  status: partial
+  summary: Vanguard authenticates HTTP clients when an API key is configured, but does not yet provide full principal-aware auth for all deployments.
+  controls:
+    - API key and bearer-token checks on SSE and Streamable HTTP requests
+  evidence:
+    - core/sse_server.py:_check_auth
+    - tests/test_sse_hardening.py
+- id: MCP-02
+  title: Credential and Token Theft
+  status: gap
+  summary: The proxy does not yet redact, vault, or formally model credential-bearing tool flows.
+  controls: []
+  evidence: []
+- id: MCP-03
+  title: Session Hijacking
+  status: partial
+  summary: Streamable HTTP sessions are securely generated, validated, lifecycle-managed, and bound to transport identity, but not yet to authenticated principals.
+  controls:
+    - Cryptographically random session identifiers
+    - Session-id format validation
+    - Coarse binding to client IP, Origin, and User-Agent
+  evidence:
+    - core/sse_server.py:VanguardStreamableSessionManager
+    - tests/test_streamable_http.py
+- id: MCP-04
+  title: Privilege Escalation and Confused Deputy
+  status: partial
+  summary: Deterministic rules and safe zones reduce confused-deputy behavior, but there is no full authorization model for upstream capabilities yet.
+  controls:
+    - Layer 1 static rules
+    - Safe-zone jail enforcement
+  evidence:
+    - core/rules_engine.py
+    - core/jail.py
+    - tests/test_jail_logic.py
+- id: MCP-05
+  title: Excessive Permissions and Overexposure
+  status: partial
+  summary: Safe zones and rule-based blocks reduce overexposure, but tool permissions are still inferred from request content rather than a formal least-privilege manifest.
+  controls:
+    - Tool/path jail checks
+    - Command and network rule packs
+  evidence:
+    - rules/safe_zones.yaml
+    - rules/commands.yaml
+    - rules/network.yaml
+- id: MCP-06
+  title: Pending Primary-Source Title Sync
+  status: gap
+  summary: This taxonomy slot is intentionally marked as a gap until the repo syncs the exact MCP-38 title and mitigation mapping from the primary paper appendix.
+  controls: []
+  evidence: []
+- id: MCP-07
+  title: Command Injection
+  status: partial
+  summary: Vanguard blocks many command-execution patterns through static signatures, but does not yet verify all shell and interpreter execution surfaces exhaustively.
+  controls:
+    - Command rule pack
+    - Semantic scoring fallback
+  evidence:
+    - rules/commands.yaml
+    - core/semantic.py
+    - tests/test_rules.py
+- id: MCP-08
+  title: File System Exposure and Path Traversal
+  status: implemented
+  summary: File access is guarded by deterministic safe-zone jails plus filesystem-specific signatures.
+  controls:
+    - Safe-zone jail enforcement
+    - Filesystem rule pack
+  evidence:
+    - core/jail.py
+    - core/rules_engine.py
+    - rules/filesystem.yaml
+    - tests/test_jail_logic.py
+- id: MCP-09
+  title: Pending Primary-Source Title Sync
+  status: partial
+  summary: Network and request-shape controls reduce some remote-access abuse paths, but this slot needs a paper-accurate title and tighter mapping.
+  controls:
+    - Network rule pack
+    - Body-size and content-type validation
+  evidence:
+    - rules/network.yaml
+    - core/sse_server.py:_validate_message_request
+- id: MCP-10
+  title: Tool Description Poisoning
+  status: implemented
+  summary: Tool-list metadata is inspected on the server-to-agent path and can be warned, blocked, or filtered per tool.
+  controls:
+    - Deterministic metadata inspection
+    - Metadata policy modes block, warn, and drop-tool
+  evidence:
+    - core/metadata_inspection.py
+    - core/proxy.py
+    - tests/test_metadata_poisoning.py
+- id: MCP-11
+  title: Full Schema Poisoning
+  status: implemented
+  summary: Nested tool schema metadata such as descriptions, titles, defaults, examples, enum values, and array item descriptions are inspected before reaching the model.
+  controls:
+    - Recursive schema metadata traversal
+  evidence:
+    - core/metadata_inspection.py
+    - tests/test_metadata_poisoning.py
+- id: MCP-12
+  title: Resource Content Poisoning
+  status: gap
+  summary: Vanguard does not yet inspect prompt/resource list metadata and resource contents with the same rigor as tool metadata.
+  controls: []
+  evidence: []
+- id: MCP-13
+  title: Tool Shadowing
+  status: partial
+  summary: Tool metadata inspection and enrichment reduce obvious shadowing attempts, but there is not yet a dedicated duplicate-name or authority-conflict detector.
+  controls:
+    - Metadata inspection
+    - Tool enrichment surface
+  evidence:
+    - core/proxy.py:_enrich_tool_list
+    - tests/test_proxy_enrichment.py
+- id: MCP-14
+  title: Name Spoofing
+  status: partial
+  summary: Metadata inspection covers suspicious textual behavior, but there is no dedicated anti-spoof normalization or reserved-name policy yet.
+  controls:
+    - Metadata inspection on tool names and titles
+  evidence:
+    - core/metadata_inspection.py
+- id: MCP-15
+  title: Preference Manipulation
+  status: gap
+  summary: The proxy does not yet model preference-state attacks or long-lived agent memory manipulation explicitly.
+  controls: []
+  evidence: []
+- id: MCP-16
+  title: Rug Pull
+  status: gap
+  summary: Upstream server behavior and capability drift are not yet pinned to an integrity manifest.
+  controls: []
+  evidence: []
+- id: MCP-17
+  title: Parasitic Tool Chaining
+  status: partial
+  summary: Behavioral analysis tracks suspicious request patterns, but there is not yet a chaining-specific policy engine across multi-step tool plans.
+  controls:
+    - Session-window behavioral analysis
+  evidence:
+    - core/behavioral.py
+    - tests/test_behavioral.py
+- id: MCP-18
+  title: Pending Primary-Source Title Sync
+  status: gap
+  summary: This taxonomy slot is not yet explicitly modeled in repo policy or validation.
+  controls: []
+  evidence: []
+- id: MCP-19
+  title: Direct Prompt Injection
+  status: partial
+  summary: Prompt-injection-like behavior is addressed indirectly through regex rules, semantic scoring, and metadata inspection, but not with a dedicated prompt-policy layer.
+  controls:
+    - Jailbreak rule pack
+    - Semantic scoring
+    - Metadata inspection
+  evidence:
+    - rules/jailbreak.yaml
+    - core/semantic.py
+    - core/metadata_inspection.py
+- id: MCP-20
+  title: Indirect Prompt Injection
+  status: partial
+  summary: Metadata poisoning controls and semantic analysis catch part of the indirect-prompt surface, but resource and content ingestion still need fuller coverage.
+  controls:
+    - Metadata inspection on initialize and tools/list
+    - Semantic scoring layer
+  evidence:
+    - core/proxy.py
+    - core/metadata_inspection.py
+- id: MCP-21
+  title: Overreliance on LLM Safeguards
+  status: implemented
+  summary: The architecture is explicitly layered so deterministic controls act as the primary boundary and semantic scoring is optional and secondary.
+  controls:
+    - Layer 1 before Layer 2 ordering
+    - Semantic layer optionality
+  evidence:
+    - core/proxy.py
+    - core/rules_engine.py
+    - MCPVANGUARD_ENGINEERING_ROADMAP.md
+- id: MCP-22
+  title: Human-in-the-Loop Bypass
+  status: gap
+  summary: Vanguard does not yet enforce approval gates or human confirmation workflows for sensitive operations.
+  controls: []
+  evidence: []
+- id: MCP-23
+  title: Consent Fatigue
+  status: gap
+  summary: The product does not yet model repeated approval pressure or consent-harvesting patterns.
+  controls: []
+  evidence: []
+- id: MCP-24
+  title: Data Exfiltration via Tool Output
+  status: partial
+  summary: Behavioral analysis and large-response heuristics can flag suspicious output patterns, but there is no dedicated content DLP pipeline.
+  controls:
+    - Large-response detection
+    - High-entropy output heuristics
+  evidence:
+    - core/behavioral.py
+    - tests/test_behavioral.py
+- id: MCP-25
+  title: Privacy Inversion
+  status: partial
+  summary: Some exfiltration patterns are constrained, but the system does not yet explicitly model cross-tool aggregation or inference attacks over benign-looking reads.
+  controls:
+    - Behavioral read/write sequence tracking
+  evidence:
+    - core/behavioral.py
+- id: MCP-26
+  title: Supply Chain Compromise
+  status: partial
+  summary: Signed rule bundles protect Vanguard's own signature distribution, but upstream MCP servers and packages are not yet covered by the same integrity model.
+  controls:
+    - Signed rules manifest
+    - Detached signature verification
+  evidence:
+    - core/signing.py
+    - tests/test_rules_manifest.py
+    - tests/test_cli_update.py
+- id: MCP-27
+  title: Missing Integrity Verification
+  status: partial
+  summary: Rule content integrity is verified, but there is no manifest or pinning yet for the wrapped upstream MCP server itself.
+  controls:
+    - Rule manifest hashing
+    - Detached signature verification
+  evidence:
+    - core/signing.py
+    - rules/manifest.json
+    - rules/manifest.sig.json
+- id: MCP-28
+  title: Pending Primary-Source Title Sync
+  status: gap
+  summary: This taxonomy slot is not yet mapped to a dedicated repo control.
+  controls: []
+  evidence: []
+- id: MCP-29
+  title: Pending Primary-Source Title Sync
+  status: gap
+  summary: This taxonomy slot is not yet mapped to a dedicated repo control.
+  controls: []
+  evidence: []
+- id: MCP-30
+  title: Pending Primary-Source Title Sync
+  status: gap
+  summary: This taxonomy slot is not yet mapped to a dedicated repo control.
+  controls: []
+  evidence: []
+- id: MCP-31
+  title: DNS Rebinding
+  status: partial
+  summary: Safer bind defaults and Origin validation reduce browser-origin abuse, but there is no dedicated DNS rebinding detector or deployment attestation.
+  controls:
+    - Loopback-safe default bind
+    - Origin allowlist and required-Origin mode
+  evidence:
+    - core/sse_server.py
+    - tests/test_sse_hardening.py
+- id: MCP-32
+  title: Unrestricted Network Access and Lateral Movement
+  status: partial
+  summary: Network signatures catch many dangerous calls, but there is not yet a full egress-control or destination allowlist system.
+  controls:
+    - Network rule pack
+  evidence:
+    - rules/network.yaml
+- id: MCP-33
+  title: Resource Exhaustion and Denial of Wallet
+  status: partial
+  summary: Rate limits, concurrency guards, regex timeouts, and body-size caps harden the gateway against some exhaustion attacks, but there is no cost-aware policy engine yet.
+  controls:
+    - Token-bucket rate limiting
+    - Per-IP and global concurrency caps
+    - Regex timeout guard
+    - Body-size limits
+  evidence:
+    - core/sse_server.py
+    - core/rules_engine.py
+    - tests/test_sse_hardening.py
+- id: MCP-34
+  title: Pending Primary-Source Title Sync
+  status: partial
+  summary: Current transport and lifecycle checks cover part of this slot's likely protocol-abuse surface, but the exact MCP-38 title still needs to be synced from the paper appendix.
+  controls:
+    - Session lifecycle validation
+  evidence:
+    - tests/test_streamable_http.py
+- id: MCP-35
+  title: Planning and Agent Logic Drift
+  status: gap
+  summary: Vanguard inspects requests and responses but does not yet verify planning semantics or long-horizon goal drift explicitly.
+  controls: []
+  evidence: []
+- id: MCP-36
+  title: Multi-Agent Context Hijacking
+  status: gap
+  summary: Cross-agent and cross-server isolation is still on the roadmap rather than implemented.
+  controls: []
+  evidence: []
+- id: MCP-37
+  title: Sandbox Escape
+  status: partial
+  summary: Filesystem jail checks and command rules reduce some breakout patterns, but there is no host-level sandbox enforcement inside Vanguard itself.
+  controls:
+    - Safe zones
+    - Command and privilege signatures
+  evidence:
+    - core/jail.py
+    - rules/commands.yaml
+    - rules/privilege.yaml
+- id: MCP-38
+  title: Invisible Agent Activity and Missing Observability
+  status: implemented
+  summary: Vanguard provides audit logging, dashboard visibility, and explicit allow/block reasoning across the proxy path.
+  controls:
+    - Audit log
+    - Dashboard
+    - Layered decision logging
+  evidence:
+    - audit.log
+    - core/dashboard.py
+    - core/proxy.py

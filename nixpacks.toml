@@ -14,4 +14,4 @@ cmds = [
 ]
 
 [start]
-cmd = "/opt/venv/bin/python3 -m core.cli sse --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"
+cmd = "/opt/venv/bin/python3 -m core.cli sse --host 0.0.0.0 --server \"$MCP_SERVER_COMMAND\" --semantic --behavioral"

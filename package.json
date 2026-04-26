@@ -1,7 +1,7 @@
 {
   "name": "mcp-vanguard",
-  "version": "1.8.0",
-  "description": "Titan-Grade AI Firewall for MCP Agents.",
+  "version": "2.0.0-rc1",
+  "description": "Security gateway and verification layer for MCP agents.",
   "main": "index.js",
   "type": "module",
   "scripts": {

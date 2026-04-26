@@ -27,6 +27,11 @@ class TestRulesEngineLoads:
         assert any(r.startswith("JB-") for r in ids), "Should have jailbreak rules"
         assert any(r.startswith("PRIV-") for r in ids), "Should have privilege rules"
 
+    def test_skips_non_rule_yaml_artifacts(self, engine):
+        ids = engine.get_rule_ids()
+        assert "MCP-01" not in ids
+        assert "MCP-38" not in ids
+
 
 class TestFilesystemRules:
     def test_blocks_etc_path(self, engine):
@@ -160,6 +165,13 @@ class TestJailbreakRules:
         result = engine.check(msg)
         assert result.allowed
 
+    def test_warns_on_repeated_character_token_stuffing(self, engine):
+        msg = make_tool_call("send_message", content=("A" * 250))
+        result = engine.check(msg)
+        assert result.allowed
+        assert result.action == "WARN"
+        assert result.rule_matches[0].rule_id == "JB-005"
+
 
 class TestPrivilegeRules:
     def test_blocks_crontab(self, engine):
@@ -203,3 +215,20 @@ class TestInspectionResultShape:
         assert not result.allowed
         assert result.block_reason is not None
         assert len(result.block_reason) > 0
+
+
+class TestRegexBackendSafety:
+    def test_invalid_regex_uses_never_match_fallback(self):
+        from core.rules_engine import Rule
+
+        rule = Rule(
+            {
+                "id": "BROKEN-001",
+                "pattern": "(",
+                "match_fields": ["params.arguments.content"],
+            },
+            source_file="runtime",
+        )
+
+        match = rule.check(make_tool_call("send_message", content="hello world"))
+        assert match is None

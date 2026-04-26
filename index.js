@@ -7,14 +7,39 @@
  */
 
 import { spawn } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 
-// Check if we are running in a venv or need to find python
-const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+function resolvePythonCommand() {
+  if (process.env.VANGUARD_PYTHON) {
+    return process.env.VANGUARD_PYTHON;
+  }
+
+  const venv = process.env.VIRTUAL_ENV;
+  if (venv) {
+    const venvPython = process.platform === 'win32'
+      ? path.join(venv, 'Scripts', 'python.exe')
+      : path.join(venv, 'bin', 'python');
+    if (fs.existsSync(venvPython)) {
+      return venvPython;
+    }
+  }
+
+  const repoLocalPython = process.platform === 'win32'
+    ? path.join(__dirname, '.venv', 'Scripts', 'python.exe')
+    : path.join(__dirname, '.venv', 'bin', 'python');
+  if (fs.existsSync(repoLocalPython)) {
+    return repoLocalPython;
+  }
+
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+const pythonCmd = resolvePythonCommand();
 
 const child = spawn(pythonCmd, ['-m', 'core.cli', 'start', ...args], {
   cwd: __dirname,
@@ -31,6 +56,6 @@ child.on('exit', (code) => {
 
 child.on('error', (err) => {
   console.error('[McpVanguard Bridge] Failed to start Python core:', err.message);
-  console.error('Ensure Python 3.11+ is installed and core/cli.py exists.');
+  console.error('Set VANGUARD_PYTHON or ensure Python 3.11+ is installed and available.');
   process.exit(1);
 });

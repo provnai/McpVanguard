@@ -32,6 +32,20 @@
             "description": "Safety: Set to 1 if encountering uvloop subprocess issues",
             "required": false,
             "value": "1"
+        },
+        "VANGUARD_METADATA_INSPECTION_ENABLED": {
+            "description": "Enable Layer 1 server-to-agent metadata inspection.",
+            "required": false,
+            "value": "true"
+        },
+        "VANGUARD_SERVER_MANIFEST_FILE": {
+            "description": "Path to the upstream server SBOM manifest for integrity verification.",
+            "required": false
+        },
+        "VANGUARD_AUTH_MODE": {
+            "description": "Authentication mode: 'none', 'api_key', or 'oidc'.",
+            "required": false,
+            "value": "api_key"
         }
     }
 }

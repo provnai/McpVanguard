@@ -5,19 +5,23 @@ Loads YAML rule files from rules/ and matches against every MCP tool call.
 """
 
 from __future__ import annotations
-import re
+import re as stdlib_re
 import time
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 import os
 import yaml
 
 from core.models import InspectionResult, RuleMatch, RuleAction, RuleSeverity, SafeZone
 from core.jail import check_path_jail
+from core.risk import RiskEngine
+from core import safe_regex
 
 logger = logging.getLogger(__name__)
+_REPEATED_CHAR_BACKREF = stdlib_re.compile(r"^\(\.\)\\1\{(\d+),\}$")
 
 
 # ---------------------------------------------------------------------------
@@ -35,14 +39,22 @@ class Rule:
         self.message: str = data.get("message", f"Rule {self.rule_id} triggered")
         self.match_fields: list[str] = data.get("match_fields", ["params"])
         self.source_file: str = source_file
+        self.matcher: str = data.get("matcher", "regex")
+        self.repeat_threshold: int = int(data.get("repeat_threshold", 200))
+        self.pattern: Optional[Any] = None
 
-        # Compile the regex pattern for speed
-        pattern_str = data.get("pattern", "")
-        try:
-            self.pattern: re.Pattern = re.compile(pattern_str, re.IGNORECASE)
-        except re.error as e:
-            logger.error(f"Invalid regex in rule {self.rule_id}: {e}")
-            self.pattern = re.compile(r"(?!)")  # never matches
+        if self.matcher == "regex":
+            pattern_str = data.get("pattern", "")
+            repeated_threshold = self._extract_repeated_character_threshold(pattern_str)
+            if repeated_threshold is not None:
+                self.matcher = "repeated_char_run"
+                self.repeat_threshold = repeated_threshold
+                return
+            try:
+                self.pattern = safe_regex.compile(pattern_str, safe_regex.IGNORECASE)
+            except safe_regex.RegexCompileError as e:
+                logger.error(f"Invalid regex in rule {self.rule_id}: {e}")
+                self.pattern = safe_regex.never_match_pattern()
 
     # Shared thread-pool: runs regex matches with a timeout to prevent ReDoS
     _match_pool = ThreadPoolExecutor(max_workers=12, thread_name_prefix="vanguard-re")
@@ -53,6 +65,16 @@ class Rule:
         # Mitigation (P2 Audit Finding): Cap input string length to 100KB to prevent 
         # catastrophic backtracking on huge inputs that could exhaust the match pool.
         safe_value = value[:100000]
+
+        if self.pattern is None:
+            return False
+
+        if safe_regex.is_re2_pattern(self.pattern):
+            try:
+                return self.pattern.search(safe_value) is not None
+            except Exception as e:
+                logger.error(f"Error in RE2 match for rule {self.rule_id}: {e}")
+                return True  # FAIL-CLOSED: Block on unexpected errors
         
         try:
             future = Rule._match_pool.submit(self.pattern.search, safe_value)
@@ -75,7 +97,12 @@ class Rule:
             if value is None:
                 continue
             str_value = str(value)
-            if self._safe_search(str_value):
+            matched = False
+            if self.matcher == "repeated_char_run":
+                matched = self._has_repeated_character_run(str_value)
+            else:
+                matched = self._safe_search(str_value)
+            if matched:
                 return RuleMatch(
                     rule_id=self.rule_id,
                     rule_name=self.description,
@@ -90,7 +117,7 @@ class Rule:
     def _extract_field(self, message: dict, field_path: str) -> Optional[str]:
         """
         Extract a value from a nested dict using dot-notation.
-        e.g. "params.arguments.path" → message["params"]["arguments"]["path"]
+        e.g. "params.arguments.path" -> message["params"]["arguments"]["path"]
         Special case: "params" returns the whole params dict as a string.
         """
         try:
@@ -105,6 +132,29 @@ class Rule:
         except Exception:
             return None
 
+    def _has_repeated_character_run(self, value: str) -> bool:
+        """Detect N+1 consecutive identical characters without backreferences."""
+        if not value:
+            return False
+
+        run_length = 1
+        previous = value[0]
+        for current in value[1:]:
+            if current == previous:
+                run_length += 1
+                if run_length > self.repeat_threshold:
+                    return True
+            else:
+                previous = current
+                run_length = 1
+        return False
+
+    def _extract_repeated_character_threshold(self, pattern_str: str) -> Optional[int]:
+        match = _REPEATED_CHAR_BACKREF.fullmatch(pattern_str)
+        if not match:
+            return None
+        return int(match.group(1))
+
 
 # ---------------------------------------------------------------------------
 # Rules Engine
@@ -113,56 +163,104 @@ class Rule:
 class RulesEngine:
     """
     Loads all YAML rules from a directory and checks messages against them.
-    Rules are loaded once at startup and cached in memory.
+    Implements a thread-safe Singleton pattern for global hot-reloading.
     """
+    _instance: Optional[RulesEngine] = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(RulesEngine, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
 
     def __init__(self, rules_dir: str = "rules"):
-        self.rules_dir = Path(rules_dir)
+        requested_rules_dir = Path(rules_dir)
+        if getattr(self, "_initialized", False):
+            if self.rules_dir != requested_rules_dir:
+                self.rules_dir = requested_rules_dir
+            # Explicit constructor calls should always resync from disk so callers
+            # do not inherit mutated singleton state from earlier runtime/test code.
+            self.reload()
+            return
+        
+        self.rules_dir = requested_rules_dir
         self.rules: list[Rule] = []
         self.safe_zones: list[SafeZone] = []
-        self.load_rules()
-        self.load_safe_zones()
+        self._rules_lock = threading.Lock()
+        
+        self.reload()
+        self._initialized = True
 
-    def _sort_rules(self) -> None:
+    @classmethod
+    def get_instance(cls) -> RulesEngine:
+        if cls._instance is None:
+            return cls()
+        return cls._instance
+
+    def _sort_rule_list(self, rules: list[Rule]) -> None:
         severity_order = {
             RuleSeverity.CRITICAL: 0,
             RuleSeverity.HIGH: 1,
             RuleSeverity.MEDIUM: 2,
             RuleSeverity.LOW: 3,
         }
-        self.rules.sort(key=lambda r: severity_order.get(r.severity, 99))
+        rules.sort(key=lambda r: severity_order.get(r.severity, 99))
+
+    def reload(self) -> int:
+        """
+        Atomically reload all rules and safe zones from the rules directory.
+        This is non-destructive and safe to call during active sessions.
+        """
+        logger.info(f"Reloading rules from '{self.rules_dir}'...")
+        new_rules: list[Rule] = []
+        new_safe_zones: list[SafeZone] = []
+
+        # 1. Load Rules into temp list
+        if self.rules_dir.exists():
+            for yaml_file in sorted(self.rules_dir.glob("*.yaml")):
+                try:
+                    if yaml_file.name == "safe_zones.yaml":
+                        continue
+                        
+                    with open(yaml_file, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
+
+                    if not isinstance(data, list):
+                        continue
+
+                    for rule_data in data:
+                        if isinstance(rule_data, dict) and "id" in rule_data and ("pattern" in rule_data or "matcher" in rule_data):
+                            new_rules.append(Rule(rule_data, source_file=yaml_file.name))
+                except Exception as e:
+                    logger.error(f"Failed to load rules from {yaml_file.name}: {e}")
+
+        # 2. Load Safe Zones into temp list
+        config_file = self.rules_dir / "safe_zones.yaml"
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                if isinstance(data, list):
+                    for entry in data:
+                        new_safe_zones.append(SafeZone(**entry))
+            except Exception as e:
+                logger.error(f"Failed to load safe zones: {e}")
+
+        self._sort_rule_list(new_rules)
+
+        # 3. Atomic swap
+        with self._rules_lock:
+            self.rules = new_rules
+            self.safe_zones = new_safe_zones
+
+        logger.info(f"RulesEngine: successfully reloaded {len(self.rules)} rules and {len(self.safe_zones)} safe zones.")
+        return len(self.rules)
 
     def load_rules(self) -> int:
-        """Load (or reload) all YAML files from the rules directory."""
-        self.rules.clear()
-        loaded = 0
-
-        if not self.rules_dir.exists():
-            logger.warning(f"Rules directory '{self.rules_dir}' does not exist.")
-            return 0
-
-        for yaml_file in sorted(self.rules_dir.glob("*.yaml")):
-            try:
-                with open(yaml_file, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-
-                if yaml_file.name == "safe_zones.yaml":
-                    continue
-
-                if not isinstance(data, list):
-                    logger.warning(f"Skipping {yaml_file.name}: expected a list of rules")
-                    continue
-
-                for rule_data in data:
-                    rule = Rule(rule_data, source_file=yaml_file.name)
-                    self.rules.append(rule)
-                    loaded += 1
-
-            except Exception as e:
-                logger.error(f"Failed to load {yaml_file.name}: {e}")
-
-        self._sort_rules()
-        return loaded
+        """Deprecated: Use reload() for thread-safe updates."""
+        return self.reload()
 
     def add_runtime_rules(self, yaml_text: str, source_file: str = "runtime") -> list[str]:
         """
@@ -177,77 +275,69 @@ class RulesEngine:
             raise ValueError("Runtime rule payload must be a YAML rule object or a non-empty list of rules.")
 
         added_ids: list[str] = []
-        existing_ids = {rule.rule_id for rule in self.rules}
-        for rule_data in data:
-            if not isinstance(rule_data, dict):
-                raise ValueError("Each runtime rule must be a YAML mapping.")
-            if "allowed_prefixes" in rule_data or rule_data.get("tool"):
-                raise ValueError("Safe Zone definitions are not supported by vanguard_apply_rule.")
+        with self._rules_lock:
+            existing_ids = {rule.rule_id for rule in self.rules}
+            for rule_data in data:
+                if not isinstance(rule_data, dict):
+                    raise ValueError("Each runtime rule must be a YAML mapping.")
+                if "allowed_prefixes" in rule_data or rule_data.get("tool"):
+                    raise ValueError("Safe Zone definitions are not supported by vanguard_apply_rule.")
 
-            rule = Rule(rule_data, source_file=source_file)
-            if rule.rule_id in existing_ids:
-                raise ValueError(f"Rule ID '{rule.rule_id}' already exists.")
-            self.rules.append(rule)
-            existing_ids.add(rule.rule_id)
-            added_ids.append(rule.rule_id)
+                rule = Rule(rule_data, source_file=source_file)
+                if rule.rule_id in existing_ids:
+                    raise ValueError(f"Rule ID '{rule.rule_id}' already exists.")
+                # We need to create a NEW list to keep it atomic if others are iterating
+                new_rules = list(self.rules)
+                new_rules.append(rule)
+                self._sort_rule_list(new_rules)
+                self.rules = new_rules
+                existing_ids.add(rule.rule_id)
+                added_ids.append(rule.rule_id)
 
-        self._sort_rules()
         return added_ids
 
     def load_safe_zones(self) -> int:
-        """Load safe zones configuration from safe_zones.yaml."""
-        self.safe_zones.clear()
-        config_file = self.rules_dir / "safe_zones.yaml"
-        
-        if not config_file.exists():
-            logger.info("No safe_zones.yaml found — skipping Safe Zone enforcement.")
-            return 0
-
-        try:
-            with open(config_file, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            
-            if not isinstance(data, list):
-                logger.warning(f"Invalid format in {config_file.name}: expected a list")
-                return 0
-
-            for entry in data:
-                self.safe_zones.append(SafeZone(**entry))
-            
-            logger.info(f"Loaded {len(self.safe_zones)} Safe Zones from {config_file.name}")
-            return len(self.safe_zones)
-        except Exception as e:
-            logger.error(f"Failed to load {config_file.name}: {e}")
-            return 0
+        """Deprecated: Use reload() for thread-safe updates."""
+        self.reload()
+        return len(self.safe_zones)
 
     def _check_safe_zones(self, message: dict) -> Optional[InspectionResult]:
+        """Legacy wrapper for backward compatibility."""
+        with self._rules_lock:
+            return self._check_safe_zones_list(message, self.safe_zones)
+
+    def _check_safe_zones_list(self, message: dict, zones: list[SafeZone]) -> Optional[InspectionResult]:
         """
         Verify tool arguments against defined Safe Zones (Jails).
         Returns a BLOCK InspectionResult if a breach is detected.
         """
         # Identify tool calls regardless of strictly formatted "tools/call" method
-        # CRIT-1 Fix: Support both standard and fallback tool call formats
-        params = message.get("params", {})
+        params = message.get("params") or {}
+        if not isinstance(params, dict):
+            params = {}
         tool_name = params.get("name")
-        args = params.get("arguments", {})
+        args = params.get("arguments") or {}
+        if not isinstance(args, dict):
+            args = {}
 
         # Fallback for non-standard formats (e.g. from custom clients)
         if not tool_name:
             tool_name = message.get("name")
         if not args:
-            args = message.get("arguments", {})
+            args = message.get("arguments") or {}
+            if not isinstance(args, dict):
+                args = {}
 
         # If it doesn't look like a tool call at all, skip safe zones
         if not tool_name or not isinstance(args, dict):
             return None
 
         # Find any safe zones for this tool
-        relevant_zones = [z for z in self.safe_zones if z.tool == tool_name]
+        relevant_zones = [z for z in zones if z.tool == tool_name]
         if not relevant_zones:
             return None
 
         # Check for path-like arguments
-        # We look for common path keys like 'path', 'filepath', 'dir', etc.
         path_keys = ["path", "filepath", "directory", "dir", "destination", "source"]
         
         for key in path_keys:
@@ -257,7 +347,7 @@ class RulesEngine:
                 
                 for zone in relevant_zones:
                     if check_path_jail(requested_path, zone.allowed_prefixes, recursive=zone.recursive):
-                        # Task 2: Check entropy if restricted (P2 Audit Finding)
+                        # Entropy check if restricted
                         if zone.max_entropy:
                             content = args.get("content") or args.get("data")
                             if content:
@@ -298,13 +388,17 @@ class RulesEngine:
         matches: list[RuleMatch] = []
 
         # 1. Deterministic Safe Zone Check (Fastest & Most Critical)
-        jail_result = self._check_safe_zones(message)
+        with self._rules_lock:
+            safe_zones = self.safe_zones
+            rules = self.rules
+
+        jail_result = self._check_safe_zones_list(message, safe_zones)
         if jail_result:
             _log_latency(t_start, "Layer 1 SAFE-ZONE BLOCK")
             return jail_result
 
         # 2. Legacy Regex Rules
-        for rule in self.rules:
+        for rule in rules:
             match = rule.check(message)
             if match is None:
                 continue
@@ -340,10 +434,9 @@ class RulesEngine:
                 rule_matches=matches,
             )
 
-        # CRIT-2 Fix: Support VANGUARD_DEFAULT_POLICY=DENY
+        # 3. Default Policy Check
         default_policy = os.getenv("VANGUARD_DEFAULT_POLICY", "ALLOW").upper()
         if default_policy == "DENY":
-            # Only deny if it actually looks like a tool call or restricted method
             method = message.get("method")
             if method in ("tools/call", "tools/list", "resources/read", "resources/list") or message.get("name"):
                 logger.warning(f"DEFAULT-DENY: Blocking unmatched request for {method or message.get('name')}")
@@ -357,10 +450,12 @@ class RulesEngine:
 
     @property
     def rule_count(self) -> int:
-        return len(self.rules)
+        with self._rules_lock:
+            return len(self.rules)
 
     def get_rule_ids(self) -> list[str]:
-        return [r.rule_id for r in self.rules]
+        with self._rules_lock:
+            return [r.rule_id for r in self.rules]
 
 
 def _log_latency(t_start: float, label: str):

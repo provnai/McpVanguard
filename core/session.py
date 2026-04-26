@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 import threading
 from typing import Optional
 
+from core.models import AuthPrincipal
+
 
 @dataclass
 class ToolCallRecord:
@@ -39,6 +41,9 @@ class SessionState:
     total_calls: int = 0
     is_terminated: bool = False
     termination_reason: Optional[str] = None
+    principal: Optional[AuthPrincipal] = None
+    # Phase 6: upstream server identity for cross-server isolation
+    server_id: Optional[str] = None
 
     # --- Per-tool call counters (for behavioral analysis) ---
     tool_call_counts: dict = field(default_factory=lambda: defaultdict(int))
@@ -97,6 +102,9 @@ class SessionState:
     def summary(self) -> dict:
         return {
             "session_id": self.session_id,
+            "server_id": self.server_id,
+            "principal_id": self.principal.principal_id if self.principal else None,
+            "auth_type": self.principal.auth_type if self.principal else None,
             "age_seconds": round(self.age_seconds, 1),
             "total_calls": self.total_calls,
             "blocked": self.blocked_count,
@@ -125,11 +133,11 @@ class SessionManager:
         for sid in expired:
             del self._sessions[sid]
 
-    def create(self) -> SessionState:
+    def create(self, principal: Optional[AuthPrincipal] = None, server_id: Optional[str] = None) -> SessionState:
         """Create and register a new session."""
         with self._lock:
             self._evict_expired()
-            session = SessionState()
+            session = SessionState(principal=principal, server_id=server_id)
             self._sessions[session.session_id] = session
             
             # Redis persistence for metadata (prevents loss on restart)

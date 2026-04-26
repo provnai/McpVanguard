@@ -2,6 +2,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from core.models import AuthPrincipal
 from core.proxy import VanguardProxy, ProxyConfig
 from core.session import SessionState
 
@@ -117,3 +118,49 @@ async def test_proxy_blocks_management_tools_when_disabled():
     assert response["error"]["data"]["rule"] == "VANGUARD-MGMT-DISABLED"
     proxy.audit.info.assert_called_once()
     assert "Management tools are disabled" in proxy.audit.info.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_proxy_scope_denial_includes_oauth_metadata():
+    config = ProxyConfig()
+
+    request = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {"name": "write_file", "arguments": {"path": "notes.txt", "content": "hi"}},
+    }).encode("utf-8")
+
+    class Reader:
+        def __init__(self):
+            self.lines = [request, b""]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    principal = AuthPrincipal(
+        principal_id="bearer:user-123",
+        auth_type="bearer",
+        roles=["authenticated"],
+        attributes={"token_scope": ["scope:net"]},
+    )
+    proxy = VanguardProxy(
+        server_command=["python", "-c", "pass"],
+        config=config,
+        agent_reader=Reader(),
+        agent_writer=AsyncMock(),
+        principal=principal,
+    )
+    proxy._session = SessionState(session_id="proxy-scope")
+    proxy._write_to_agent = AsyncMock()
+    proxy.audit.info = MagicMock()
+
+    await proxy._pump_agent_to_server()
+
+    proxy._write_to_agent.assert_awaited_once()
+    response = json.loads(proxy._write_to_agent.await_args.args[0])
+    assert response["id"] == 8
+    assert response["error"]["data"]["rule"] == "VANGUARD-AUTH-SCOPE"
+    assert response["error"]["data"]["oauth_error"] == "insufficient_scope"
+    assert response["error"]["data"]["required_scope"] == "scope:io"
+    assert response["error"]["data"]["granted_scopes"] == ["scope:net"]

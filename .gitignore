@@ -18,7 +18,7 @@ venv/
 env/
 ENV/
 
-# Environment variables — NEVER commit real secrets
+# Environment variables - NEVER commit real secrets
 .env
 .env.local
 .env.production
@@ -65,3 +65,11 @@ RAILWAY_TEST_REPORT.*
 
 # setuptools-scm
 core/_version.py
+
+# Local release audit scratch
+tmp/
+.uv-cache-smoke/
+*.mcpb
+.release_audit_dist/
+.release_audit_sdist/
+.release_smoke_venv/

@@ -125,11 +125,22 @@ class InspectionResult(BaseModel):
         )
 
 
+class AuthPrincipal(BaseModel):
+    """Authenticated caller identity resolved at the transport boundary."""
+    principal_id: str
+    auth_type: str
+    roles: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
 class AuditEvent(BaseModel):
     """An entry written to audit.log for every proxied message."""
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     timestamp: float = Field(default_factory=time.time)
     session_id: str
+    principal_id: Optional[str] = None
+    auth_type: Optional[str] = None
+    server_id: Optional[str] = None  # Phase 6: upstream server identity
     direction: str  # "agent→server" | "server→agent"
     method: Optional[str] = None
     tool_name: Optional[str] = None
@@ -137,8 +148,11 @@ class AuditEvent(BaseModel):
     layer_triggered: Optional[int] = None
     rule_id: Optional[str] = None
     semantic_score: Optional[float] = None
+    risk_score: Optional[float] = None
+    risk_enforcement: Optional[str] = None
     latency_ms: Optional[float] = None
     blocked_reason: Optional[str] = None
+    auth_warnings: list[str] = Field(default_factory=list)
 
     def to_log_line(self, format: str = "text") -> str:
         if format == "json":
@@ -147,10 +161,16 @@ class AuditEvent(BaseModel):
         from datetime import datetime
         ts = datetime.fromtimestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         tag = f"[{self.action}]"
+        principal = f" [{self.principal_id}]" if self.principal_id else ""
+        srv = f" [srv:{self.server_id}]" if self.server_id else ""
+        risk = ""
+        if self.risk_score is not None:
+            enforcement = self.risk_enforcement or "UNKNOWN"
+            risk = f" [risk:{self.risk_score:.2f}/{enforcement}]"
         tool = f" [{self.tool_name}]" if self.tool_name else ""
         reason = f" — {self.blocked_reason}" if self.blocked_reason else ""
         layer = f" (Layer {self.layer_triggered})" if self.layer_triggered else ""
-        return f"[{ts}] {tag:<9} {layer:<10} | {self.session_id[:8]} | {self.direction}{tool}{reason}"
+        return f"[{ts}] {tag:<9} {layer:<10} | {self.session_id[:8]} | {self.direction}{principal}{srv}{risk}{tool}{reason}"
 
 
 # ---------------------------------------------------------------------------

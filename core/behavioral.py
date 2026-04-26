@@ -27,6 +27,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Deque, Optional, Any
+from core.risk import RiskEngine
 
 from core.models import InspectionResult, RuleMatch
 
@@ -132,6 +133,7 @@ class _TokenBucket:
 class BehavioralState:
     """Tracks behavioral counters for a single proxy session."""
     session_id: str
+    server_id: str = "default"  # Phase 6: upstream server identity
     # Per-tool sliding windows
     _windows: dict[str, Any] = field(default_factory=dict)
     # Paths that have been read (for priv-esc sequence detection)
@@ -168,7 +170,7 @@ class BehavioralState:
     def window(self, tool: str):
         if tool not in self._windows:
             if _redis_client:
-                self._windows[tool] = _RedisWindow(f"vguard:beh:{self.session_id}:win:{tool}")
+                self._windows[tool] = _RedisWindow(f"vguard:beh:{self.session_id}:{self.server_id}:win:{tool}")
             else:
                 self._windows[tool] = _Window()
         return self._windows[tool]
@@ -188,7 +190,7 @@ class BehavioralState:
             path = path.replace("\\", "/")
             if any(frag.lower() in path.lower() for frag in _SENSITIVE_PATH_FRAGMENTS):
                 if _redis_client:
-                    rkey = f"vguard:beh:{self.session_id}:reads"
+                    rkey = f"vguard:beh:{self.session_id}:{self.server_id}:reads"
                     _redis_client.sadd(rkey, path)
                     _redis_client.expire(rkey, 3600)
                 else:
@@ -198,14 +200,14 @@ class BehavioralState:
     def record_write(self, tool_name: str) -> None:
         has_sensitive = False
         if _redis_client:
-            rkey = f"vguard:beh:{self.session_id}:reads"
+            rkey = f"vguard:beh:{self.session_id}:{self.server_id}:reads"
             has_sensitive = _redis_client.scard(rkey) > 0
         else:
             has_sensitive = len(self.sensitive_reads) > 0
 
         if has_sensitive:
             if _redis_client:
-                wkey = f"vguard:beh:{self.session_id}:write_after"
+                wkey = f"vguard:beh:{self.session_id}:{self.server_id}:write_after"
                 _redis_client.setex(wkey, 3600, "1")
             else:
                 self.write_after_sensitive = True
@@ -218,19 +220,19 @@ class BehavioralState:
 
     def get_sensitive_reads(self) -> set[str]:
         if _redis_client:
-            rkey = f"vguard:beh:{self.session_id}:reads"
+            rkey = f"vguard:beh:{self.session_id}:{self.server_id}:reads"
             return set(_redis_client.smembers(rkey))
         return self.sensitive_reads
 
     def has_write_after_sensitive(self) -> bool:
         if _redis_client:
-            wkey = f"vguard:beh:{self.session_id}:write_after"
+            wkey = f"vguard:beh:{self.session_id}:{self.server_id}:write_after"
             return _redis_client.exists(wkey) > 0
         return self.write_after_sensitive
 
     def add_response_bytes(self, byte_len: int) -> int:
         if _redis_client:
-            bkey = f"vguard:beh:{self.session_id}:bytes"
+            bkey = f"vguard:beh:{self.session_id}:{self.server_id}:bytes"
             val = _redis_client.incrby(bkey, byte_len)
             _redis_client.expire(bkey, 3600)
             return val
@@ -241,24 +243,25 @@ class BehavioralState:
 
 # ─── Global registry ─────────────────────────────────────────────────────────
 
-_states: dict[str, BehavioralState] = {}
+_states: dict[tuple[str, str], BehavioralState] = {}
 
 
-def get_state(session_id: str) -> BehavioralState:
-    if session_id not in _states:
+def get_state(session_id: str, server_id: str = "default") -> BehavioralState:
+    key = (session_id, server_id)
+    if key not in _states:
         # CRIT-3 Fix: Prune old states if we're growing too large
         if len(_states) > 1000:
             prune_inactive_states(max_age_secs=3600)
             
-        _states[session_id] = BehavioralState(session_id=session_id)
+        _states[key] = BehavioralState(session_id=session_id, server_id=server_id)
     
-    state = _states[session_id]
+    state = _states[key]
     state.last_accessed = time.monotonic()
     return state
 
 
-def clear_state(session_id: str) -> None:
-    _states.pop(session_id, None)
+def clear_state(session_id: str, server_id: str = "default") -> None:
+    _states.pop((session_id, server_id), None)
 
 
 def clear_all_states() -> None:
@@ -299,16 +302,17 @@ def _is_write_tool(tool_name: str) -> bool:
 
 # ─── Public inspection API ────────────────────────────────────────────────────
 
-async def inspect_request(session_id: str, message: dict) -> Optional[InspectionResult]:
+async def inspect_request(session_id: str, message: dict, server_id: str = "default") -> Optional[InspectionResult]:
     """Async wrapper that delegates to _inspect_request_sync using ThreadPoolExecutor."""
     if not ENABLED: return None
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, _inspect_request_sync, session_id, message)
+    return await loop.run_in_executor(_executor, _inspect_request_sync, session_id, message, server_id)
 
 
 def _inspect_request_sync(
     session_id: str,
     message: dict,
+    server_id: str = "default",
 ) -> Optional[InspectionResult]:
     """
     Inspect an incoming tool call using behavioral analysis.
@@ -316,12 +320,12 @@ def _inspect_request_sync(
     Args:
         session_id: Identifies the proxy session.
         message: Raw JSON-RPC message dict.
+        server_id: Upstream server identity (Phase 6 isolation key).
 
     Returns:
         InspectionResult to BLOCK or WARN, or None to pass through.
     """
     if not ENABLED:
-        # print(f"[VANGUARD-DEBUG] behavioral Layer is DISABLED (ENABLED={ENABLED})")
         return None
 
     # Fail-closed if STRICT_REDIS is enabled but client failed to connect
@@ -337,7 +341,7 @@ def _inspect_request_sync(
 
     params = message.get("params", {})
     tool_name = params.get("name", "unknown")
-    state = get_state(session_id)
+    state = get_state(session_id, server_id)
 
     # Record the call
     state.record_call(tool_name, params)
@@ -374,6 +378,11 @@ def _inspect_request_sync(
             )],
             block_reason=f"Data scraping: {read_count} read_file calls in 10s",
         )
+    
+    if read_count > (MAX_READ_FILE_PER_10S * 0.5):
+        RiskEngine.get_instance().record_event(session_id, server_id, "BEHAVIORAL_WARN", {"detector": "BEH-001", "count": read_count})
+
+    # ... and so on for other detectors ...
 
     # ── BEH-002: Directory enumeration detector ──
     list_count = state.window("list_directory").count_in(5.0)
@@ -451,16 +460,17 @@ def entropy_risk_label(h: float) -> str:
     return "LOW (plaintext)"
 
 
-async def inspect_response(session_id: str, response_body: str) -> Optional[InspectionResult]:
+async def inspect_response(session_id: str, response_body: str, server_id: str = "default") -> Optional[InspectionResult]:
     """Async wrapper that delegates to _inspect_response_sync using ThreadPoolExecutor."""
     if not ENABLED: return None
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, _inspect_response_sync, session_id, response_body)
+    return await loop.run_in_executor(_executor, _inspect_response_sync, session_id, response_body, server_id)
 
 
 def _inspect_response_sync(
     session_id: str,
     response_body: str,
+    server_id: str = "default",
 ) -> Optional[InspectionResult]:
     """
     Inspect a server response for large payload and high-entropy exfiltration attempts.
@@ -471,7 +481,7 @@ def _inspect_response_sync(
 
     byte_data = response_body.encode("utf-8")
     byte_len = len(byte_data)
-    state = get_state(session_id)
+    state = get_state(session_id, server_id)
 
     # ── Task 3: Entropy check (BEH-006) ──
     h = compute_shannon_entropy(byte_data)
@@ -484,6 +494,11 @@ def _inspect_response_sync(
             layer=3,
             rule_matches=[RuleMatch(rule_id="BEH-006", severity="CRITICAL")]
         )
+
+    if h >= ENTROPY_BLOCK_THRESHOLD:
+         RiskEngine.get_instance().record_event(session_id, server_id, "ENTROPY_CRITICAL", {"h": h})
+    elif h >= ENTROPY_HIGH_THRESHOLD:
+         RiskEngine.get_instance().record_event(session_id, server_id, "ENTROPY_HIGH", {"h": h})
 
     # Apply Token Bucket consumption
     cost = 1.0
