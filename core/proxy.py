@@ -326,8 +326,14 @@ class VanguardProxy:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-        except Exception as e:
+        except (BlockingIOError, OSError) as e:
+            if getattr(e, "errno", None) == 11:
+                 logger.critical(f"[Vanguard] RESOURCE EXHAUSTION: Cannot spawn MCP server (Errno 11). System limits reached.")
+                 raise RuntimeError("Server capacity reached (OS process limit). Please try again later.")
             logger.error(f"[Vanguard] Failed to launch server: {e}")
+            raise RuntimeError(f"MCP Server command failed: {e}")
+        except Exception as e:
+            logger.error(f"[Vanguard] Unexpected error launching server: {e}")
             raise RuntimeError(f"MCP Server command failed: {e}")
 
         logger.info(f"[Vanguard] Server PID {self._server_process.pid} proxy active")

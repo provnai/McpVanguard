@@ -79,8 +79,8 @@ def _get_sse_config():
         "BIND_STREAMABLE_SESSIONS": os.getenv("VANGUARD_BIND_STREAMABLE_SESSIONS", "true").lower() == "true",
         "TRUST_PROXY_HEADERS": os.getenv("VANGUARD_TRUST_PROXY_HEADERS", "false").lower() == "true",
         "TRUSTED_PROXY_IPS": [ip.strip() for ip in os.getenv("VANGUARD_TRUSTED_PROXY_IPS", "").split(",") if ip.strip()],
-        "MAX_CONCURRENCY": int(os.getenv("VANGUARD_MAX_CONCURRENT_SSE", "5")),
-        "MAX_GLOBAL_CONNECTIONS": int(os.getenv("VANGUARD_MAX_GLOBAL_CONNECTIONS", "50")),
+        "MAX_CONCURRENCY": int(os.getenv("VANGUARD_MAX_CONCURRENT_SSE", "3")),
+        "MAX_GLOBAL_CONNECTIONS": int(os.getenv("VANGUARD_MAX_GLOBAL_CONNECTIONS", "10")),
         "RATE_LIMIT_PER_SEC": float(os.getenv("VANGUARD_SSE_RATE_LIMIT", "1.0")),
         "MAX_BODY_BYTES": int(os.getenv("VANGUARD_SSE_MAX_BODY_BYTES", "131072")),
     }
@@ -856,7 +856,11 @@ async def handle_sse(scope, receive, send, ctx: ServerContext):
                 principal=principal,
                 server_id=session_isolation.derive_server_id(ctx.server_command),
             )
-            await proxy.run()
+            try:
+                await proxy.run()
+            except Exception as e:
+                logger.error("VanguardProxy execution failed: %s", e)
+                raise
     finally:
         async with _registry_lock:
             _active_connections[client_ip] -= 1

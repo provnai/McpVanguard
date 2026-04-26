@@ -73,3 +73,10 @@ tmp/
 .release_audit_dist/
 .release_audit_sdist/
 .release_smoke_venv/
+
+# Testing & Chaos Engine
+scratch/
+tests/
+tests_performance/
+chaos_engine.py
+stress_test.py
