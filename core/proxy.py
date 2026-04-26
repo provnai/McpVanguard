@@ -1401,8 +1401,11 @@ class VanguardProxy:
                     result.rule_matches.extend(beh_result.rule_matches)
 
         if self.config.semantic_enabled:
+            from dataclasses import replace
             t_start = time.monotonic()
-            sem_result = await semantic.score_intent(message, enabled=self.config.semantic_enabled)
+            settings = semantic._get_settings()
+            settings = replace(settings, enabled=self.config.semantic_enabled)
+            sem_result = await semantic.score_intent(message, settings=settings)
             telemetry.metrics.record_latency("L2", (time.monotonic() - t_start) * 1000)
             if sem_result:
                 if not sem_result.allowed:
