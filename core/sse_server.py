@@ -666,6 +666,23 @@ class VanguardStreamableSessionManager:
 
         return transport
 
+    async def _send_heartbeats(self, write_stream, session_id: str) -> None:
+        """Sends periodic SSE comments to keep the connection alive."""
+        interval = float(os.getenv("VANGUARD_SSE_HEARTBEAT_SECS", "15.0"))
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    # In SSE, lines starting with ':' are comments and keep the connection alive
+                    # without being processed as events by the client.
+                    await write_stream.send(":\n\n")
+                    logger.debug("Sent SSE heartbeat for session %s", session_id)
+                except Exception as e:
+                    logger.debug("Failed to send heartbeat for session %s: %s", session_id, e)
+                    break
+        except asyncio.CancelledError:
+            pass
+
     async def _run_session(
         self,
         transport: StreamableHTTPServerTransport,
@@ -677,15 +694,26 @@ class VanguardStreamableSessionManager:
             async with transport.connect() as (read_stream, write_stream):
                 bridge = StreamWrapper(read_stream, write_stream)
                 ready.set()
-                proxy = VanguardProxy(
-                    server_command=self.server_command,
-                    config=self.config,
-                    agent_reader=bridge,
-                    agent_writer=bridge,
-                    principal=principal,
-                    server_id=session_isolation.derive_server_id(self.server_command),
-                )
-                await proxy.run()
+                
+                # Start background heartbeat task to keep Claude connected during idle periods
+                heartbeat_task = asyncio.create_task(self._send_heartbeats(write_stream, session_id or "unknown"))
+                
+                try:
+                    proxy = VanguardProxy(
+                        server_command=self.server_command,
+                        config=self.config,
+                        agent_reader=bridge,
+                        agent_writer=bridge,
+                        principal=principal,
+                        server_id=session_isolation.derive_server_id(self.server_command),
+                    )
+                    await proxy.run()
+                finally:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
         except asyncio.CancelledError:
             raise
         except Exception:

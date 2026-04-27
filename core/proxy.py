@@ -1387,12 +1387,24 @@ class VanguardProxy:
         if not result.allowed:
             return result
 
+        # Parallel L2/L3 execution to minimize latency
+        beh_task = None
         if self.config.behavioral_enabled and self._session:
-            t_start = time.monotonic()
-            beh_result = await behavioral.inspect_request(
+            beh_task = asyncio.create_task(behavioral.inspect_request(
                 self._session.session_id, message, self._server_id
-            )
-            telemetry.metrics.record_latency("L3", (time.monotonic() - t_start) * 1000)
+            ))
+
+        sem_task = None
+        if self.config.semantic_enabled:
+            from dataclasses import replace
+            settings = semantic._get_settings()
+            settings = replace(settings, enabled=self.config.semantic_enabled)
+            sem_task = asyncio.create_task(semantic.score_intent(message, settings=settings))
+
+        if beh_task:
+            t_start_l3 = time.monotonic()
+            beh_result = await beh_task
+            telemetry.metrics.record_latency("L3", (time.monotonic() - t_start_l3) * 1000)
             if beh_result:
                 if not beh_result.allowed:
                     return beh_result
@@ -1400,13 +1412,10 @@ class VanguardProxy:
                     result.action = "WARN"
                     result.rule_matches.extend(beh_result.rule_matches)
 
-        if self.config.semantic_enabled:
-            from dataclasses import replace
-            t_start = time.monotonic()
-            settings = semantic._get_settings()
-            settings = replace(settings, enabled=self.config.semantic_enabled)
-            sem_result = await semantic.score_intent(message, settings=settings)
-            telemetry.metrics.record_latency("L2", (time.monotonic() - t_start) * 1000)
+        if sem_task:
+            t_start_l2 = time.monotonic()
+            sem_result = await sem_task
+            telemetry.metrics.record_latency("L2", (time.monotonic() - t_start_l2) * 1000)
             if sem_result:
                 if not sem_result.allowed:
                     return sem_result
