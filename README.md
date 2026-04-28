@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/provnai-mcpvanguard-badge.png)](https://mseep.ai/app/provnai-mcpvanguard)
+
 # McpVanguard
 ### Security Gateway for MCP Agents
 
