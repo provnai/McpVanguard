@@ -14,6 +14,7 @@ build/
 # Virtual environments
 .venv/
 .venv_wsl/
+.audit_venv/
 venv/
 env/
 ENV/
@@ -76,7 +77,4 @@ tmp/
 
 # Testing & Chaos Engine
 scratch/
-tests/
-tests_performance/
-chaos_engine.py
-stress_test.py
+

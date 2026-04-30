@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import math
 import os
 import sys
 import time
@@ -1575,6 +1576,10 @@ class VanguardProxy:
                 raise ValueError(f"String length {len(value)} exceeds limit {self.config.max_string_len}")
             
             return value
+        elif isinstance(message, float):
+            # 5. Reject NaN and Infinity to prevent downstream crashes/bypasses
+            if math.isnan(message) or math.isinf(message):
+                raise ValueError("NaN/Infinity values are not permitted in McpVanguard messages.")
         return message
 
     # -----------------------------------------------------------------------
