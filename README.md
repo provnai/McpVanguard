@@ -31,7 +31,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release summary and history.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
-Part of the **[Provnai Open Research Initiative](https://provnai.com)** - Building the Immune System for AI.
+Part of the **[Provnai Open Research Initiative](https://www.provnai.com/mcp-vanguard)** - Building the Immune System for AI.
 
 ---
 

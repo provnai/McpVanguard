@@ -905,6 +905,15 @@ class VanguardProxy:
             if not line:
                 break
 
+            # #4 Fix: Cap raw line size BEFORE decoding/parsing to prevent memory DoS
+            max_line_bytes = self.config.max_string_len * 4  # generous UTF-8 headroom
+            if isinstance(line, (bytes, bytearray)) and len(line) > max_line_bytes:
+                logger.warning("[Vanguard] REJECTED: Incoming line exceeds max size (%d bytes), dropping.", len(line))
+                continue
+            elif isinstance(line, str) and len(line) > max_line_bytes:
+                logger.warning("[Vanguard] REJECTED: Incoming line exceeds max size (%d chars), dropping.", len(line))
+                continue
+
             if isinstance(line, bytes):
                 line = line.decode("utf-8", errors="replace")
             
@@ -1544,16 +1553,20 @@ class VanguardProxy:
             return [item for item in raw if isinstance(item, str)]
         return []
 
-    def _normalize_message(self, message: Any) -> Any:
+    def _normalize_message(self, message: Any, _depth: int = 0) -> Any:
         """
         Recursively URL-decodes and Unicode-normalizes (NFKC) all string values
         in a message to prevent encoding-based rule bypasses.
         Loops URL decode until the value stabilizes to handle double/triple encoding.
         """
+        # #5 Fix: Depth limit prevents stack overflow from deeply nested JSON payloads
+        if _depth > 50:
+            raise ValueError("Message nesting depth exceeds limit (50 levels). Possible DoS payload.")
+
         if isinstance(message, dict):
-            return {k: self._normalize_message(v) for k, v in message.items()}
+            return {k: self._normalize_message(v, _depth + 1) for k, v in message.items()}
         elif isinstance(message, list):
-            return [self._normalize_message(v) for v in message]
+            return [self._normalize_message(v, _depth + 1) for v in message]
         elif isinstance(message, str):
             # 1. Loop URL decode until stable (handles %252F triple encoding etc.)
             value = message

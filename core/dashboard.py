@@ -3,6 +3,7 @@ core/dashboard.py
 A lightweight Starlette dashboard for the McpVanguard audit log.
 """
 
+import html
 import json
 import os
 from datetime import datetime
@@ -306,15 +307,15 @@ async def get_logs_fragment(request):
 
             row = f"""
             <tr>
-                <td class="timestamp">{item.timestamp}</td>
-                <td class="action-{item.action}">{item.action}</td>
-                <td class="session">{item.session_id}</td>
+                <td class="timestamp">{html.escape(item.timestamp)}</td>
+                <td class="action-{html.escape(item.action)}">{html.escape(item.action)}</td>
+                <td class="session">{html.escape(item.session_id)}</td>
                 <td>
-                    <span class="direction">{item.direction}</span>
-                    {item.tool_name or item.method or '---'}
+                    <span class="direction">{html.escape(item.direction)}</span>
+                    {html.escape(item.tool_name or item.method or '---')}
                 </td>
                 <td class="reason">
-                    {item.reason or '---'}
+                    {html.escape(item.reason or '---')}
                 </td>
             </tr>
             """
