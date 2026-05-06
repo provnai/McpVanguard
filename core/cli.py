@@ -355,6 +355,41 @@ def sse(
     ))
 
 
+@app.command("demo-server")
+def demo_server(
+    mode: str = typer.Option(
+        "stdio",
+        "--mode",
+        help="Run the bundled demo MCP server in 'stdio' mode for upstream use or 'sse' mode for hosted raw exposure.",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Binding host for the hosted demo server. Use 0.0.0.0 explicitly for public/cloud exposure.",
+    ),
+    port: int = typer.Option(
+        int(os.getenv("PORT", "8080")),
+        "--port",
+        "-p",
+        help="Port to listen on in hosted mode. Defaults to $PORT or 8080.",
+    ),
+    poisoned_metadata: Optional[bool] = typer.Option(
+        None,
+        "--poisoned-metadata/--clean-metadata",
+        help="Serve the metadata-poisoning variant of the demo tool list.",
+    ),
+):
+    """
+    Run the bundled demo MCP server used by the Railway showcase.
+    """
+    if poisoned_metadata is not None:
+        os.environ["DEMO_POISONED_METADATA"] = "true" if poisoned_metadata else "false"
+
+    from core import demo_mcp
+
+    demo_mcp.run_demo_server(mode=mode, host=host, port=port)
+
+
 # ---------------------------------------------------------------------------
 # vanguard info
 # ---------------------------------------------------------------------------
