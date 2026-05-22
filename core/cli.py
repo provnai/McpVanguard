@@ -355,6 +355,41 @@ def sse(
     ))
 
 
+@app.command("demo-server")
+def demo_server(
+    mode: str = typer.Option(
+        "stdio",
+        "--mode",
+        help="Run the bundled demo MCP server in 'stdio' mode for upstream use or 'sse' mode for hosted raw exposure.",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Binding host for the hosted demo server. Use 0.0.0.0 explicitly for public/cloud exposure.",
+    ),
+    port: int = typer.Option(
+        int(os.getenv("PORT", "8080")),
+        "--port",
+        "-p",
+        help="Port to listen on in hosted mode. Defaults to $PORT or 8080.",
+    ),
+    poisoned_metadata: Optional[bool] = typer.Option(
+        None,
+        "--poisoned-metadata/--clean-metadata",
+        help="Serve the metadata-poisoning variant of the demo tool list.",
+    ),
+):
+    """
+    Run the bundled demo MCP server used by the Railway showcase.
+    """
+    if poisoned_metadata is not None:
+        os.environ["DEMO_POISONED_METADATA"] = "true" if poisoned_metadata else "false"
+
+    from core import demo_mcp
+
+    demo_mcp.run_demo_server(mode=mode, host=host, port=port)
+
+
 # ---------------------------------------------------------------------------
 # vanguard info
 # ---------------------------------------------------------------------------
@@ -406,6 +441,51 @@ def info(
 def version():
     """Show version information."""
     rprint(f"[bold green]McpVanguard[/bold green] v{__version__}")
+
+
+# ---------------------------------------------------------------------------
+# vanguard login
+# ---------------------------------------------------------------------------
+
+@app.command()
+def login(
+    token: str = typer.Option(
+        ...,
+        "--token", "-t",
+        help="ProvnCloud service token (shown once in dashboard).",
+    ),
+    base_url: str = typer.Option(
+        "https://provncloud-production.up.railway.app",
+        "--base-url", "-u",
+        help="ProvnCloud API base URL.",
+    ),
+    provncloud: bool = typer.Option(
+        False,
+        "--provncloud",
+        help="Authenticate with ProvnCloud (required flag).",
+    ),
+):
+    """
+    Authenticate McpVanguard with ProvnCloud.
+    Stores credentials in ~/.config/mcp-vanguard/provncloud.json
+    """
+    if not provncloud:
+        console.print("[bold red]Error:[/bold red] Use --provncloud to login with ProvnCloud.")
+        raise typer.Exit(code=1)
+
+    try:
+        from core.provncloud import login_with_token
+        cfg = login_with_token(base_url, token)
+    except Exception as exc:
+        console.print(f"[bold red]Login failed:[/bold red] {exc}")
+        raise typer.Exit(code=1)
+
+    console.print(Panel.fit(
+        f"[bold green]ProvnCloud login successful[/bold green]\n"
+        f"Tenant: [cyan]{cfg.tenant_id}[/cyan]\n"
+        f"Dashboard: [link={cfg.dashboard_url}]{cfg.dashboard_url}[/link]",
+        border_style="green",
+    ))
 
 
 # ---------------------------------------------------------------------------

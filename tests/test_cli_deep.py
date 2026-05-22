@@ -185,6 +185,29 @@ def test_vanguard_sse_management_tools_flag_enables_surface():
     coroutine.close()
 
 
+def test_vanguard_demo_server_dispatches_to_demo_module(monkeypatch):
+    monkeypatch.delenv("DEMO_POISONED_METADATA", raising=False)
+
+    with patch("core.demo_mcp.run_demo_server") as mock_run_demo_server:
+        result = runner.invoke(
+            app,
+            [
+                "demo-server",
+                "--mode",
+                "sse",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9090",
+                "--poisoned-metadata",
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_run_demo_server.assert_called_once_with(mode="sse", host="0.0.0.0", port=9090)
+    assert os.environ["DEMO_POISONED_METADATA"] == "true"
+
+
 def test_vanguard_taxonomy_coverage_reports_summary():
     result = runner.invoke(app, ["taxonomy-coverage"])
 

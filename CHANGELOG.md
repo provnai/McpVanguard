@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0-rc1] - 2026-04-26 (The Integrity Gateway Release)
+## [2.0.0] - 2026-05-22 (The Integrity Gateway Release)
 
 ### Security and Platform
 
@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Release verification baseline**: The repository now has an accuracy-first verification baseline with the full repository suite passing in the current recovery state.
+- **Release verification posture**: The repository now has a cleaner release-hardening baseline across packaging, CI, and public documentation, with the shipped gateway and integrity scope separated more clearly from longer-horizon platform work.
 - **Management and operator tooling**: Auth cache management, rule reload, and integrity workflows are now part of the verified management surface instead of being treated as informal helpers.
 - **Release posture**: The project now has a clearer split between shipped platform/security work and longer-horizon research-track ideas, reducing ambiguity in public release claims.
 
@@ -44,11 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Management and integrity features should be described using **server integrity**, **baseline verification**, and **capability drift** language, not full SBOM language.
 - JWT/JWKS support in this release covers the verified bearer-auth path described in the implementation and tests, including Ed25519 / EdDSA JWT verification.
 - Regex safety in this release includes RE2-backed matching through the shared safe-regex backend, with explicit fallback behavior for environments without the wheel.
+- Broader ProvnCloud control-plane work and other longer-horizon platform ideas are intentionally outside the core `2.0.0` release promise.
 
 ### Verification
 
-- **Full repository verification baseline**: `308 passed`
 - **Release scope validation**: Transport, metadata, auth, integrity, benchmark, cross-server isolation, and management/integrity recovery paths all have dedicated test coverage in the current tree.
+- **Release packaging validation**: CI now builds the distribution artifacts and smoke-installs the packaged CLI before publish.
 
 ---
 

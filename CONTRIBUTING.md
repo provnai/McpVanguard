@@ -1,14 +1,16 @@
 # Contributing to McpVanguard
 
-First off — thanks for taking the time to contribute! McpVanguard is a community project. Every validated exploit makes MCP safer for everyone.
+Thanks for taking the time to contribute. McpVanguard is a community project, and thoughtful bug reports, rules, tests, and documentation all help make MCP deployments safer.
 
 ## Ways to Contribute
 
 ### Write New Rules
-While core filesystem isolation is handled deterministically via `safe_zones.yaml` and OS kernel features (`openat2`), we rely on the community to build Layer 1 regex signatures to catch malicious payloads and command injections.
 
-1. Open the relevant `rules/*.yaml` file (or create a new one)
-2. Add a new rule following the schema:
+While core filesystem isolation is handled deterministically via `safe_zones.yaml` and OS kernel features such as `openat2`, community rule contributions help expand Layer 1 signature coverage for malicious payloads and command injections.
+
+1. Open the relevant `rules/*.yaml` file, or create a new one.
+2. Add a new rule following the existing schema:
+
    ```yaml
    - id: "CAT-NNN"
      description: "Human readable description"
@@ -17,28 +19,35 @@ While core filesystem isolation is handled deterministically via `safe_zones.yam
      match_fields:
        - "params.arguments.path"
        - "params.arguments.command"
-     pattern: 'your_regex_here'
+     pattern: "your_regex_here"
      message: "User-facing block reason"
    ```
-3. Add a test case to `tests/test_rules.py`
-4. Run `pytest tests/test_rules.py -v` — all tests must pass
-5. Open a PR with the new rule + test
 
-### Report Bugs (Issue Tracker)
+3. Add a test case to `tests/test_rules.py`.
+4. Run `pytest tests/test_rules.py -v` - all tests must pass.
+5. Open a PR with the new rule and test.
+
+### Report Bugs
+
 Open a GitHub issue with:
-- What you expected vs what happened
-- Minimal reproduction steps
+
+- what you expected versus what happened
+- minimal reproduction steps
 - Python version and OS
 
 ### Report Security Vulnerabilities
-**Do NOT open a public issue.** Email **contact@provnai.com** instead.
+
+Do not open a public issue for vulnerabilities. Email **contact@provnai.com** instead.
+
 See [SECURITY.md](SECURITY.md) for the full disclosure policy.
 
-### Documentation Standards
-- Fix typos, improve clarity, add examples
-- Docs live in `docs/` and `README.md`
+### Improve Documentation
 
----
+- fix typos
+- improve clarity
+- add examples where they help
+
+Docs live in `docs/` and `README.md`.
 
 ## Development Setup
 
@@ -51,7 +60,7 @@ cd McpVanguard
 python -m venv .venv
 # Windows:
 .venv\Scripts\activate
-# Mac/Linux:
+# macOS / Linux:
 source .venv/bin/activate
 
 # 3. Install dependencies
@@ -61,30 +70,24 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
----
-
 ## Code Style
 
-- **Python**: PEP 8, type hints where practical, docstrings on all public methods
-- **YAML rules**: Follow the existing schema exactly — `id`, `description`, `severity`, `action`, `match_fields`, `pattern`, `message`
-- **Tests**: Every new rule needs a corresponding test — both a block case and an allow case
-
----
+- **Python**: PEP 8, type hints where practical, docstrings on public methods where useful
+- **YAML rules**: Follow the existing schema exactly - `id`, `description`, `severity`, `action`, `match_fields`, `pattern`, `message`
+- **Tests**: Every new rule should include both a block case and an allow case
 
 ## Pull Request Checklist
 
-- [ ] `pytest tests/ -v` passes (all green)
-- [ ] New rules have both block and allow test cases
-- [ ] No sensitive data in the PR (no real credentials, etc.)
-- [ ] `CHANGELOG.md` updated for any user-facing changes
-
----
+- [ ] `pytest tests/ -v` passes
+- [ ] new rules include both block and allow test cases
+- [ ] no sensitive data is included in the PR
+- [ ] `CHANGELOG.md` is updated for user-facing changes
 
 ## Code of Conduct
 
-- Be respectful
-- Validated bypass techniques should be disclosed responsibly so they can become public rules
+- be respectful
+- disclose bypass techniques responsibly so they can be fixed and documented safely
 
-## Questions?
+## Questions
 
 Open a GitHub Discussion or file an issue with the `question` label.

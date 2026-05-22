@@ -1,6 +1,6 @@
 # Deploying McpVanguard on Railway
 
-McpVanguard is a real-time AI security proxy for the Model Context Protocol (MCP). Deploying it on Railway gives you a fully managed, cloud-native security gateway that intercepts and blocks malicious AI agent tool calls before they reach your infrastructure.
+McpVanguard is a real-time security gateway for the Model Context Protocol (MCP). Deploying it on Railway gives you a managed, cloud-native gateway that intercepts and blocks malicious AI agent tool calls before they reach your infrastructure.
 
 ## One-Click Deployment
 
@@ -90,7 +90,7 @@ Verify the service is running:
 curl https://your-project.up.railway.app/health
 # Expected: {
 #   "status": "ok",
-#   "version": "1.7.0",
+#   "version": "2.0.0",
 #   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
 #   "timestamp": 1711022400.0
 # }
@@ -129,7 +129,7 @@ The most powerful enterprise configuration runs **both** McpVanguard and VEX nat
         → [VEX on Railway]    — cryptographically anchors every blocked call to Postgres
 ```
 
-This topology is **Railway Partnership Certified** — validated with a 250-iteration burst test achieving 100% block rate and 100% audit finality. See the [certification report](https://github.com/provnai/McpVanguard/blob/main/tests/benchmarks/railway_cloud_certification.py) for full details.
+This topology has been validated in the repository's Railway-focused benchmark and certification test suite, including burst and audit-finality scenarios. See the [certification report](https://github.com/provnai/McpVanguard/blob/main/tests/benchmarks/railway_cloud_certification.py) for the exact test harness.
 
 **To set it up:**
 1. Deploy [VEX on Railway](https://railway.com/deploy/N9-iqS?referralCode=4AXmAG) separately.
@@ -149,7 +149,7 @@ The instance is pre-configured with a `/health` endpoint:
 GET /health
 → {
   "status": "ok",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
   "timestamp": 1711022400.0
 }

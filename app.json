@@ -1,52 +1,52 @@
 {
-    "name": "McpVanguard Proxy",
-    "description": "Enterprise-grade security gateway for the Model Context Protocol (MCP). Protects servers from malicious agent intent.",
-    "repository": "https://github.com/provnai/McpVanguard",
-    "icon": "assets/logo.png",
-    "env": {
-        "VANGUARD_API_KEY": {
-            "description": "Required: Secret key for SSE clients. Must be sent in X-Api-Key header.",
-            "required": true,
-            "value": "sk-PLACEHOLDER-CHANGE-ME"
-        },
-        "MCP_SERVER_COMMAND": {
-            "description": "The shell command to spawn your target MCP server (e.g. 'npx @modelcontextprotocol/server-filesystem /path/to/data')",
-            "required": true
-        },
-        "VANGUARD_VEX_URL": {
-            "description": "Optional: VEX Protocol Flight Recorder API (Immutable Audit)",
-            "required": false
-        },
-        "VANGUARD_VEX_KEY": {
-            "description": "Optional: JWT Key for VEX Auditor integration",
-            "required": false
-        },
-        "OLLAMA_API_BASE": {
-            "description": "Optional: Remote LLM base URL for L2 Semantic intent scoring",
-            "required": false
-        },
-        "VANGUARD_REDIS_URL": {
-            "description": "Optional: Redis connection string for L3 Stateful Behavior tracing",
-            "required": false
-        },
-        "VANGUARD_DISABLE_UVLOOP": {
-            "description": "Safety: Set to 1 if encountering uvloop subprocess issues",
-            "required": false,
-            "value": "1"
-        },
-        "VANGUARD_METADATA_INSPECTION_ENABLED": {
-            "description": "Enable Layer 1 server-to-agent metadata inspection.",
-            "required": false,
-            "value": "true"
-        },
-        "VANGUARD_SERVER_MANIFEST_FILE": {
-            "description": "Path to the upstream server SBOM manifest for integrity verification.",
-            "required": false
-        },
-        "VANGUARD_AUTH_MODE": {
-            "description": "Authentication mode: 'none', 'api_key', or 'oidc'.",
-            "required": false,
-            "value": "api_key"
-        }
+  "name": "McpVanguard",
+  "description": "Security gateway for the Model Context Protocol (MCP). Protects MCP servers and tools before risky agent traffic reaches them.",
+  "repository": "https://github.com/provnai/McpVanguard",
+  "icon": "assets/logo.png",
+  "env": {
+    "VANGUARD_API_KEY": {
+      "description": "Required secret for SSE clients. Requests must send this in the X-Api-Key header.",
+      "required": true,
+      "value": "sk-PLACEHOLDER-CHANGE-ME"
+    },
+    "MCP_SERVER_COMMAND": {
+      "description": "Shell command used to spawn the target MCP server (for example 'npx @modelcontextprotocol/server-filesystem /path/to/data').",
+      "required": true
+    },
+    "VANGUARD_VEX_URL": {
+      "description": "Optional VEX endpoint for downstream audit and evidence workflows.",
+      "required": false
+    },
+    "VANGUARD_VEX_KEY": {
+      "description": "Optional key used for VEX integration.",
+      "required": false
+    },
+    "VANGUARD_OLLAMA_URL": {
+      "description": "Optional Ollama base URL for Layer 2 semantic scoring.",
+      "required": false
+    },
+    "VANGUARD_REDIS_URL": {
+      "description": "Optional Redis connection string for Layer 3 behavioral state.",
+      "required": false
+    },
+    "VANGUARD_DISABLE_UVLOOP": {
+      "description": "Set to 1 if you encounter uvloop subprocess issues in your deployment environment.",
+      "required": false,
+      "value": "1"
+    },
+    "VANGUARD_METADATA_INSPECTION_ENABLED": {
+      "description": "Enable metadata inspection on server-to-agent responses.",
+      "required": false,
+      "value": "true"
+    },
+    "VANGUARD_SERVER_MANIFEST_FILE": {
+      "description": "Optional path to the upstream server manifest used for integrity verification.",
+      "required": false
+    },
+    "VANGUARD_AUTH_MODE": {
+      "description": "Authentication mode: 'none', 'api_key', or 'oauth'.",
+      "required": false,
+      "value": "api_key"
     }
+  }
 }
