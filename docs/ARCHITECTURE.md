@@ -2,7 +2,7 @@
 
 ## Overview
 
-McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communication between an AI agent and any MCP server. It sits in the middle of the stdio stream, inspects every tool call in real-time, and applies three layers of defense before forwarding or blocking the request.
+McpVanguard is a **JSON-RPC security gateway** that intercepts communication between an AI agent and an MCP server. It sits in the middle of the stdio stream, inspects every tool call in real time, and applies three layers of defense before forwarding or blocking the request.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -44,7 +44,7 @@ McpVanguard is a **transparent JSON-RPC proxy** that intercepts all communicatio
 
 ## Component Breakdown
 
-### `core/proxy.py` — The Transparent Proxy
+### `core/proxy.py` — The Core Gateway Loop
 
 **The heart of the system.** This module:
 - Spawns the real MCP server as a **subprocess** using `asyncio.create_subprocess_exec`
@@ -72,7 +72,7 @@ Main Event Loop
 | Regex rule check (Layer 1) | ~16ms |
 | Behavioral check (Layer 3) | <5ms |
 | Semantic score (Layer 2) | async, non-blocking |
-| Total proxy overhead | ~156ms under max load |
+| Total gateway overhead | ~156ms under max load |
 
 ---
 
@@ -85,8 +85,8 @@ Before inspecting payload strings, Vanguard intercepts tool calls (like `read_fi
 - **Linux (`openat2`)**: Uses syscall 437 with `RESOLVE_BENEATH` to guarantee a path cannot escape its defined root directory, crushing TOCTOU and symlink attacks.
 - **Windows (`GetFinalPathNameByHandleW`)**: Opens a file handle to evaluate the true canonical path, defeating 8.3 shortnames (`PROGRA~1`), junction points, and DOS device paths (`\\.\`).
 
-**2. Static Signature Firewall (`rules/*.yaml`)**
-If a request is within bounds (or has no specific Safe Zone defined), it falls back to the static firewall. Contains **50+ signatures** across 5 categories.
+**2. Static Signature Rules (`rules/*.yaml`)**
+If a request is within bounds (or has no specific Safe Zone defined), it falls back to the static rule layer. Contains **50+ signatures** across 5 categories.
 
 **Rule Categories:**
 - `rules/filesystem.yaml` — null bytes, Unix/Windows sensitive paths

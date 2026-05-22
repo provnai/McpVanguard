@@ -32,13 +32,23 @@ class FleetSyncWorker:
         rules_dir: str = "rules",
         interval_secs: int = 60,
         allow_unsigned: bool = False,
+        auth_token: Optional[str] = None,
+        signature_filename: str = "manifest.sig.json",
     ):
         self.fleet_url = fleet_url.rstrip("/")
         self.rules_dir = Path(rules_dir)
         self.interval_secs = interval_secs
         self.allow_unsigned = allow_unsigned
+        self.auth_token = auth_token
+        self.signature_filename = signature_filename
         self._running = False
         self._task: Optional[asyncio.Task] = None
+
+    def _headers(self) -> Dict[str, str]:
+        h = {}
+        if self.auth_token:
+            h["Authorization"] = f"Bearer {self.auth_token}"
+        return h
 
     async def start(self):
         """Start the background sync loop."""
@@ -82,7 +92,7 @@ class FleetSyncWorker:
             # 1. Fetch Manifest
             try:
                 manifest_url = f"{self.fleet_url}/{signing.RULE_MANIFEST}"
-                resp = await client.get(manifest_url)
+                resp = await client.get(manifest_url, headers=self._headers())
                 if resp.status_code == 404:
                     logger.debug("FleetSync: No remote manifest found.")
                     return False
@@ -95,8 +105,8 @@ class FleetSyncWorker:
             # 2. Fetch & Verify Signature
             signature_doc = None
             try:
-                sig_url = f"{self.fleet_url}/{signing.RULE_SIGNATURE}"
-                resp = await client.get(sig_url)
+                sig_url = f"{self.fleet_url}/{self.signature_filename}"
+                resp = await client.get(sig_url, headers=self._headers())
                 if resp.status_code == 200:
                     signature_doc = resp.json()
             except Exception:
@@ -139,7 +149,7 @@ class FleetSyncWorker:
             logger.info(f"FleetSync: Downloading {len(download_list)} updated rule(s) from {self.fleet_url}")
             for filename in download_list:
                 rule_url = f"{self.fleet_url}/{filename}"
-                resp = await client.get(rule_url)
+                resp = await client.get(rule_url, headers=self._headers())
                 resp.raise_for_status()
                 content = resp.content
                 
@@ -170,19 +180,31 @@ _worker: Optional[FleetSyncWorker] = None
 
 async def start_fleet_sync(config: dict, rules_dir: str):
     global _worker
-    fleet_url = os.getenv("VANGUARD_FLEET_URL")
-    if not fleet_url:
-        logger.info("VANGUARD_FLEET_URL not set; skipping automated fleet synchronization.")
-        return
+
+    # ProvnCloud integration: prefer stored config over env var
+    from core import provncloud as pc
+    pc_cfg = pc.load_config()
+    if pc_cfg and pc_cfg.rules_manifest_url:
+        fleet_url = pc_cfg.rules_manifest_url.replace(f"/{signing.RULE_MANIFEST}", "").replace("/manifest.json", "")
+        auth_token = pc_cfg.service_token
+        logger.info("FleetSync: Using ProvnCloud manifest URL: %s", fleet_url)
+    else:
+        fleet_url = os.getenv("VANGUARD_FLEET_URL")
+        auth_token = None
+        if not fleet_url:
+            logger.info("VANGUARD_FLEET_URL not set and no ProvnCloud config found; skipping automated fleet synchronization.")
+            return
 
     interval = int(os.getenv("VANGUARD_FLEET_SYNC_INTERVAL", "60"))
     allow_unsigned = os.getenv("VANGUARD_ALLOW_UNSIGNED_FLEET", "false").lower() == "true"
-    
+
     _worker = FleetSyncWorker(
         fleet_url=fleet_url,
         rules_dir=rules_dir,
         interval_secs=interval,
         allow_unsigned=allow_unsigned,
+        auth_token=auth_token,
+        signature_filename="manifest.json.sig",  # ProvnCloud naming convention
     )
     await _worker.start()
 

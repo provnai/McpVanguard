@@ -1,7 +1,7 @@
 # McpVanguard — Deployment Guide
-**Version**: v1.6.0 (Production Hardening)
+**Current version**: `2.0.0`
 
-McpVanguard is a transparent security proxy that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
+McpVanguard is a security gateway that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
 It adds three layers of protection — deterministic Safe Zones, semantic scoring, and behavioral analysis — without requiring any changes to your existing agent or server code.
 
@@ -91,9 +91,9 @@ export VANGUARD_ENTROPY_BLOCK="7.5"   # Immediate block (likely encryption keys)
 
 ## 4. The VEX + CHORA Integration (Flight Recorder)
 
-When Vanguard blocks an agent's tool call, it needs to cryptographically prove that the block was justified. 
+When Vanguard blocks an agent's tool call, it can optionally forward the payload to VEX for immutable audit recording.
 
-Vanguard integrates asynchronously with the **VEX API**. Whenever an action is blocked, Vanguard fires the payload to the VEX Server. The VEX Server hashes the payload, anchors it to the Bitcoin blockchain via the CHORA Gate, and streams a verifiable `EvidenceCapsule` back to your audit logs.
+Vanguard integrates asynchronously with the **VEX API**. Whenever an action is blocked, Vanguard can send the payload to the VEX server for downstream hashing, anchoring, and evidence receipt workflows.
 
 **Configuration:**
 ```bash

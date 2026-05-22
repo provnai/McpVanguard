@@ -1,5 +1,5 @@
-# McpVanguard Polyglot Deployment (Node + Python)
-# Explicitly defines the environment for Railway/Nixpacks
+# McpVanguard polyglot deployment (Node + Python)
+# Explicitly defines the environment for Railway / Nixpacks.
 
 [phases.setup]
 nixPkgs = ["python311", "nodejs_20", "gcc"]
@@ -9,8 +9,7 @@ cmds = [
   "npm install",
   "python3 -m venv /opt/venv",
   "/opt/venv/bin/pip install --upgrade pip",
-  "/opt/venv/bin/pip install -r requirements.txt",
-  "/opt/venv/bin/pip install . "
+  "/opt/venv/bin/pip install .[full]"
 ]
 
 [start]

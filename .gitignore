@@ -28,7 +28,6 @@ ENV/
 # Logs & audit
 audit.log
 *.log
-*.txt
 run_tests_isolated.py
 
 # Local signing material
@@ -55,12 +54,21 @@ web/out/
 
 # Coverage
 .coverage
+.coverage.*
 htmlcov/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.nox/
+.tox/
 
 # Build dist
 dist/
 *.whl
+pip-wheel-metadata/
+*.pyz
+sbom.json
 
 RAILWAY_TEST_REPORT.*
 
@@ -74,7 +82,15 @@ tmp/
 .release_audit_dist/
 .release_audit_sdist/
 .release_smoke_venv/
+.smoke-venv/
+.release-smoke-venv/
 
 # Testing & Chaos Engine
 scratch/
 
+# Internal release prep
+docs/RELEASE_READINESS_CHECKLIST.md
+
+# Early optional hosted-gateway scaffolding (keep local until intentionally public)
+gateway_bootstrap.py
+Dockerfile.mcp-vanguard

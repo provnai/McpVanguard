@@ -1,6 +1,6 @@
 {
   "name": "mcp-vanguard",
-  "version": "2.0.0-rc1",
+  "version": "2.0.0",
   "description": "Security gateway and verification layer for MCP agents.",
   "main": "index.js",
   "type": "module",
