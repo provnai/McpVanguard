@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Management and integrity features should be described using **server integrity**, **baseline verification**, and **capability drift** language, not full SBOM language.
 - JWT/JWKS support in this release covers the verified bearer-auth path described in the implementation and tests, including Ed25519 / EdDSA JWT verification.
 - Regex safety in this release includes RE2-backed matching through the shared safe-regex backend, with explicit fallback behavior for environments without the wheel.
-- Broader ProvnCloud control-plane work and other longer-horizon platform ideas are intentionally outside the core `2.0.0` release promise.
+- Broader control-plane work and other longer-horizon platform ideas are intentionally outside the core `2.0.0` release promise.
 
 ### Verification
 

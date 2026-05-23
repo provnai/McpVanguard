@@ -52,7 +52,6 @@ from core import provenance
 from core import supplier_signatures
 from core import sigstore_bundle
 from core.risk import RiskEngine, EnforcementLevel
-from core import provncloud as pc
 
 logger = logging.getLogger(__name__)
 
@@ -269,12 +268,6 @@ class VanguardProxy:
         self.agent_reader = agent_reader
         self.agent_writer = agent_writer
 
-        # ProvnCloud integration
-        self._provncloud_cfg = pc.load_config()
-        self._provncloud_reporter: Optional[pc.ProvnCloudEventReporter] = None
-        if self._provncloud_cfg:
-            self._provncloud_reporter = pc.ProvnCloudEventReporter(self._provncloud_cfg)
-
         logger.info(
             f"[Vanguard] Loaded {self.rules_engine.rule_count} rules from '{self.config.rules_dir}'"
         )
@@ -315,13 +308,6 @@ class VanguardProxy:
         event = self._build_audit_event(**kwargs)
         self.audit.info(event.to_log_line(format=self.config.audit_format))
 
-        # Mirror to ProvnCloud (async, non-blocking)
-        if self._provncloud_reporter:
-            try:
-                asyncio.create_task(self._provncloud_reporter.report(event.model_dump()))
-            except Exception as exc:
-                logger.debug("[ProvnCloud] Failed to queue event: %s", exc)
-
     # -----------------------------------------------------------------------
     # Main entry point
     # -----------------------------------------------------------------------
@@ -330,16 +316,6 @@ class VanguardProxy:
         """Start the proxy."""
         self._session = self.session_manager.create(principal=self.principal, server_id=self._server_id)
         logger.info(f"[Vanguard] Session {self._session.session_id} started (server={self._server_id})")
-
-        # ProvnCloud: apply remote settings at startup
-        if self._provncloud_cfg:
-            try:
-                provider = pc.RemoteSettingsProvider(self._provncloud_cfg)
-                provider.apply_to(self.config)
-                self._provncloud_reporter.start()
-                logger.info("[ProvnCloud] Reporter started for tenant %s", self._provncloud_cfg.tenant_id)
-            except Exception as exc:
-                logger.warning("[ProvnCloud] Failed to initialize: %s", exc)
 
         self._check_server_integrity_baseline()
         self._load_capability_manifest_baseline()
@@ -381,13 +357,6 @@ class VanguardProxy:
         except Exception as e:
             logger.error(f"[Vanguard] Unexpected error in proxy loop: {e}")
         finally:
-            # Flush ProvnCloud events before shutdown
-            if self._provncloud_reporter:
-                try:
-                    await self._provncloud_reporter.shutdown()
-                except Exception as exc:
-                    logger.debug("[ProvnCloud] Shutdown error: %s", exc)
-
             current = asyncio.current_task()
             pending_cancels = current.cancelling() if current else 0
             if current and pending_cancels:

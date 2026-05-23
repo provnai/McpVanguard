@@ -90,7 +90,3 @@ scratch/
 
 # Internal release prep
 docs/RELEASE_READINESS_CHECKLIST.md
-
-# Early optional hosted-gateway scaffolding (keep local until intentionally public)
-gateway_bootstrap.py
-Dockerfile.mcp-vanguard
