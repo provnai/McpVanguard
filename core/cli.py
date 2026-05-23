@@ -444,51 +444,6 @@ def version():
 
 
 # ---------------------------------------------------------------------------
-# vanguard login
-# ---------------------------------------------------------------------------
-
-@app.command()
-def login(
-    token: str = typer.Option(
-        ...,
-        "--token", "-t",
-        help="ProvnCloud service token (shown once in dashboard).",
-    ),
-    base_url: str = typer.Option(
-        "https://provncloud-production.up.railway.app",
-        "--base-url", "-u",
-        help="ProvnCloud API base URL.",
-    ),
-    provncloud: bool = typer.Option(
-        False,
-        "--provncloud",
-        help="Authenticate with ProvnCloud (required flag).",
-    ),
-):
-    """
-    Authenticate McpVanguard with ProvnCloud.
-    Stores credentials in ~/.config/mcp-vanguard/provncloud.json
-    """
-    if not provncloud:
-        console.print("[bold red]Error:[/bold red] Use --provncloud to login with ProvnCloud.")
-        raise typer.Exit(code=1)
-
-    try:
-        from core.provncloud import login_with_token
-        cfg = login_with_token(base_url, token)
-    except Exception as exc:
-        console.print(f"[bold red]Login failed:[/bold red] {exc}")
-        raise typer.Exit(code=1)
-
-    console.print(Panel.fit(
-        f"[bold green]ProvnCloud login successful[/bold green]\n"
-        f"Tenant: [cyan]{cfg.tenant_id}[/cyan]\n"
-        f"Dashboard: [link={cfg.dashboard_url}]{cfg.dashboard_url}[/link]",
-        border_style="green",
-    ))
-
-
-# ---------------------------------------------------------------------------
 # vanguard update
 # ---------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 """
 core/fleet.py
 Automated fleet synchronization for McpVanguard policies.
-Polls ProvnCloud or a configured remote registry for signed rule updates.
+Polls a configured remote registry for signed rule updates.
 """
 
 import asyncio
@@ -180,20 +180,11 @@ _worker: Optional[FleetSyncWorker] = None
 
 async def start_fleet_sync(config: dict, rules_dir: str):
     global _worker
-
-    # ProvnCloud integration: prefer stored config over env var
-    from core import provncloud as pc
-    pc_cfg = pc.load_config()
-    if pc_cfg and pc_cfg.rules_manifest_url:
-        fleet_url = pc_cfg.rules_manifest_url.replace(f"/{signing.RULE_MANIFEST}", "").replace("/manifest.json", "")
-        auth_token = pc_cfg.service_token
-        logger.info("FleetSync: Using ProvnCloud manifest URL: %s", fleet_url)
-    else:
-        fleet_url = os.getenv("VANGUARD_FLEET_URL")
-        auth_token = None
-        if not fleet_url:
-            logger.info("VANGUARD_FLEET_URL not set and no ProvnCloud config found; skipping automated fleet synchronization.")
-            return
+    fleet_url = os.getenv("VANGUARD_FLEET_URL")
+    auth_token = None
+    if not fleet_url:
+        logger.info("VANGUARD_FLEET_URL not set; skipping automated fleet synchronization.")
+        return
 
     interval = int(os.getenv("VANGUARD_FLEET_SYNC_INTERVAL", "60"))
     allow_unsigned = os.getenv("VANGUARD_ALLOW_UNSIGNED_FLEET", "false").lower() == "true"
@@ -204,7 +195,6 @@ async def start_fleet_sync(config: dict, rules_dir: str):
         interval_secs=interval,
         allow_unsigned=allow_unsigned,
         auth_token=auth_token,
-        signature_filename="manifest.json.sig",  # ProvnCloud naming convention
     )
     await _worker.start()
 
