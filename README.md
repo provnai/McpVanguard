@@ -11,7 +11,6 @@ Existing MCP servers do not need to be rewritten.
 [![Security Audit](https://github.com/provnai/McpVanguard/actions/workflows/security-audit.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/security-audit.yml)
 [![SBOM](https://github.com/provnai/McpVanguard/actions/workflows/sbom.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/sbom.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/mcp-vanguard.svg)](https://pypi.org/project/mcp-vanguard/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
@@ -78,7 +77,7 @@ vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
 
 Deploy on Railway:
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/mcpvanguard?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 Need a complete deployment walkthrough? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/railway-deployment-guide.md](docs/railway-deployment-guide.md).
 
