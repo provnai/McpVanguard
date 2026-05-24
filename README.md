@@ -2,18 +2,33 @@
 
 Security gateway for MCP agents and tool servers.
 
-McpVanguard sits between an AI agent and an MCP server, inspects tool traffic in real time, and enforces policy before sensitive calls reach the underlying tool. It can run locally in front of stdio servers or as a hosted gateway over SSE and Streamable HTTP.
+McpVanguard sits between an AI agent and an MCP server, inspects tool traffic in real time, and enforces policy before sensitive calls reach the underlying tool. It runs locally in front of stdio servers or as a hosted gateway over SSE and Streamable HTTP.
 
 Existing MCP servers do not need to be rewritten.
 
 [![Tests](https://github.com/provnai/McpVanguard/actions/workflows/test.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/test.yml)
+[![CodeQL](https://github.com/provnai/McpVanguard/actions/workflows/codeql.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/codeql.yml)
+[![Security Audit](https://github.com/provnai/McpVanguard/actions/workflows/security-audit.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/security-audit.yml)
+[![SBOM](https://github.com/provnai/McpVanguard/actions/workflows/sbom.yml/badge.svg)](https://github.com/provnai/McpVanguard/actions/workflows/sbom.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mcp-vanguard.svg?color=blue)](https://pypi.org/project/mcp-vanguard/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/mcp-vanguard.svg)](https://pypi.org/project/mcp-vanguard/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
+## Why Developers Use It
+
+MCP workflows are powerful, but once tools touch files, shells, or networks, guardrails matter.
+
+McpVanguard adds a runtime enforcement boundary so you can:
+
+- keep normal tool traffic flowing
+- block unsafe calls before execution
+- inspect and debug policy decisions with audit logs
+- adopt incrementally without rewriting existing MCP servers
+
 ## What It Does
 
-McpVanguard is designed for teams that want a real enforcement boundary around MCP-based agent workflows.
+McpVanguard is for developers and platform teams who want explicit policy enforcement around MCP workflows.
 
 - inspect MCP tool calls before execution
 - block unsafe filesystem, command, and network patterns
@@ -22,11 +37,22 @@ McpVanguard is designed for teams that want a real enforcement boundary around M
 - track repeated suspicious behavior over time
 - emit audit and telemetry signals for blocked, warned, and allowed traffic
 
+## Quick Verification Scenario
+
+Use one raw path and one guarded path against the same MCP server.
+
+- safe file read passes in both paths
+- path traversal attempt is blocked in the guarded path
+- risky network request is blocked in the guarded path
+- metadata poisoning attempts are filtered or blocked before model exposure
+
+This gives you a fast signal that policy is active and enforcement behaves as expected.
+
 ## Use Cases
 
 - protect local desktop or developer-machine MCP servers without rewriting them
 - add a hosted gateway in front of shared MCP servers
-- test raw versus guarded behavior for risky tool workflows
+- compare raw versus guarded behavior for risky tool workflows
 - add policy enforcement to high-risk file, shell, and network-access tools
 
 ## Quickstart
@@ -54,6 +80,8 @@ Deploy on Railway:
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
+Need a complete deployment walkthrough? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/railway-deployment-guide.md](docs/railway-deployment-guide.md).
+
 ## Getting Started
 
 Bootstrap a local workspace:
@@ -62,7 +90,7 @@ Bootstrap a local workspace:
 # 1. Initialize safe zones and .env template
 vanguard init
 
-# 2. Optionally protect Claude Desktop server entries
+# 2. Optionally update Claude Desktop server entries
 vanguard configure-claude
 
 # 3. Launch the local security dashboard
@@ -107,9 +135,9 @@ AI Agent -> McpVanguard -> MCP Server -> Tools / Files / External Systems
 - signed-manifest, provenance, detached signature, and Sigstore-backed trust verification
 - benchmark and taxonomy tooling for measurable coverage
 
-## Authentication
+## Authentication Modes
 
-McpVanguard is local-first, but it also supports stronger hosted-gateway controls.
+McpVanguard is local-first and supports stronger hosted-gateway controls when needed.
 
 - **stdio mode**: no network auth required
 - **SSE / Streamable HTTP mode**: supports `VANGUARD_API_KEY`
@@ -141,7 +169,7 @@ This should be described as server integrity, baseline verification, and trust v
 
 - `2.0.0` is the current release line
 - the core gateway and integrity features are the main shipped scope
-- broader research and future control-plane work are intentionally outside the core release promise
+- broader research and future control-plane work are intentionally outside the core OSS release scope
 
 See [CHANGELOG.md](CHANGELOG.md) for the release history and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for deployment details.
 
@@ -154,6 +182,17 @@ McpVanguard focuses on local inspection and gateway enforcement. See [PRIVACY.md
 - Issues: [github.com/provnai/McpVanguard/issues](https://github.com/provnai/McpVanguard/issues)
 - Contact: [contact@provnai.com](mailto:contact@provnai.com)
 - Security: see [SECURITY.md](SECURITY.md)
+
+## FAQ
+
+**Does this replace my MCP server?**  
+No. McpVanguard sits in front of your existing MCP server and enforces policy before calls reach it.
+
+**Do I need to rewrite tools or agent code?**  
+Usually no. Most setups start by routing one workflow through McpVanguard.
+
+**Is this only for hosted setups?**  
+No. It supports local-first stdio wrapping and hosted gateway modes.
 
 ## License
 
