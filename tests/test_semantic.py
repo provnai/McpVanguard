@@ -5,6 +5,7 @@ tests/test_semantic.py — Tests for Layer 2 semantic analysis using mocks.
 import json
 import pytest
 import asyncio
+from urllib.parse import urlparse
 from unittest.mock import patch, MagicMock
 from core import semantic
 
@@ -126,7 +127,8 @@ async def test_semantic_minimax_block(mock_ollama_client, base_settings):
     
     # Verify MiniMax endpoint was called
     call_args = mock_ollama_client.post.call_args
-    assert "api.minimax.io" in str(call_args)
+    request_url = call_args.args[0]
+    assert urlparse(request_url).hostname == "api.minimax.io"
 
 @pytest.mark.asyncio
 async def test_semantic_ollama_offline(mock_ollama_client, base_settings):

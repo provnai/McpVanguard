@@ -15,6 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -166,7 +167,10 @@ def _call_cloud_provider(
         "temperature": 0.1,
     }
 
-    if "openai.com" in url:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    is_openai_host = host == "openai.com" or host.endswith(".openai.com")
+    if is_openai_host:
         payload["response_format"] = {"type": "json_object"}
         payload["temperature"] = 0.0
 

@@ -10,6 +10,7 @@ import logging
 import json
 import sys
 import hmac
+import hashlib
 import base64
 import collections
 import os
@@ -299,9 +300,12 @@ def _audit_auth_finding(
 
 
 def _principal_fingerprint(value: str) -> str:
-    import hashlib
-
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    secret = os.getenv("VANGUARD_FINGERPRINT_SECRET", "")
+    if not secret:
+        # Fall back to a process-local key to avoid raw unsalted token hashing.
+        secret = f"{os.getpid()}:{sys.version}"
+    digest = hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:12]
 
 
 def _decode_unverified_bearer_claims(token: str) -> dict[str, Any]:
