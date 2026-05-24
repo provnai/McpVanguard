@@ -304,8 +304,16 @@ def _principal_fingerprint(value: str) -> str:
     if not secret:
         # Fall back to a process-local key to avoid raw unsalted token hashing.
         secret = f"{os.getpid()}:{sys.version}"
-    digest = hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
-    return digest[:12]
+    # Use a KDF rather than a fast hash so credential-derived fingerprints
+    # are not produced with weak-sensitive-data hashing patterns.
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        value.encode("utf-8"),
+        secret.encode("utf-8"),
+        120_000,
+        dklen=16,
+    )
+    return derived.hex()[:12]
 
 
 def _decode_unverified_bearer_claims(token: str) -> dict[str, Any]:
