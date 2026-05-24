@@ -688,7 +688,7 @@ wheels = [
 
 [[package]]
 name = "mcp-vanguard"
-version = "2.0.0rc1"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3.0",
   "name": "mcp-vanguard",
-  "version": "2.0.0-rc1",
+  "version": "2.0.0",
   "description": "Security gateway and verification layer for MCP agents.",
   "author": "provnai (https://github.com/provnai)",
   "repository": {
