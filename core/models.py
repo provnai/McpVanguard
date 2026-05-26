@@ -183,7 +183,7 @@ def make_block_response(request_id: Any, reason: str, rule_id: str = "VANGUARD")
         "jsonrpc": "2.0",
         "id": request_id,
         "error": {
-            "code": -32600,
+            "code": -32001,
             "message": f"McpVanguard Blocked: {reason}",
             "data": {
                 "blocked_by": "McpVanguard",
@@ -278,7 +278,7 @@ def build_manifest(
     if "SAFEZONE" in (rule_id or ""):
         gate_sensors["path_violation"] = {
             "attempted_path": path,
-            "resolved_physical_path": "RESOLVED_SYMLINK_LOGIC_ACTIVE", # Placeholder for L1 resolution
+            "resolved_physical_path": path or None,
             "policy_root": "RESTRICTED_SAFE_ZONE"
         }
     

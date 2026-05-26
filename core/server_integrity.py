@@ -245,8 +245,10 @@ def verify_server_manifest_signature(
         raise ValueError(f"Server manifest signer '{key_id}' is not trusted by this McpVanguard build.")
 
     expected_digest = signature_doc.get("manifest_sha256")
+    if not isinstance(expected_digest, str) or not expected_digest.strip():
+        raise ValueError("Server manifest signature is missing manifest_sha256.")
     actual_digest = server_manifest_sha256(manifest)
-    if expected_digest and expected_digest != actual_digest:
+    if expected_digest != actual_digest:
         raise ValueError("Server manifest signature metadata does not match the manifest digest.")
 
     public_key_bytes = _decode_public_key(signer["public_key"])

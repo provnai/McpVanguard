@@ -1,11 +1,13 @@
 import asyncio
 import json
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
 from core import auth
 from core import behavioral
+from core import management
 from core.management import ManagementContext, handle_vanguard_tool
 from core.rules_engine import RulesEngine
 
@@ -56,6 +58,32 @@ message: "Runtime rule fired."
     check = engine.check(msg)
     assert check.action == "BLOCK"
     assert check.rule_matches[0].rule_id == "RUNTIME-001"
+
+
+def test_vanguard_apply_rule_rejects_oversized_yaml():
+    context = ManagementContext(rules_engine=MagicMock())
+    huge_yaml = "x" * (management.MAX_RUNTIME_RULE_YAML_BYTES + 1)
+
+    result = asyncio.run(handle_vanguard_tool("vanguard_apply_rule", {"rule_yaml": huge_yaml}, context))
+
+    assert result.get("isError") is True
+    assert "runtime safety limit" in result["content"][0]["text"]
+
+
+def test_vanguard_apply_rule_rate_limits_runtime_injection():
+    management._RUNTIME_RULE_APPLY_WINDOWS.clear()
+    engine = MagicMock()
+    engine.add_runtime_rules.return_value = ["RUNTIME-OK"]
+    context = ManagementContext(session_id="mgmt-budget", rules_engine=engine)
+
+    for _ in range(management.RUNTIME_RULE_APPLY_LIMIT):
+        result = asyncio.run(handle_vanguard_tool("vanguard_apply_rule", {"rule_yaml": "id: ok"}, context))
+        assert result.get("isError") is not True
+
+    blocked = asyncio.run(handle_vanguard_tool("vanguard_apply_rule", {"rule_yaml": "id: ok"}, context))
+
+    assert blocked.get("isError") is True
+    assert "limit exceeded" in blocked["content"][0]["text"].lower()
 
 
 def test_vanguard_reset_session_clears_behavioral_state():

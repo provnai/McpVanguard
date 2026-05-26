@@ -195,7 +195,7 @@ def verify_attestation(actual: dict[str, Any], pinned: Optional[dict[str, Any]] 
     )
 
 
-def compare_section(expected: dict[str, Any], actual: dict[str, Any], section: str) -> list[str]:
+def compare_section(expected: dict[str, Any], actual: dict[str, Any], section: str) -> list[AttestationDrift]:
     if section not in {"initialize", "tools"}:
         raise ValueError(f"Unsupported capability section: {section}")
     return compare_capability_manifests({section: expected.get(section)}, {section: actual.get(section)})
@@ -309,8 +309,10 @@ def verify_capability_manifest_signature(
         raise ValueError(f"Capability manifest signer '{key_id}' is not trusted by this McpVanguard build.")
 
     expected_digest = signature_doc.get("manifest_sha256")
+    if not isinstance(expected_digest, str) or not expected_digest.strip():
+        raise ValueError("Capability manifest signature is missing manifest_sha256.")
     actual_digest = capability_manifest_sha256(manifest)
-    if expected_digest and expected_digest != actual_digest:
+    if expected_digest != actual_digest:
         raise ValueError("Capability manifest signature metadata does not match the manifest digest.")
 
     public_key_bytes = _decode_public_key(signer["public_key"])

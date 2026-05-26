@@ -81,3 +81,18 @@ def test_evaluate_provenance_signature_detects_tampering():
 
     assert issues
     assert "verification failed" in issues[0].lower()
+
+
+def test_verify_provenance_signature_requires_digest_field():
+    document = _sample_provenance("a" * 64)
+    private_key_pem, signer_doc = signing.generate_signing_keypair("provenance-signer")
+    signature_doc = provenance.sign_provenance(document, private_key_pem, "provenance-signer")
+    signature_doc.pop("payload_sha256", None)
+    trusted_signers = provenance.load_trusted_provenance_signers(extra_signers=[signer_doc])
+
+    try:
+        provenance.verify_provenance_signature(document, signature_doc, trusted_signers)
+    except ValueError as exc:
+        assert "payload_sha256" in str(exc)
+    else:
+        raise AssertionError("verify_provenance_signature should require payload_sha256")

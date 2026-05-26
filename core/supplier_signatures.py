@@ -135,8 +135,10 @@ def verify_artifact_signature(
 
     artifact_bytes = Path(artifact_path).read_bytes()
     expected_digest = signature_doc.get("artifact_sha256")
+    if not isinstance(expected_digest, str) or not expected_digest.strip():
+        raise ValueError("Artifact signature is missing artifact_sha256.")
     actual_digest = hashlib.sha256(artifact_bytes).hexdigest()
-    if expected_digest and expected_digest != actual_digest:
+    if expected_digest != actual_digest:
         raise ValueError("Artifact signature metadata does not match the artifact digest.")
 
     public_key_bytes = _decode_public_key(signer["public_key"])

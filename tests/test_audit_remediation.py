@@ -33,6 +33,20 @@ def test_crit_1_format_bypass_blocked():
     }
     assert engine.check(msg_non_standard).action == "BLOCK"
 
+
+def test_safe_zone_blocks_nonstandard_target_argument():
+    engine = RulesEngine(rules_dir="rules")
+    engine.safe_zones = [SafeZone(tool="read_file", allowed_prefixes=["/safe/"], recursive=True)]
+
+    msg = {
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"target": "/etc/passwd"}}
+    }
+
+    result = engine.check(msg)
+    assert result.action == "BLOCK"
+    assert "SAFEZONE" in result.rule_matches[0].rule_id
+
 def test_crit_2_default_deny_enforced():
     """Verify that VANGUARD_DEFAULT_POLICY=DENY works for unknown tools."""
     os.environ["VANGUARD_DEFAULT_POLICY"] = "DENY"
@@ -70,6 +84,37 @@ def test_crit_3_behavioral_state_pruning(clean_behavioral):
     # Pruned states should be gone (500 aged + 1 trigger logic)
     # The count should be back below ~1000
     assert len(behavioral._states) <= 1000
+
+
+def test_clear_all_states_uses_scan_iter_when_available(clean_behavioral):
+    class FakeRedis:
+        def __init__(self):
+            self.deleted_batches = []
+            self.keys_called = False
+
+        def scan_iter(self, match=None, count=None):
+            assert match == "vguard:beh:*"
+            assert count == 100
+            for key in ("vguard:beh:1", "vguard:beh:2"):
+                yield key
+
+        def delete(self, *keys):
+            self.deleted_batches.append(keys)
+
+        def keys(self, pattern):
+            self.keys_called = True
+            raise AssertionError("keys() should not be used when scan_iter is available")
+
+    fake = FakeRedis()
+    original = behavioral._redis_client
+    behavioral._redis_client = fake
+    try:
+        behavioral.clear_all_states()
+    finally:
+        behavioral._redis_client = original
+
+    assert fake.deleted_batches == [("vguard:beh:1", "vguard:beh:2")]
+    assert fake.keys_called is False
 
 def test_med_2_oversized_payload_rejection():
     """Verify that oversized payloads are REJECTED instead of truncated."""

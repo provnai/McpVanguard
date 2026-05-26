@@ -73,6 +73,8 @@ class RiskEngine:
         self.weights = {
             "RULE_WARN": 5.0,
             "RULE_BLOCK": 20.0,
+            "SEMANTIC_WARN": 10.0,
+            "SEMANTIC_BLOCK": 20.0,
             "ENTROPY_HIGH": 15.0,
             "ENTROPY_CRITICAL": 50.0,
             "BEHAVIORAL_WARN": 10.0,

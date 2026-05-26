@@ -882,6 +882,7 @@ async def handle_sse(scope, receive, send, ctx: ServerContext):
             _active_connections[client_ip] -= 1
             _total_active_connections -= 1
         await _send_error(send, 429, "Too Many Requests. Rate limit exceeded.")
+        return
 
 
 

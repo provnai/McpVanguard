@@ -264,6 +264,7 @@ class VanguardProxy:
         self._pending_initializations: set[Any] = set()
         self._expected_capability_manifest: Optional[dict[str, Any]] = None
         self._observed_capability_manifest: dict[str, Any] = {"version": 1, "initialize": None, "tools": None}
+        self._semantic_forced: bool = False
 
         self.agent_reader = agent_reader
         self.agent_writer = agent_writer
@@ -927,11 +928,11 @@ class VanguardProxy:
                 if enforcement == EnforcementLevel.BLOCK:
                     logger.critical(f"[Vanguard] [FAIL-CLOSED] Risk Engine terminated session {self._session.session_id} due to low trust score.")
                     break
-                elif enforcement == EnforcementLevel.DEGRADE:
+                self._semantic_forced = enforcement == EnforcementLevel.DEGRADE
+                if self._semantic_forced:
                     # Force Semantic Scanning and moderate throttling for degraded sessions
                     if not self.config.semantic_enabled:
                         logger.warning(f"[Vanguard] DEGRADED MODE: Forcing semantic scanning for session {self._session.session_id}")
-                    self.config.semantic_enabled = True
                     # Small delay to simulate throttling on request side too
                     await asyncio.sleep(0.05)
 
@@ -994,7 +995,7 @@ class VanguardProxy:
                         tool_name=tool_name,
                         method=method,
                         params=raw_message.get("params", {}),
-                        action="ALLOW" if self.config.management_tools_enabled else "BLOCK",
+                        action="ALLOW" if self.config.management_tools_enabled and self.principal is not None else "BLOCK",
                     )
 
                 if not self.config.management_tools_enabled:
@@ -1012,6 +1013,24 @@ class VanguardProxy:
                         request_id=request_id,
                         reason="Management tools are disabled on this McpVanguard instance.",
                         rule_id="VANGUARD-MGMT-DISABLED",
+                    )
+                    await self._write_to_agent(json.dumps(block_response))
+                    continue
+                if self.principal is None:
+                    telemetry.metrics.record_status("blocked")
+                    self._stats["blocked"] += 1
+                    self._log_audit_event(
+                        direction="agent→server",
+                        method=method,
+                        tool_name=tool_name,
+                        action="BLOCK",
+                        rule_id="VANGUARD-MGMT-AUTH-REQUIRED",
+                        blocked_reason="Management tools require authenticated access.",
+                    )
+                    block_response = make_block_response(
+                        request_id=request_id,
+                        reason="Management tools require authenticated access.",
+                        rule_id="VANGUARD-MGMT-AUTH-REQUIRED",
                     )
                     await self._write_to_agent(json.dumps(block_response))
                     continue
@@ -1080,7 +1099,12 @@ class VanguardProxy:
             # Record into risk engine (Phase 7)
             if self._session:
                 if result.action == "BLOCK":
-                    etype = "RULE_BLOCK" if result.layer_triggered == 1 else "BEHAVIORAL_BLOCK"
+                    if result.layer_triggered == 1:
+                        etype = "RULE_BLOCK"
+                    elif result.layer_triggered == 2:
+                        etype = "SEMANTIC_BLOCK"
+                    else:
+                        etype = "BEHAVIORAL_BLOCK"
                     self.risk_engine.record_event(
                         self._session.session_id,
                         self._server_id,
@@ -1088,7 +1112,12 @@ class VanguardProxy:
                         {"rule": result_rule_id},
                     )
                 elif result.action == "WARN":
-                    etype = "RULE_WARN" if result.layer_triggered == 1 else "BEHAVIORAL_WARN"
+                    if result.layer_triggered == 1:
+                        etype = "RULE_WARN"
+                    elif result.layer_triggered == 2:
+                        etype = "SEMANTIC_WARN"
+                    else:
+                        etype = "BEHAVIORAL_WARN"
                     self.risk_engine.record_event(
                         self._session.session_id,
                         self._server_id,
@@ -1351,9 +1380,6 @@ class VanguardProxy:
                     t["readOnlyHint"] = True
                 elif any(name.startswith(p) for p in WRITE_PREFIXES):
                     t["destructiveHint"] = True
-                else:
-                    # Default: label as conservative if ambiguous but mostly tool-like
-                    t["readOnlyHint"] = True
             
         return all_tools
 
@@ -1405,10 +1431,11 @@ class VanguardProxy:
             ))
 
         sem_task = None
-        if self.config.semantic_enabled:
+        semantic_enabled = self.config.semantic_enabled or self._semantic_forced
+        if semantic_enabled:
             from dataclasses import replace
             settings = semantic._get_settings()
-            settings = replace(settings, enabled=self.config.semantic_enabled)
+            settings = replace(settings, enabled=semantic_enabled)
             sem_task = asyncio.create_task(semantic.score_intent(message, settings=settings))
 
         if beh_task:
@@ -1417,6 +1444,9 @@ class VanguardProxy:
             telemetry.metrics.record_latency("L3", (time.monotonic() - t_start_l3) * 1000)
             if beh_result:
                 if not beh_result.allowed:
+                    if sem_task and not sem_task.done():
+                        sem_task.cancel()
+                        await asyncio.gather(sem_task, return_exceptions=True)
                     return beh_result
                 if beh_result.action == "WARN":
                     result.action = "WARN"

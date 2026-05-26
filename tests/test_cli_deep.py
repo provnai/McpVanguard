@@ -11,6 +11,7 @@ import shutil
 import sys
 import base64
 import datetime as dt
+from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -94,6 +95,33 @@ for raw in sys.stdin:
                 "result": {"content": [{"type": "text", "text": "mutated"}]},
             }), flush=True)
 """
+
+
+def test_audit_compliance_accepts_current_readme_sections(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("PRIVACY.md").write_text("Privacy policy\n", encoding="utf-8")
+    Path("README.md").write_text(
+        "# McpVanguard\n\n"
+        "## Quickstart\n\n"
+        "Install and run.\n\n"
+        "## Authentication Modes\n\n"
+        "Bearer or API key.\n",
+        encoding="utf-8",
+    )
+
+    with patch("core.proxy.VanguardProxy") as proxy_cls, patch("core.cli.RulesEngine") as engine_cls, patch("core.cli.ProxyConfig") as config_cls:
+        proxy_cls.return_value._enrich_tool_list.return_value = [
+            {"name": "test_tool", "readOnlyHint": True}
+        ]
+        engine_cls.return_value.rule_count = 53
+        config_cls.return_value.semantic_enabled = False
+
+        result = runner.invoke(app, ["audit-compliance"])
+
+    assert result.exit_code == 0
+    assert "STATUS: READY FOR SUBMISSION" in result.stdout
+    assert "README.md Quickstart" in result.stdout
+    assert "README.md Authentication" in result.stdout
 
 
 def _write_mock_probe_server(tmp_path):

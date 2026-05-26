@@ -61,6 +61,11 @@ _BACKEND_MODE = _normalize_backend_mode(os.getenv("VANGUARD_REGEX_ENGINE"))
 _RE2_MODULE = _load_re2_module()
 _ACTIVE_BACKEND = "re2" if _BACKEND_MODE != "python" and _RE2_MODULE is not None else "python"
 
+if _ACTIVE_BACKEND == "python" and _BACKEND_MODE != "python":
+    logger.warning(
+        "google-re2 is not available; falling back to Python re with timeout-based ReDoS protection."
+    )
+
 
 def backend_name() -> str:
     return _ACTIVE_BACKEND

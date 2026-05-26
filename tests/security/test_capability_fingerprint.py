@@ -103,3 +103,32 @@ def test_evaluate_capability_manifest_signature_detects_tampering(tmp_path):
 
     assert issues
     assert "verification failed" in issues[0].lower() or "digest" in issues[0].lower()
+
+
+def test_verify_capability_manifest_signature_requires_digest_field():
+    manifest = capability_fingerprint.build_capability_manifest(
+        tools_payload={
+            "jsonrpc": "2.0",
+            "id": "tools-1",
+            "result": {"tools": [{"name": "read_file", "description": "Read a file."}]},
+        }
+    )
+    private_key_pem, signer_doc = signing.generate_signing_keypair("capability-signer")
+    signature_doc = capability_fingerprint.sign_capability_manifest(
+        manifest,
+        private_key_pem,
+        signer_doc["key_id"],
+    )
+    signature_doc.pop("manifest_sha256", None)
+    trusted_signers = capability_fingerprint.load_trusted_capability_signers(extra_signers=[signer_doc])
+
+    try:
+        capability_fingerprint.verify_capability_manifest_signature(
+            manifest,
+            signature_doc,
+            trusted_signers,
+        )
+    except ValueError as exc:
+        assert "manifest_sha256" in str(exc)
+    else:
+        raise AssertionError("verify_capability_manifest_signature should require manifest_sha256")

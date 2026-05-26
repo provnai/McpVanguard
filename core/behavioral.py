@@ -269,9 +269,20 @@ def clear_all_states() -> None:
     _states.clear()
     if _redis_client:
         try:
-            keys = _redis_client.keys("vguard:beh:*")
-            if keys:
-                _redis_client.delete(*keys)
+            scan_iter = getattr(_redis_client, "scan_iter", None)
+            if callable(scan_iter):
+                batch: list[str] = []
+                for key in scan_iter(match="vguard:beh:*", count=100):
+                    batch.append(key)
+                    if len(batch) >= 100:
+                        _redis_client.delete(*batch)
+                        batch.clear()
+                if batch:
+                    _redis_client.delete(*batch)
+            else:
+                keys = _redis_client.keys("vguard:beh:*")
+                if keys:
+                    _redis_client.delete(*keys)
         except Exception:
             pass
 
@@ -488,6 +499,7 @@ def _inspect_response_sync(
     
     # Check if we should block immediately (critical keys)
     if h >= ENTROPY_BLOCK_THRESHOLD:
+        RiskEngine.get_instance().record_event(session_id, server_id, "ENTROPY_CRITICAL", {"h": h})
         logger.warning("High-entropy response blocked: H=%.4f session=%s", h, session_id)
         return InspectionResult.block(
             reason=f"Exfiltration Block: H={h:.4f} (Cryptographic Material Detected)",
@@ -495,9 +507,7 @@ def _inspect_response_sync(
             rule_matches=[RuleMatch(rule_id="BEH-006", severity="CRITICAL")]
         )
 
-    if h >= ENTROPY_BLOCK_THRESHOLD:
-         RiskEngine.get_instance().record_event(session_id, server_id, "ENTROPY_CRITICAL", {"h": h})
-    elif h >= ENTROPY_HIGH_THRESHOLD:
+    if h >= ENTROPY_HIGH_THRESHOLD:
          RiskEngine.get_instance().record_event(session_id, server_id, "ENTROPY_HIGH", {"h": h})
 
     # Apply Token Bucket consumption

@@ -338,7 +338,24 @@ class RulesEngine:
             return None
 
         # Check for path-like arguments
-        path_keys = ["path", "filepath", "directory", "dir", "destination", "source"]
+        path_keys = [
+            "path",
+            "filepath",
+            "filename",
+            "directory",
+            "dir",
+            "destination",
+            "source",
+            "target",
+            "location",
+            "from",
+            "to",
+            "uri",
+            "url",
+            "base_dir",
+            "root",
+            "cwd",
+        ]
         
         for key in path_keys:
             if key in args:

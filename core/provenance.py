@@ -124,8 +124,10 @@ def verify_provenance_signature(
         raise ValueError(f"Provenance signer '{key_id}' is not trusted by this McpVanguard build.")
 
     expected_digest = signature_doc.get("payload_sha256")
+    if not isinstance(expected_digest, str) or not expected_digest.strip():
+        raise ValueError("Provenance signature is missing payload_sha256.")
     actual_digest = provenance_sha256(document)
-    if expected_digest and expected_digest != actual_digest:
+    if expected_digest != actual_digest:
         raise ValueError("Provenance signature metadata does not match the provenance digest.")
 
     public_key_bytes = _decode_public_key(signer["public_key"])

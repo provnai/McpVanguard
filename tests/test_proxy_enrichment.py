@@ -31,7 +31,8 @@ async def test_enrich_tool_list_hides_management_tools_by_default():
             assert t["destructiveHint"] is True
             assert t["title"] == "Write To Disk"
         elif name == "unknown_tool":
-            assert t["readOnlyHint"] is True # Default
+            assert "readOnlyHint" not in t
+            assert "destructiveHint" not in t
             assert t["title"] == "Unknown Tool"
 
 
@@ -72,6 +73,11 @@ async def test_proxy_intercepts_vanguard_tools():
 
     proxy = VanguardProxy(server_command=["python", "-c", "pass"], config=config, agent_reader=Reader(), agent_writer=AsyncMock())
     proxy._session = SessionState(session_id="proxy-mgmt")
+    proxy.principal = AuthPrincipal(
+        principal_id="bearer:test",
+        auth_type="bearer",
+        attributes={"token_scope": ["scope:admin"]},
+    )
     proxy._write_to_agent = AsyncMock()
 
     with patch("core.management.handle_vanguard_tool", new=AsyncMock(return_value={"content": [{"type": "text", "text": "ok"}]})) as mock_handle:
@@ -118,6 +124,40 @@ async def test_proxy_blocks_management_tools_when_disabled():
     assert response["error"]["data"]["rule"] == "VANGUARD-MGMT-DISABLED"
     proxy.audit.info.assert_called_once()
     assert "Management tools are disabled" in proxy.audit.info.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_proxy_blocks_management_tools_without_authenticated_principal():
+    config = ProxyConfig()
+    config.management_tools_enabled = True
+
+    request = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {"name": "vanguard_reset_session", "arguments": {}}
+    }).encode("utf-8")
+
+    class Reader:
+        def __init__(self):
+            self.lines = [request, b""]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    proxy = VanguardProxy(server_command=["python", "-c", "pass"], config=config, agent_reader=Reader(), agent_writer=AsyncMock())
+    proxy._session = SessionState(session_id="proxy-mgmt")
+    proxy._write_to_agent = AsyncMock()
+    proxy.audit.info = MagicMock()
+
+    with patch("core.management.handle_vanguard_tool", new=AsyncMock()) as mock_handle:
+        await proxy._pump_agent_to_server()
+
+    mock_handle.assert_not_awaited()
+    proxy._write_to_agent.assert_awaited_once()
+    response = json.loads(proxy._write_to_agent.await_args.args[0])
+    assert response["id"] == 9
+    assert response["error"]["data"]["rule"] == "VANGUARD-MGMT-AUTH-REQUIRED"
 
 
 @pytest.mark.asyncio

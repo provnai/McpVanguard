@@ -15,8 +15,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from core.models import AuthPrincipal
 from core.proxy import VanguardProxy, ProxyConfig
-from core.models import InspectionResult, RuleMatch
+from core.models import InspectionResult, RuleMatch, SafeZone
 from core.risk import RiskEngine
+from core.session import SessionState
 from core import capability_fingerprint, provenance, server_integrity, signing, sigstore_bundle, supplier_signatures
 
 @pytest.fixture
@@ -79,7 +80,10 @@ def test_proxy_run_creates_session_with_principal(mock_config):
 
 @pytest.mark.asyncio
 async def test_proxy_blocks_layer_1_rules(proxy):
-    # Layer 1 should block path traversal immediately
+    # Layer 1 should block a deterministic Safe Zone violation immediately
+    proxy.config.semantic_enabled = False
+    proxy.config.behavioral_enabled = False
+    proxy.rules_engine.safe_zones = [SafeZone(tool="read_file", allowed_prefixes=["/safe/"], recursive=True)]
     msg = {
         "jsonrpc": "2.0",
         "id": "123",
@@ -154,6 +158,42 @@ async def test_proxy_blocks_layer_3_behavioral(proxy):
             assert result.action == "BLOCK"
             assert result.layer_triggered == 3
 
+
+@pytest.mark.asyncio
+async def test_proxy_cancels_semantic_task_when_behavioral_blocks(proxy):
+    cancel_seen = asyncio.Event()
+    beh_result = InspectionResult(
+        allowed=False,
+        action="BLOCK",
+        layer_triggered=3,
+        rule_matches=[RuleMatch(rule_id="BEH-001", severity="HIGH")],
+        block_reason="Behavioral detection",
+    )
+
+    async def slow_semantic(*args, **kwargs):
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancel_seen.set()
+            raise
+
+    with patch("core.behavioral.inspect_request", new_callable=AsyncMock) as mock_beh, \
+         patch("core.semantic.score_intent", new=AsyncMock(side_effect=slow_semantic)), \
+         patch.object(proxy.rules_engine, "check", return_value=InspectionResult.allow()):
+        mock_beh.return_value = beh_result
+        msg = {
+            "jsonrpc": "2.0",
+            "id": "123",
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {"path": "benign.txt"}}
+        }
+
+        result = await proxy._inspect_message(msg)
+
+    assert not result.allowed
+    assert result.layer_triggered == 3
+    assert cancel_seen.is_set()
+
 @pytest.mark.asyncio
 async def test_proxy_allows_clean_request(proxy):
     # All layers return ALLOW/None
@@ -171,6 +211,83 @@ async def test_proxy_allows_clean_request(proxy):
         result = await proxy._inspect_message(msg)
         assert result.allowed
         assert result.action == "ALLOW"
+
+
+@pytest.mark.asyncio
+async def test_degrade_mode_forces_semantic_per_session_without_mutating_config():
+    shared_config = ProxyConfig()
+    shared_config.semantic_enabled = False
+    shared_config.behavioral_enabled = False
+
+    class Reader:
+        def __init__(self, payload):
+            self.lines = [payload, b""]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    request = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "benign.txt"}},
+    }).encode("utf-8")
+
+    proxy = VanguardProxy(server_command=["python", "-c", "pass"], config=shared_config, agent_reader=Reader(request), agent_writer=AsyncMock())
+    proxy._session = SessionState(session_id="degrade-a", server_id=proxy._server_id)
+    proxy._write_to_server = AsyncMock()
+    proxy._inspect_message = AsyncMock(return_value=InspectionResult.allow())
+
+    engine = RiskEngine.get_instance()
+    engine._states.clear()
+    engine.record_event("degrade-a", proxy._server_id, "BEHAVIORAL_BLOCK")
+    engine.record_event("degrade-a", proxy._server_id, "BEHAVIORAL_BLOCK")
+
+    await proxy._pump_agent_to_server()
+
+    assert shared_config.semantic_enabled is False
+    assert proxy._semantic_forced is True
+
+
+@pytest.mark.asyncio
+async def test_proxy_records_semantic_block_as_semantic_risk_event():
+    config = ProxyConfig()
+    config.semantic_enabled = True
+    config.behavioral_enabled = False
+
+    class Reader:
+        def __init__(self, payload):
+            self.lines = [payload, b""]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    request = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 42,
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "benign.txt"}},
+    }).encode("utf-8")
+
+    proxy = VanguardProxy(server_command=["python", "-c", "pass"], config=config, agent_reader=Reader(request), agent_writer=AsyncMock())
+    proxy._session = SessionState(session_id="sem-risk", server_id=proxy._server_id)
+    proxy._write_to_agent = AsyncMock()
+    proxy._write_to_server = AsyncMock()
+
+    sem_result = InspectionResult(
+        allowed=False,
+        action="BLOCK",
+        layer_triggered=2,
+        rule_matches=[RuleMatch(rule_id="SEM-BLOCK", severity="HIGH")],
+        semantic_score=0.95,
+        block_reason="Semantic detection",
+    )
+
+    with patch.object(proxy, "_inspect_message", new=AsyncMock(return_value=sem_result)):
+        await proxy._pump_agent_to_server()
+
+    state = proxy.risk_engine.get_state("sem-risk", proxy._server_id)
+    assert state.events[-1]["type"] == "SEMANTIC_BLOCK"
 
 
 @pytest.mark.asyncio

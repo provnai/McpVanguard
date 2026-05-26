@@ -4,6 +4,7 @@ Task 3: Verifies the Shannon Entropy scouter and risk-weighted throttling logic.
 """
 
 import unittest
+from unittest.mock import patch
 from core.behavioral import (
     compute_shannon_entropy,
     entropy_risk_label,
@@ -13,6 +14,7 @@ from core.behavioral import (
     get_state,
     clear_state,
 )
+from core.risk import RiskEngine
 import asyncio
 
 
@@ -62,6 +64,7 @@ class TestEntropyThrottling(unittest.TestCase):
 
     def setUp(self):
         clear_state("test-entropy")
+        RiskEngine.get_instance()._states.clear()
 
     def test_high_entropy_response_blocked(self):
         """A response with H > 7.5 should be blocked with BEH-006."""
@@ -88,6 +91,18 @@ class TestEntropyThrottling(unittest.TestCase):
         # Should not be blocked by entropy
         if result:
             self.assertNotEqual(result.rule_matches[0].rule_id, "BEH-006")
+
+    def test_entropy_critical_records_risk_event(self):
+        engine = RiskEngine.get_instance()
+        with patch("core.behavioral.compute_shannon_entropy", return_value=ENTROPY_BLOCK_THRESHOLD + 0.1):
+            result = asyncio.run(inspect_response("test-entropy", "plain text still patched high"))
+
+        self.assertIsNotNone(result)
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.rule_matches[0].rule_id, "BEH-006")
+        state = engine.get_state("test-entropy", "default")
+        self.assertEqual(state.score, 50.0)
+        self.assertTrue(any(event["type"] == "ENTROPY_CRITICAL" for event in state.events))
 
 
 if __name__ == "__main__":

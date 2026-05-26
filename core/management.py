@@ -8,9 +8,15 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional
 
 from core import __version__, telemetry
+
+MAX_RUNTIME_RULE_YAML_BYTES = 8 * 1024
+RUNTIME_RULE_APPLY_LIMIT = 5
+RUNTIME_RULE_APPLY_WINDOW_SECS = 60.0
+_RUNTIME_RULE_APPLY_WINDOWS: dict[str, deque[float]] = {}
 
 
 @dataclass
@@ -147,6 +153,23 @@ def _tail_lines(path: Path, limit: int) -> list[str]:
     return [line.rstrip("\n") for line in lines]
 
 
+def _management_rate_key(context: ManagementContext) -> str:
+    return context.session_id or "anonymous"
+
+
+def _consume_runtime_rule_budget(context: ManagementContext) -> bool:
+    key = _management_rate_key(context)
+    now = time.monotonic()
+    window = _RUNTIME_RULE_APPLY_WINDOWS.setdefault(key, deque())
+    cutoff = now - RUNTIME_RULE_APPLY_WINDOW_SECS
+    while window and window[0] < cutoff:
+        window.popleft()
+    if len(window) >= RUNTIME_RULE_APPLY_LIMIT:
+        return False
+    window.append(now)
+    return True
+
+
 async def handle_vanguard_tool(
     name: str,
     arguments: Dict[str, Any],
@@ -198,8 +221,15 @@ async def handle_vanguard_tool(
         rule_yaml = arguments.get("rule_yaml", "")
         if not isinstance(rule_yaml, str) or not rule_yaml.strip():
             return _result_text("rule_yaml must be a non-empty YAML string.", is_error=True)
+        if len(rule_yaml.encode("utf-8")) > MAX_RUNTIME_RULE_YAML_BYTES:
+            return _result_text(
+                f"rule_yaml exceeds the {MAX_RUNTIME_RULE_YAML_BYTES}-byte runtime safety limit.",
+                is_error=True,
+            )
         if context.rules_engine is None:
             return _result_text("Active rules engine unavailable for runtime patching.", is_error=True)
+        if not _consume_runtime_rule_budget(context):
+            return _result_text("Runtime rule apply limit exceeded. Try again later.", is_error=True)
 
         try:
             added_ids = context.rules_engine.add_runtime_rules(rule_yaml, source_file="runtime")

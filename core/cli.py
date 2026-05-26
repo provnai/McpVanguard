@@ -67,6 +67,13 @@ RULE_SIGNATURE = signing.RULE_SIGNATURE
 REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
+def _readme_has_any_heading(content: str, headings: tuple[str, ...]) -> bool:
+    return any(
+        re.search(rf"^##+\s+{re.escape(heading)}\s*$", content, re.IGNORECASE | re.MULTILINE)
+        for heading in headings
+    )
+
+
 def _resolve_option_or_env(option_value: str, option_default: str, env_name: str) -> str:
     env_value = os.getenv(env_name)
     if env_value and option_value == option_default:
@@ -764,16 +771,15 @@ def audit_compliance(
     console.print("\n[bold]2. Documentation[/bold]")
     docs = {
         "PRIVACY.md": os.path.exists("PRIVACY.md"),
-        "README.md Usage Examples": False,
+        "README.md Quickstart": False,
         "README.md Authentication": False
     }
     
     if os.path.exists("README.md"):
-        import re
         content = open("README.md", "r", encoding="utf-8").read()
-        if re.search(r"Usage Examples", content, re.IGNORECASE):
-            docs["README.md Usage Examples"] = True
-        if re.search(r"Authentication", content, re.IGNORECASE):
+        if _readme_has_any_heading(content, ("Quickstart", "Getting Started", "Quick Verification Scenario")):
+            docs["README.md Quickstart"] = True
+        if _readme_has_any_heading(content, ("Authentication Modes", "Authentication")):
             docs["README.md Authentication"] = True
 
     for item, status in docs.items():

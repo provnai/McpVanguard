@@ -1393,3 +1393,48 @@ async def test_handle_sse_api_key_mode_does_not_emit_oauth_challenge(monkeypatch
     assert start["status"] == 401
     headers = dict(start["headers"])
     assert b"www-authenticate" not in headers
+
+
+@pytest.mark.asyncio
+async def test_handle_sse_rate_limit_does_not_connect(monkeypatch):
+    from core import sse_server
+
+    sse_server._total_active_connections = 0
+    sse_server._active_connections.clear()
+    sse_server._rate_limiters.clear()
+
+    transport = MagicMock()
+    transport.connect_sse = AsyncMock()
+    ctx = ServerContext(
+        server_command=["python", "-c", "print('hello')"],
+        config=None,
+        sse_transport=transport,
+        cfg={
+            "AUTH_MODE": "none",
+            "API_KEY": "",
+            "ALLOWED_IPS": [],
+            "ALLOWED_ORIGINS": [],
+            "REQUIRE_ORIGIN": False,
+            "MAX_CONCURRENCY": 5,
+            "MAX_GLOBAL_CONNECTIONS": 10,
+            "RATE_LIMIT_PER_SEC": 1.0,
+            "MAX_BODY_BYTES": 1024,
+        },
+    )
+    scope = {
+        "type": "http",
+        "client": ["127.0.0.1", 1234],
+        "headers": [],
+    }
+
+    limiter = AsyncMock()
+    limiter.consume.return_value = False
+    sse_server._rate_limiters["127.0.0.1"] = limiter
+    send = _SendCollector()
+
+    await handle_sse(scope, AsyncMock(), send, ctx)
+
+    transport.connect_sse.assert_not_called()
+    start = send.messages[0]
+    assert start["type"] == "http.response.start"
+    assert start["status"] == 429

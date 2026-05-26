@@ -18,6 +18,27 @@ def test_safe_regex_forced_python_backend(monkeypatch):
         importlib.reload(safe_regex)
 
 
+def test_safe_regex_warns_when_re2_unavailable(monkeypatch, caplog):
+    real_import_module = importlib.import_module
+
+    def fake_import_module(name, package=None):
+        if name == "re2":
+            raise ImportError("forced missing re2")
+        return real_import_module(name, package)
+
+    monkeypatch.setenv("VANGUARD_REGEX_ENGINE", "auto")
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+    caplog.set_level("WARNING", logger="vanguard.safe_regex")
+
+    module = importlib.reload(safe_regex)
+    try:
+        assert module.backend_name() == "python"
+        assert "falling back to Python re" in caplog.text
+    finally:
+        monkeypatch.delenv("VANGUARD_REGEX_ENGINE", raising=False)
+        importlib.reload(safe_regex)
+
+
 def test_safe_regex_can_bind_fake_re2_backend(monkeypatch):
     fake_module = types.ModuleType("re2")
 
