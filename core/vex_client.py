@@ -92,7 +92,6 @@ async def _execute_and_listen(payload: dict, session_id: str):
     # Extract sanitized risk indicators instead of raw malicious payloads.
     # This ensures 100% audit finality by bypassing front-gate safety judges
     # while providing enough context for the forensic agent to verify the block.
-    import json
     
     risk_summary = {
         "event_type": "SECURITY_BLOCK",
@@ -118,7 +117,7 @@ async def _execute_and_listen(payload: dict, session_id: str):
             risk_summary["risk_indicator"] = "NETWORK_SSRF_FORENSIC"
         else:
             risk_summary["risk_indicator"] = "GENERAL_MANIPULATION_FORENSIC"
-    except:
+    except Exception:
         risk_summary["risk_indicator"] = "UNKNOWN_SECURITY_RISK"
 
     audit_prompt = (
@@ -174,10 +173,12 @@ async def _execute_and_listen(payload: dict, session_id: str):
 
                 except httpx.HTTPStatusError as e:
                     logger.error("VEX Execute HTTP Error: %d - %s", e.response.status_code, e.response.text)
-                    if attempt == max_retries - 1: return
+                    if attempt == max_retries - 1:
+                        return
                 except Exception as e:
                     logger.error("VEX API Execute Error: %s", e)
-                    if attempt == max_retries - 1: return
+                    if attempt == max_retries - 1:
+                        return
             
             if not job_id:
                 logger.error("Failed to obtain a job_id after multiple retries.")

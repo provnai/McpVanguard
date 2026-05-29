@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Optional
 from dataclasses import dataclass, field
 
 from cryptography.exceptions import InvalidSignature

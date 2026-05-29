@@ -13,11 +13,11 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import httpx
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac, serialization
+from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, ed448, padding, rsa
 
 

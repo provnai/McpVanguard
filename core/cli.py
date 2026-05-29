@@ -24,8 +24,6 @@ import typer
 from dotenv import load_dotenv
 from rich.console import Console
 
-# Load environment variables from .env
-load_dotenv()
 from rich.table import Table
 from rich.panel import Panel
 from rich import print as rprint
@@ -33,7 +31,6 @@ from rich import print as rprint
 from core import __version__
 from core.proxy import ProxyConfig, run_proxy
 from core.rules_engine import RulesEngine
-from core import semantic, behavioral
 from core import signing
 from core import taxonomy
 from core import benchmarks
@@ -44,6 +41,10 @@ from core import active_probing
 from core import supplier_signatures
 from core import sigstore_bundle
 from core import conformance
+from core.proxy import VanguardProxy
+
+# Load environment variables from .env
+load_dotenv()
 
 app = typer.Typer(
     name="vanguard",
@@ -261,23 +262,23 @@ def start(
     ))
     proxy_console.print(f"[bold]Server:[/bold]    {server}")
     proxy_console.print(f"[bold]Rules:[/bold]     {engine.rule_count} loaded from '{resolved_rules_dir}/'")
-    proxy_console.print(f"[bold]Layer 1:[/bold]    [green]Enabled[/green] (Static rules)")
+    proxy_console.print("[bold]Layer 1:[/bold]    [green]Enabled[/green] (Static rules)")
     
     if behavioral:
-        proxy_console.print(f"[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
+        proxy_console.print("[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
     else:
-        proxy_console.print(f"[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
+        proxy_console.print("[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
 
     if config.management_tools_enabled:
-        proxy_console.print(f"[bold]Mgmt:[/bold]       [green]Enabled[/green] (Native Vanguard tools exposed)")
+        proxy_console.print("[bold]Mgmt:[/bold]       [green]Enabled[/green] (Native Vanguard tools exposed)")
     else:
-        proxy_console.print(f"[bold]Mgmt:[/bold]       [dim]Disabled[/dim] (Native Vanguard tools hidden)")
+        proxy_console.print("[bold]Mgmt:[/bold]       [dim]Disabled[/dim] (Native Vanguard tools hidden)")
     
     if semantic:
         status = "Ready" if semantic_ready else "Offline (Scoring will be skipped)"
         proxy_console.print(f"[bold]Layer 2:[/bold]    {status} — Ollama ({ollama_model})")
     else:
-        proxy_console.print(f"[bold]Layer 2:[/bold]    [dim]Disabled[/dim] (Semantic scoring)")
+        proxy_console.print("[bold]Layer 2:[/bold]    [dim]Disabled[/dim] (Semantic scoring)")
     
     proxy_console.print(f"[bold]Audit log:[/bold]  {log_file}\n")
     proxy_console.print("[dim]Press Ctrl+C to stop[/dim]\n")
@@ -752,7 +753,6 @@ def audit_compliance(
 
     # 1. Check Tool Safety Annotations (🚫 REQUIRED)
     console.print("[bold]1. Tool Safety Annotations[/bold]")
-    from core.proxy import VanguardProxy
     proxy = VanguardProxy(server_command=["python", "-c", "pass"])
     mock_tools = [{"name": "test_tool"}]
     enriched = proxy._enrich_tool_list(mock_tools)
@@ -1122,6 +1122,119 @@ def conformance_server(
 
     if not result.passed:
         raise typer.Exit(code=result.returncode or 1)
+
+
+@app.command("gpu-harden")
+def gpu_harden(
+    json_output: bool = typer.Option(
+        False,
+        "--json-output",
+        help="Emit the combined GPU hardening corpus report as JSON.",
+    ),
+):
+    """
+    Run the paired GPU hardening corpora as one repeatable smoke test.
+    """
+    from core.benchmarks import benchmark_report
+
+    report = benchmark_report(
+        [
+            "tests/benchmarks/gpu_hardening_cases.yaml",
+            "tests/benchmarks/gpu_false_positive_cases.yaml",
+        ]
+    )
+
+    summary = report["summary"]
+    quality = report["quality"]
+    if json_output:
+        console.print(json.dumps({
+            "summary": summary,
+            "quality": quality,
+            "corpora": [
+                {
+                    "path": corpus["path"],
+                    "summary": corpus["summary"],
+                    "quality": corpus["quality"],
+                }
+                for corpus in report["corpora"]
+            ],
+            "cases": [
+                {
+                    "case_id": case.case_id,
+                    "mcp38_id": case.mcp38_id,
+                    "title": case.title,
+                    "harness": case.harness,
+                    "expected_action": case.expected_action,
+                    "expected_rule_id": case.expected_rule_id,
+                }
+                for case in report["cases"]
+            ],
+            "evaluations": [
+                {
+                    "case_id": evaluation.case_id,
+                    "passed": evaluation.passed,
+                    "expected_action": evaluation.expected_action,
+                    "actual_action": evaluation.actual_action,
+                    "expected_rule_id": evaluation.expected_rule_id,
+                    "actual_rule_id": evaluation.actual_rule_id,
+                    "details": evaluation.details,
+                }
+                for evaluation in report["evaluations"]
+            ],
+        }, indent=2, sort_keys=True))
+        return
+
+    console.print(Panel.fit(
+        "[bold green]GPU Hardening Smoke Test[/bold green]\n"
+        "[dim]Paired adversarial and false-positive corpora[/dim]",
+        border_style="green",
+    ))
+    console.print(f"[bold]Total cases:[/bold] {summary['total']}")
+    console.print(f"[bold green]Passed:[/bold green] {summary['passed']}")
+    console.print(f"[bold red]Failed:[/bold red] {summary['failed']}")
+    console.print(f"[bold]ALLOW:[/bold] {summary['ALLOW']}  [bold yellow]WARN:[/bold yellow] {summary['WARN']}  [bold red]BLOCK:[/bold red] {summary['BLOCK']}")
+    console.print(f"[bold]Adversarial block rate:[/bold] {quality['adversarial_block_rate']:.0%}")
+    console.print(f"[bold]Benign allow rate:[/bold] {quality['benign_allow_rate']:.0%}")
+    console.print(f"[bold]False positive rate:[/bold] {quality['false_positive_rate']:.0%}")
+
+    if summary["failed"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("gpu-thresholds")
+def gpu_thresholds(
+    json_output: bool = typer.Option(
+        False,
+        "--json-output",
+        help="Emit the threshold sweep as JSON.",
+    ),
+):
+    """
+    Sweep semantic warn/block thresholds against the synthetic GPU semantic corpus.
+    """
+    from core.benchmarks import threshold_sweep_report
+
+    report = threshold_sweep_report("tests/benchmarks/gpu_semantic_threshold_cases.yaml")
+    if json_output:
+        console.print(json.dumps(report, indent=2, sort_keys=True, default=lambda o: o.__dict__))
+        return
+
+    console.print(Panel.fit(
+        "[bold green]GPU Semantic Threshold Sweep[/bold green]\n"
+        "[dim]Synthetic score corpus for warn/block tuning[/dim]",
+        border_style="green",
+    ))
+    for entry in report["thresholds"]:
+        quality = entry["quality"]
+        summary = entry["summary"]
+        console.print(
+            f"[bold]warn={entry['warn_threshold']:.2f} block={entry['block_threshold']:.2f}[/bold] "
+            f"pass={summary['passed']}/{summary['total']} "
+            f"allow={summary['ALLOW']} warn={summary['WARN']} block={summary['BLOCK']} "
+            f"adversarial_block_rate={quality['adversarial_block_rate']:.0%} "
+            f"benign_allow_rate={quality['benign_allow_rate']:.0%} "
+            f"false_positive_rate={quality['false_positive_rate']:.0%}"
+        )
 
 
 @app.command("server-manifest")

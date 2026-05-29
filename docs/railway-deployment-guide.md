@@ -6,7 +6,7 @@ McpVanguard is a real-time security gateway for the Model Context Protocol (MCP)
 
 Deploy the full McpVanguard stack in one click:
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PCkNLS?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/mcpvanguard?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ## Prerequisites
 
@@ -41,9 +41,19 @@ Fine-tune the behavior of the security engine and connect your AI brain:
 | `VANGUARD_SEMANTIC_CUSTOM_KEY`| - | Your API key for the custom provider. |
 | `VANGUARD_SEMANTIC_CUSTOM_MODEL`| - | e.g., `deepseek-chat` or `llama3-70b-8192`. |
 | `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. |
-| `VANGUARD_BLOCK_THRESHOLD` | `0.8` | Semantic scoring threshold above which a request is blocked (Layer 2, requires Ollama). |
-| `VANGUARD_WARN_THRESHOLD` | `0.5` | Semantic scoring threshold above which a request is flagged as a warning. |
+| `VANGUARD_SEMANTIC_THRESHOLD_BLOCK` | `0.8` | Semantic scoring threshold above which a request is blocked. |
+| `VANGUARD_SEMANTIC_THRESHOLD_WARN` | `0.5` | Semantic scoring threshold above which a request is flagged as a warning. |
 | `VANGUARD_MAX_STRING_LEN` | `65536` | Protection against ReDoS/Memory exhaustion. Strings longer than this are truncated before inspection. |
+
+### When To Use Local Semantic Mode
+
+If your deployment handles regulated data, needs low-latency local development, or must stay air-gapped, prefer a local or private OpenAI-compatible backend instead of a public API. The recommended profiles are documented in [docs/LOCAL_SEMANTIC_MODE.md](LOCAL_SEMANTIC_MODE.md).
+
+### Operator Warnings
+
+- Semantic model quality can drift over time after backend upgrades.
+- Thresholds tuned on the benchmark corpora can still produce long-tail false positives in production.
+- If you change the backend or threshold profile, rerun the adversarial and false-positive corpora before promoting the change.
 
 ### 3. Layer 3: Behavioral Analysis & Entropy Governor (Optional)
 
@@ -62,11 +72,11 @@ McpVanguard tracks per-session patterns to detect anomalous agent behavior and c
 
 By default, McpVanguard stores behavioral session state in-memory. This works perfectly for single-replica deployments (the default).
 
-If you need **multiple replicas** for high-availability, add an official Railway **Redis** service to your project. McpVanguard will automatically detect `REDIS_URL` and share session state across all instances.
+If you need **multiple replicas** for high-availability, add an official Railway **Redis** service to your project. McpVanguard will automatically detect `VANGUARD_REDIS_URL` and share session state across all instances.
 
 | Variable | Description |
 |----------|-------------|
-| `REDIS_URL` | Auto-injected by Railway when you add a Redis service. Enables distributed session tracking across replicas. |
+| `VANGUARD_REDIS_URL` | Auto-injected by Railway when you add a Redis service. Enables distributed session tracking across replicas. |
 
 ### 5. VEX Protocol: Cryptographic Audit Logging (Optional)
 
@@ -90,7 +100,7 @@ Verify the service is running:
 curl https://your-project.up.railway.app/health
 # Expected: {
 #   "status": "ok",
-#   "version": "2.0.0",
+#   "version": "2.0.1",
 #   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
 #   "timestamp": 1711022400.0
 # }
@@ -125,8 +135,8 @@ The most powerful enterprise configuration runs **both** McpVanguard and VEX nat
 
 ```
 [AI Agent (Vercel / OpenAI)] 
-    → [McpVanguard on Railway] — blocks attacks in <1ms
-        → [VEX on Railway]    — cryptographically anchors every blocked call to Postgres
+    -> [McpVanguard on Railway] - blocks attacks in <1ms
+        -> [VEX on Railway]    - cryptographically anchors every blocked call to Postgres
 ```
 
 This topology has been validated in the repository's Railway-focused benchmark and certification test suite, including burst and audit-finality scenarios. See the [certification report](https://github.com/provnai/McpVanguard/blob/main/tests/benchmarks/railway_cloud_certification.py) for the exact test harness.
@@ -137,7 +147,7 @@ This topology has been validated in the repository's Railway-focused benchmark a
 3. Set `VANGUARD_VEX_URL` on your McpVanguard service to that URL.
 4. Set `VANGUARD_VEX_KEY` to your VEX JWT.
 
-VEX handles all the PostgreSQL logging, Merkle-tree anchoring, and CHORA evidence capsule generation remotely — while Vanguard performs fast local policy blocking at the edge.
+VEX handles all the PostgreSQL logging, Merkle-tree anchoring, and CHORA evidence capsule generation remotely while Vanguard performs fast local policy blocking at the edge.
 
 ---
 
@@ -147,9 +157,9 @@ The instance is pre-configured with a `/health` endpoint:
 
 ```bash
 GET /health
-→ {
+-> {
   "status": "ok",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
   "timestamp": 1711022400.0
 }
@@ -161,7 +171,7 @@ Railway uses this for readiness checks during deployment orchestration.
 
 ## Support
 
-- 🐛 [Open an Issue](https://github.com/provnai/McpVanguard/issues)
-- 📚 [Full Documentation](https://github.com/provnai/McpVanguard)
-- 🌐 [Provnai Research Initiative](https://provnai.com)
-- 🤝 [VEX Protocol](https://github.com/provnai/vex/blob/main/docs/railway.md)
+- [Open an Issue](https://github.com/provnai/McpVanguard/issues)
+- [Full Documentation](https://github.com/provnai/McpVanguard)
+- [Provnai Research Initiative](https://provnai.com)
+- [VEX Protocol](https://github.com/provnai/vex/blob/main/docs/railway.md)

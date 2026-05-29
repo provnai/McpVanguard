@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-vanguard"
-version = "2.0.0"
+version = "2.0.1"
 description = "Security gateway and verification layer for the Model Context Protocol (MCP)"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "provnai", email = "contact@provnai.com" }]
 keywords = ["mcp", "model-context-protocol", "ai-security", "railway", "security-gateway", "policy-enforcement", "vex-protocol"]
@@ -48,8 +49,8 @@ full = [
 vanguard = "core.cli:app"
 
 [project.urls]
-Homepage = "https://provnai.com"
-Documentation = "https://provnai.dev"
+Homepage = "https://www.provnai.com/"
+Documentation = "https://www.provnai.com/docs/"
 Repository = "https://github.com/provnai/McpVanguard"
 Issues = "https://github.com/provnai/McpVanguard/issues"
 
@@ -68,3 +69,4 @@ include = ["core*", "rules*", "assets*"]
 [tool.setuptools.package-data]
 rules = ["*.yaml", "*.json"]
 assets = ["*.png"]
+"core.benchmark_cases" = ["*.yaml"]

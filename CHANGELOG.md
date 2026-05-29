@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-05-29 (Post-Release Hardening Patch)
+
+### Security and Correctness
+
+- **Post-release audit fixes**: Patched the confirmed high-priority audit findings from the `2.0.0` follow-up pass, including SSE rate-limit fallthrough, shared DEGRADE-mode config mutation, unreachable entropy critical-risk recording, orphaned semantic task handling on L3 blocks, semantic event classification, management-tool guardrails, safe-zone path-key coverage, and ambiguous tool safety hints.
+- **Semantic false-positive tuning**: Updated the Layer 2 semantic prompt to treat quoted strings, incident notes, documentation excerpts, log-analysis snippets, and educational examples as benign context unless the actual tool action is suspicious.
+- **Risk and benchmark accounting**: Added semantic-specific risk event handling and benchmark quality metrics for adversarial block rate, benign allow rate, false-positive rate, and false-negative rate.
+
+### Added
+
+- **Local/offline semantic mode guidance**: Added `docs/LOCAL_SEMANTIC_MODE.md` plus deployment-doc updates for Ollama, LM Studio, llama.cpp, and OpenAI-compatible local endpoints.
+- **GPU R&D hardening artifacts**: Added curated GPU-lab extraction, bypass mapping, prompt hardening, L1/L2 boundary, rule-candidate, benchmark-boundary, and adopt/defer/archive notes while keeping raw R&D claims out of the public release promise.
+- **Hardening benchmark corpora**: Added paired adversarial and benign false-positive benchmark corpora, plus a synthetic semantic-threshold corpus.
+- **New benchmark commands**: Added `vanguard gpu-harden` and `vanguard gpu-thresholds` for repeatable hardening smoke tests and threshold-sensitivity checks.
+- **Phase 7 measurement tooling**: Added local measurement, mock L2, Redis code-path, live-evidence, closeout, status, markdown-report, and results-log draft scripts, plus a scheduled/manual `phase7-measurement` GitHub Actions workflow.
+
+### Changed
+
+- **Release docs**: Updated README and deployment docs to point to the local semantic guide, use the canonical Railway template link, and clarify Redis, semantic-threshold, and operator-warning language.
+- **Project metadata**: Updated package project URLs to the current ProvnAI website/documentation URLs.
+
+### CI/CD and Code Quality
+
+- **Lint hardening**: Resolved 52 ruff errors across `core/` — fixed E402 (import order), E701 (multi-statement lines), E722 (bare except), and F401 (unused imports) in `cli.py`, `proxy.py`, `vex_client.py`, `behavioral.py`, and related modules.
+- **CI action version correction**: Fixed invalid GitHub Action versions across all 6 workflows (`test.yml`, `security-audit.yml`, `sbom.yml`, `publish.yml`, `codeql.yml`, `phase7-measurement.yml`): `actions/checkout@v6` → `v4`, `actions/setup-python@v6` → `v5`, `actions/upload-artifact@v7` → `v4`.
+
+### Notes
+
+- Redis overhead, real local L2 throughput, and GPU attestation remain live-evidence gates. They are intentionally documented as external proof items, not shipped GPU product claims.
+- GPU acceleration and hardware attestation are still research-only and are not part of the `2.0.1` product promise.
+
 ## [2.0.0] - 2026-05-22 (The Integrity Gateway Release)
 
 ### Security and Platform

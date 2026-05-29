@@ -152,6 +152,8 @@ The optional Layer 2 semantic scorer supports multiple backends. The first confi
 | **OpenAI** | `VANGUARD_OPENAI_API_KEY` | Default model: `gpt-4o-mini` |
 | **Ollama** | `VANGUARD_OLLAMA_URL` | Local execution, no API key required |
 
+For a more detailed local/offline setup guide, see [docs/LOCAL_SEMANTIC_MODE.md](docs/LOCAL_SEMANTIC_MODE.md).
+
 ## Integrity and Trust
 
 McpVanguard includes:
@@ -166,7 +168,7 @@ This should be described as server integrity, baseline verification, and trust v
 
 ## Project Status
 
-- `2.0.0` is the current release line
+- `2.0.1` is the current release line
 - the core gateway and integrity features are the main shipped scope
 - broader research and future control-plane work are intentionally outside the core OSS release scope
 

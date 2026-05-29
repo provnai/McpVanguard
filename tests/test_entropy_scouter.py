@@ -101,7 +101,7 @@ class TestEntropyThrottling(unittest.TestCase):
         self.assertFalse(result.allowed)
         self.assertEqual(result.rule_matches[0].rule_id, "BEH-006")
         state = engine.get_state("test-entropy", "default")
-        self.assertEqual(state.score, 50.0)
+        self.assertAlmostEqual(state.score, 50.0, places=2)
         self.assertTrue(any(event["type"] == "ENTROPY_CRITICAL" for event in state.events))
 
 

@@ -17,7 +17,6 @@ import yaml
 
 from core.models import InspectionResult, RuleMatch, RuleAction, RuleSeverity, SafeZone
 from core.jail import check_path_jail
-from core.risk import RiskEngine
 from core import safe_regex
 
 logger = logging.getLogger(__name__)

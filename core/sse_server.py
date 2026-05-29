@@ -1026,9 +1026,9 @@ async def run_sse_server(
 
     cfg = _get_sse_config()
     if cfg["API_KEY"]:
-        print(f"[Vanguard] SSE authentication ENABLED (VANGUARD_API_KEY is set)")
+        print("[Vanguard] SSE authentication ENABLED (VANGUARD_API_KEY is set)")
     else:
-        print(f"[Vanguard] WARNING: VANGUARD_API_KEY not set. SSE endpoints are open.")
+        print("[Vanguard] WARNING: VANGUARD_API_KEY not set. SSE endpoints are open.")
 
     if not _is_loopback_host(host):
         print(f"[Vanguard] WARNING: HTTP bridge is binding to non-loopback host {host}.")

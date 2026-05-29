@@ -55,6 +55,12 @@ def test_extract_json_robustness():
     with pytest.raises(ValueError):
         semantic._extract_json('not json')
 
+def test_system_prompt_mentions_benign_contexts():
+    prompt = semantic._SYSTEM_PROMPT.lower()
+    assert "benign context" in prompt
+    assert "quoted strings" in prompt
+    assert "incident notes" in prompt
+
 @pytest.mark.asyncio
 async def test_semantic_block_highly_malicious(mock_ollama_client, base_settings):
     # Mock malicious response (Ollama format)

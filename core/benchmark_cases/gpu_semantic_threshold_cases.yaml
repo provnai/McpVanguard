@@ -1,0 +1,54 @@
+- case_id: gpu-sem-01-low-risk
+  mcp38_id: GPU-SEM-01
+  title: Low-risk semantic score stays allowed
+  harness: semantic_threshold
+  input:
+    score: 0.12
+    reason: clearly benign
+    threshold_warn: 0.50
+    threshold_block: 0.80
+  expected_action: ALLOW
+
+- case_id: gpu-sem-02-warning-band
+  mcp38_id: GPU-SEM-02
+  title: Suspicious but not blocked semantic score warns
+  harness: semantic_threshold
+  input:
+    score: 0.56
+    reason: suspicious but potentially valid
+    threshold_warn: 0.50
+    threshold_block: 0.80
+  expected_action: WARN
+
+- case_id: gpu-sem-03-block-band
+  mcp38_id: GPU-SEM-03
+  title: High-risk semantic score blocks
+  harness: semantic_threshold
+  input:
+    score: 0.91
+    reason: clear attack intent
+    threshold_warn: 0.50
+    threshold_block: 0.80
+  expected_action: BLOCK
+
+- case_id: gpu-sem-04-strict-profile-warning
+  mcp38_id: GPU-SEM-04
+  title: Strict profile turns warning into block candidate
+  harness: semantic_threshold
+  input:
+    score: 0.68
+    reason: borderline suspicious
+    threshold_warn: 0.40
+    threshold_block: 0.70
+  expected_action: WARN
+
+- case_id: gpu-sem-05-cost-profile-allow
+  mcp38_id: GPU-SEM-05
+  title: Cost-sensitive profile keeps low-risk traffic allowed
+  harness: semantic_threshold
+  input:
+    score: 0.28
+    reason: low risk, noisy but benign
+    threshold_warn: 0.60
+    threshold_block: 0.85
+  expected_action: ALLOW

@@ -53,9 +53,9 @@ from core import supplier_signatures
 from core import sigstore_bundle
 from core.risk import RiskEngine, EnforcementLevel
 
-logger = logging.getLogger(__name__)
-
 from core.auth import TOOL_SCOPE_MAPPING
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +330,7 @@ class VanguardProxy:
             )
         except (BlockingIOError, OSError) as e:
             if getattr(e, "errno", None) == 11:
-                 logger.critical(f"[Vanguard] RESOURCE EXHAUSTION: Cannot spawn MCP server (Errno 11). System limits reached.")
+                 logger.critical("[Vanguard] RESOURCE EXHAUSTION: Cannot spawn MCP server (Errno 11). System limits reached.")
                  raise RuntimeError("Server capacity reached (OS process limit). Please try again later.")
             logger.error(f"[Vanguard] Failed to launch server: {e}")
             raise RuntimeError(f"MCP Server command failed: {e}")

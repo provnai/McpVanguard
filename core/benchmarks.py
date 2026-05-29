@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from core import behavioral
-from core.models import AuthPrincipal
+from core.models import AuthPrincipal, InspectionResult
 from core.metadata_inspection import inspect_initialize_payload, inspect_tool_list_payload
 from core.proxy import ProxyConfig, VanguardProxy
 from core.rules_engine import RulesEngine
@@ -26,6 +27,7 @@ KNOWN_HARNESSES = {
     "behavioral_response",
     "proxy_auth_policy",
     "behavioral_cross_server_sequence",
+    "semantic_threshold",
 }
 
 
@@ -53,8 +55,20 @@ class BenchmarkEvaluation:
     details: str | None = None
 
 
+def _read_case_corpus(path: str | Path) -> str:
+    candidate = Path(path)
+    if candidate.exists():
+        return candidate.read_text(encoding="utf-8")
+
+    if candidate.parent.as_posix().replace("\\", "/") == "tests/benchmarks":
+        resource_name = candidate.name
+        return resources.files("core.benchmark_cases").joinpath(resource_name).read_text(encoding="utf-8")
+
+    raise FileNotFoundError(f"Benchmark corpus not found: {path}")
+
+
 def load_cases(path: str | Path = "tests/benchmarks/mcp38_cases.yaml") -> list[BenchmarkCase]:
-    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    payload = yaml.safe_load(_read_case_corpus(path))
     if not isinstance(payload, list):
         raise ValueError("Benchmark corpus must be a list of cases.")
 
@@ -115,6 +129,8 @@ def run_case(case: BenchmarkCase):
         return asyncio.run(_run_proxy_auth_policy(case))
     if case.harness == "behavioral_cross_server_sequence":
         return asyncio.run(_run_behavioral_cross_server_sequence(case))
+    if case.harness == "semantic_threshold":
+        return _run_semantic_threshold(case)
 
     raise AssertionError(f"Unsupported benchmark harness: {case.harness}")
 
@@ -175,6 +191,101 @@ def summarize_evaluations(evaluations: list[BenchmarkEvaluation]) -> dict[str, i
             summary["failed"] += 1
         summary[evaluation.expected_action] += 1
     return summary
+
+
+def summarize_benchmark_quality(evaluations: list[BenchmarkEvaluation]) -> dict[str, float]:
+    """Summarize behavior in a way that is more useful for hardening decisions."""
+    total = len(evaluations)
+    if total == 0:
+        return {
+            "total": 0.0,
+            "pass_rate": 0.0,
+            "adversarial_block_rate": 0.0,
+            "benign_allow_rate": 0.0,
+            "false_positive_rate": 0.0,
+            "false_negative_rate": 0.0,
+        }
+
+    expected_block = [e for e in evaluations if e.expected_action == "BLOCK"]
+    expected_allow = [e for e in evaluations if e.expected_action == "ALLOW"]
+    blocked_expected_block = sum(1 for e in expected_block if e.actual_action == "BLOCK")
+    allowed_expected_allow = sum(1 for e in expected_allow if e.actual_action == "ALLOW")
+    false_positives = sum(1 for e in expected_allow if e.actual_action != "ALLOW")
+    false_negatives = sum(1 for e in expected_block if e.actual_action != "BLOCK")
+
+    return {
+        "total": float(total),
+        "pass_rate": sum(1 for e in evaluations if e.passed) / total,
+        "adversarial_block_rate": (blocked_expected_block / len(expected_block)) if expected_block else 0.0,
+        "benign_allow_rate": (allowed_expected_allow / len(expected_allow)) if expected_allow else 0.0,
+        "false_positive_rate": (false_positives / len(expected_allow)) if expected_allow else 0.0,
+        "false_negative_rate": (false_negatives / len(expected_block)) if expected_block else 0.0,
+    }
+
+
+def benchmark_report(
+    corpus_paths: list[str | Path] | None = None,
+) -> dict[str, Any]:
+    """Load one or more benchmark corpora and return a combined evaluation report."""
+    if corpus_paths is None:
+        corpus_paths = ["tests/benchmarks/mcp38_cases.yaml"]
+
+    corpora: list[dict[str, Any]] = []
+    cases: list[BenchmarkCase] = []
+    for path in corpus_paths:
+        corpus_cases = load_cases(path)
+        corpus_evaluations = evaluate_cases(corpus_cases)
+        corpora.append(
+            {
+                "path": str(path),
+                "cases": corpus_cases,
+                "evaluations": corpus_evaluations,
+                "summary": summarize_evaluations(corpus_evaluations),
+                "quality": summarize_benchmark_quality(corpus_evaluations),
+            }
+        )
+        cases.extend(corpus_cases)
+
+    evaluations = [evaluation for corpus in corpora for evaluation in corpus["evaluations"]]
+    return {
+        "cases": cases,
+        "evaluations": evaluations,
+        "summary": summarize_evaluations(evaluations),
+        "quality": summarize_benchmark_quality(evaluations),
+        "corpora": corpora,
+    }
+
+
+def threshold_sweep_report(
+    corpus_path: str | Path,
+    thresholds: list[tuple[float, float]] | None = None,
+) -> dict[str, Any]:
+    """Evaluate semantic-threshold cases across multiple warn/block pairs."""
+    if thresholds is None:
+        thresholds = [(0.40, 0.70), (0.50, 0.80), (0.60, 0.85)]
+
+    cases = load_cases(corpus_path)
+    corpus_summary: list[dict[str, Any]] = []
+    for warn_threshold, block_threshold in thresholds:
+        evaluations = []
+        for case in cases:
+            result = run_case(case)
+            evaluations.append(_evaluate_semantic_threshold_case(case, result, warn_threshold, block_threshold))
+        corpus_summary.append(
+            {
+                "warn_threshold": warn_threshold,
+                "block_threshold": block_threshold,
+                "summary": summarize_evaluations(evaluations),
+                "quality": summarize_benchmark_quality(evaluations),
+                "evaluations": evaluations,
+            }
+        )
+
+    return {
+        "corpus_path": str(corpus_path),
+        "cases": cases,
+        "thresholds": corpus_summary,
+    }
 
 
 async def _run_behavioral_request_sequence(case: BenchmarkCase):
@@ -258,6 +369,60 @@ async def _run_behavioral_response(case: BenchmarkCase):
         return await behavioral.inspect_response(session_id, response_body, server_id=server_id)
     finally:
         behavioral.clear_state(session_id)
+
+
+def _run_semantic_threshold(case: BenchmarkCase) -> InspectionResult:
+    input_payload = case.input
+    score = float(input_payload.get("score", 0.0))
+    reason = str(input_payload.get("reason", "synthetic semantic benchmark"))
+    threshold_warn = float(input_payload.get("threshold_warn", 0.5))
+    threshold_block = float(input_payload.get("threshold_block", 0.8))
+
+    if score >= threshold_block:
+        return InspectionResult(
+            allowed=False,
+            action="BLOCK",
+            layer_triggered=2,
+            rule_matches=[],
+            semantic_score=score,
+            block_reason=f"Semantic intent score {score:.2f} >= {threshold_block:.2f} - {reason}",
+        )
+    if score >= threshold_warn:
+        return InspectionResult(
+            allowed=True,
+            action="WARN",
+            layer_triggered=2,
+            rule_matches=[],
+            semantic_score=score,
+            block_reason=f"Semantic intent score {score:.2f} >= {threshold_warn:.2f} - {reason}",
+        )
+    return InspectionResult.allow()
+
+
+def _evaluate_semantic_threshold_case(
+    case: BenchmarkCase,
+    result: InspectionResult,
+    warn_threshold: float,
+    block_threshold: float,
+) -> BenchmarkEvaluation:
+    expected_action = case.expected_action
+    actual_action = result.action
+    actual_rule_id = result.rule_matches[0].rule_id if result.rule_matches else None
+    passed = actual_action == expected_action
+    details = None
+    if not passed:
+        details = f"expected action {expected_action}, got {actual_action}"
+    return BenchmarkEvaluation(
+        case_id=f"{case.case_id}@warn={warn_threshold:.2f}/block={block_threshold:.2f}",
+        mcp38_id=case.mcp38_id,
+        title=case.title,
+        expected_action=expected_action,
+        actual_action=actual_action,
+        passed=passed,
+        expected_rule_id=case.expected_rule_id,
+        actual_rule_id=actual_rule_id,
+        details=details,
+    )
 
 
 async def _run_behavioral_cross_server_sequence(case: BenchmarkCase):

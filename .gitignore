@@ -69,6 +69,7 @@ dist/
 pip-wheel-metadata/
 *.pyz
 sbom.json
+mcp_vanguard-*/
 
 RAILWAY_TEST_REPORT.*
 
@@ -90,3 +91,23 @@ scratch/
 
 # Internal release prep
 docs/RELEASE_READINESS_CHECKLIST.md
+
+# Local research scratch notes
+.local-docs/
+A2A_*.md
+docs/GPU_ATTESTATION_EVIDENCE.md
+docs/GPU_BENCHMARK_BOUNDARIES.md
+docs/GPU_BYPASS_REGRESSION_MAP.md
+docs/GPU_CHECKLIST_RECONCILIATION.md
+docs/GPU_L1_L2_BOUNDARY.md
+docs/GPU_L1_RULE_CANDIDATES.md
+docs/GPU_LAB_ARTIFACT_INDEX.md
+docs/GPU_LAB_EXTRACTION_MAP.md
+docs/GPU_LAB_LEDGERS.md
+docs/GPU_PHASE7_CLOSEOUT.md
+docs/GPU_PHASE7_DECISION_GUIDE.md
+docs/GPU_PHASE7_LIVE_EVIDENCE_MATRIX.md
+docs/GPU_PHASE7_MEASUREMENT.md
+docs/GPU_PHASE7_RESULTS_LOG.md
+docs/GPU_PHASE7_RUNBOOK.md
+docs/GPU_PROMPT_HARDENING_NOTES.md

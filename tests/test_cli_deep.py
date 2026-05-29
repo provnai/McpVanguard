@@ -109,7 +109,7 @@ def test_audit_compliance_accepts_current_readme_sections(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    with patch("core.proxy.VanguardProxy") as proxy_cls, patch("core.cli.RulesEngine") as engine_cls, patch("core.cli.ProxyConfig") as config_cls:
+    with patch("core.cli.VanguardProxy") as proxy_cls, patch("core.cli.RulesEngine") as engine_cls, patch("core.cli.ProxyConfig") as config_cls:
         proxy_cls.return_value._enrich_tool_list.return_value = [
             {"name": "test_tool", "readOnlyHint": True}
         ]
@@ -122,6 +122,24 @@ def test_audit_compliance_accepts_current_readme_sections(tmp_path, monkeypatch)
     assert "STATUS: READY FOR SUBMISSION" in result.stdout
     assert "README.md Quickstart" in result.stdout
     assert "README.md Authentication" in result.stdout
+
+
+def test_gpu_harden_reports_combined_corpora():
+    result = runner.invoke(app, ["gpu-harden"])
+
+    assert result.exit_code == 0
+    assert "GPU Hardening Smoke Test" in result.stdout
+    assert "Total cases:" in result.stdout
+    assert "Passed:" in result.stdout
+
+
+def test_gpu_thresholds_reports_sweep():
+    result = runner.invoke(app, ["gpu-thresholds"])
+
+    assert result.exit_code == 0
+    assert "GPU Semantic Threshold Sweep" in result.stdout
+    assert "adversarial_block_rate" in result.stdout
+    assert "benign_allow_rate" in result.stdout
 
 
 def _write_mock_probe_server(tmp_path):

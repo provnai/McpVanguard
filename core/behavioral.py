@@ -81,13 +81,15 @@ class _RedisWindow:
         self.key = key
 
     def record(self) -> None:
-        if not _redis_client: return
+        if not _redis_client:
+            return
         now = time.monotonic()
         _redis_client.zadd(self.key, {str(uuid.uuid4()): now})
         _redis_client.expire(self.key, 65)
 
     def count_in(self, window_secs: float) -> int:
-        if not _redis_client: return 0
+        if not _redis_client:
+            return 0
         now = time.monotonic()
         cutoff = now - window_secs
         _redis_client.zremrangebyscore(self.key, "-inf", cutoff - 0.1)
@@ -315,7 +317,8 @@ def _is_write_tool(tool_name: str) -> bool:
 
 async def inspect_request(session_id: str, message: dict, server_id: str = "default") -> Optional[InspectionResult]:
     """Async wrapper that delegates to _inspect_request_sync using ThreadPoolExecutor."""
-    if not ENABLED: return None
+    if not ENABLED:
+        return None
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_executor, _inspect_request_sync, session_id, message, server_id)
 
@@ -473,7 +476,8 @@ def entropy_risk_label(h: float) -> str:
 
 async def inspect_response(session_id: str, response_body: str, server_id: str = "default") -> Optional[InspectionResult]:
     """Async wrapper that delegates to _inspect_response_sync using ThreadPoolExecutor."""
-    if not ENABLED: return None
+    if not ENABLED:
+        return None
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_executor, _inspect_response_sync, session_id, response_body, server_id)
 

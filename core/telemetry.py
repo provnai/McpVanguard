@@ -9,7 +9,7 @@ import logging
 import statistics
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict
 
 logger = logging.getLogger("vanguard.telemetry")
 

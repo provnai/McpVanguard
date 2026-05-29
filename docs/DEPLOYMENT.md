@@ -1,9 +1,9 @@
-# McpVanguard — Deployment Guide
-**Current version**: `2.0.0`
+# McpVanguard - Deployment Guide
+**Current version**: `2.0.1`
 
 McpVanguard is a security gateway that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
-It adds three layers of protection — deterministic Safe Zones, semantic scoring, and behavioral analysis — without requiring any changes to your existing agent or server code.
+It adds three layers of protection - deterministic Safe Zones, semantic scoring, and behavioral analysis - without requiring any changes to your existing agent or server code.
 
 This guide covers how to deploy Vanguard in different environments.
 
@@ -15,10 +15,10 @@ Vanguard is transport-agnostic and supports two main deployment modes:
 2.  **Cloud SSE Mode**: For remote agents connecting over the internet (Railway/Docker).
 
 ### Interception Flow (Stdio):
-`Agent Process` ↔ (`stdio`) ↔ **`McpVanguard`** ↔ (`stdio`) ↔ `MCP Server Process`
+`Agent Process` <-> (`stdio`) <-> **`McpVanguard`** <-> (`stdio`) <-> `MCP Server Process`
 
 ### Interception Flow (SSE):
-`Remote Agent` ↔ (`HTTPS/SSE`) ↔ **`McpVanguard (SSE Bridge)`** ↔ (`stdio`) ↔ `MCP Server Process`
+`Remote Agent` <-> (`HTTPS/SSE`) <-> **`McpVanguard (SSE Bridge)`** <-> (`stdio`) <-> `MCP Server Process`
 
 Because Vanguard communicates via JSON-RPC 2.0 over `stdin`/`stdout`, your agent believes it is talking directly to the server.
 
@@ -44,6 +44,21 @@ Running local LLMs (like Ollama) for Vanguard's L2 Semantic Intelligence is grea
 
 Vanguard supports cloud LLM backends for remote, high-throughput semantic scoring. Provider priority: **Universal Custom > OpenAI > MiniMax > Ollama** (first available API key wins).
 
+For a local or offline setup, see [docs/LOCAL_SEMANTIC_MODE.md](LOCAL_SEMANTIC_MODE.md).
+
+### When To Use Local Semantic Mode
+
+Use local or offline semantic scoring when you care most about:
+
+- regulated or sensitive data paths
+- low-latency local development
+- air-gapped labs or isolated staging
+- keeping prompts and tool-call context off third-party APIs
+
+If your team cannot reliably operate the model runtime, a trusted hosted OpenAI-compatible backend is usually the better first step.
+
+For practical defaults and recommended operator profiles, see [docs/LOCAL_SEMANTIC_MODE.md](LOCAL_SEMANTIC_MODE.md).
+
 **Universal Custom Provider (e.g. DeepSeek, Groq):**
 ```bash
 export VANGUARD_SEMANTIC_ENABLED=true
@@ -68,6 +83,21 @@ export VANGUARD_MINIMAX_MODEL="MiniMax-M2.5"
 
 > MiniMax provides an OpenAI-compatible API. See [MiniMax API docs](https://platform.minimax.io/docs/api-reference/text-openai-api) for details.
 
+**Ollama Configuration:**
+```bash
+export VANGUARD_SEMANTIC_ENABLED=true
+export VANGUARD_OLLAMA_URL="http://localhost:11434"
+export VANGUARD_OLLAMA_MODEL="phi4-mini"
+```
+
+**Local OpenAI-Compatible Server (LM Studio, llama.cpp, etc.):**
+```bash
+export VANGUARD_SEMANTIC_ENABLED=true
+export VANGUARD_SEMANTIC_CUSTOM_URL="http://127.0.0.1:1234/v1"
+export VANGUARD_SEMANTIC_CUSTOM_MODEL="your-local-model"
+export VANGUARD_SEMANTIC_CUSTOM_KEY="local-placeholder"
+```
+
 ## 3. L3 Horizontal Scaling (Redis State Management)
 
 Vanguard's L3 Behavioral Engine tracks sliding windows of agent activity (e.g., detecting if an agent calls `read_file` 50 times in 10 seconds).
@@ -84,7 +114,7 @@ export VANGUARD_ENTROPY_HIGH="6.0"    # Triggers massive rate-limit penalty
 export VANGUARD_ENTROPY_BLOCK="7.5"   # Immediate block (likely encryption keys)
 ```
 
-*When the Redis URL is provided, Vanguard automatically switches to using sorted sets for cluster-wide behavioral tracking.*
+*When the Redis URL is provided, Vanguard uses Redis-backed behavioral state for shared tracking across instances. The exact storage strategy is implementation-specific and may evolve.*
 
 > [!IMPORTANT]
 > **PRODUCTION REQUIREMENT**: For horizontal scaling or persistent behavioral state across restarts, Redis is **required**. Without Redis, Vanguard uses in-memory state which is lost on restart and not shared across instances, potentially allowing multi-turn horizontal bypasses.
@@ -115,6 +145,13 @@ export VANGUARD_AUDIT_FORMAT="json" # Set to 'json' for SIEM ingest (Elastic, Sp
 ## Summary
 
 With these environment variables configured, Vanguard can intercept threats via static rules, semantically score complex payloads via OpenAI/MiniMax/Ollama, track behavior via Redis, and log all defense actions via VEX.
+
+### Operator Warnings For Semantic Mode
+
+- Local model quality can drift after backend or model upgrades.
+- Thresholds that look good on the benchmark corpora can still produce long-tail false positives in production.
+- Semantic scoring adds latency; keep timeout and fail-closed behavior aligned with your deployment goals.
+- If you change the backend or threshold profile, rerun the adversarial and false-positive corpora before promoting the change.
 
 ---
 

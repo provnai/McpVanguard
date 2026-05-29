@@ -1,0 +1,65 @@
+name: Phase 7 Measurement
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+jobs:
+  phase7:
+    name: Phase 7 Baseline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m pip install -e ".[dev]"
+
+      - name: Run lightweight benchmark baseline
+        run: |
+          python -m core.cli benchmark-run --json-output > phase7-benchmark-run.json
+          python -m core.cli gpu-harden --json-output > phase7-gpu-harden.json
+          python -m core.cli gpu-thresholds --json-output > phase7-gpu-thresholds.json
+
+      - name: Generate markdown summary
+        run: |
+          python scripts/phase7_report.py \
+            --benchmark-run phase7-benchmark-run.json \
+            --gpu-harden phase7-gpu-harden.json \
+            --gpu-thresholds phase7-gpu-thresholds.json \
+            --output phase7-summary.md
+
+      - name: Generate prefilled results log draft
+        run: |
+          python scripts/phase7_prepare_log.py \
+            --benchmark-run phase7-benchmark-run.json \
+            --gpu-harden phase7-gpu-harden.json \
+            --gpu-thresholds phase7-gpu-thresholds.json \
+            --date "$(date -u +%F)" \
+            --environment "GitHub Actions ubuntu-latest" \
+            --backend "workflow baseline" \
+            --profile "scheduled/manual baseline" \
+            --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --artifact-location "phase7-measurement-artifacts" \
+            --output phase7-results-log.draft.md
+
+      - name: Upload measurement artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-measurement-artifacts
+          path: |
+            phase7-benchmark-run.json
+            phase7-gpu-harden.json
+            phase7-gpu-thresholds.json
+            phase7-summary.md
+            phase7-results-log.draft.md
