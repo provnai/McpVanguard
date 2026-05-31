@@ -94,6 +94,7 @@ docs/RELEASE_READINESS_CHECKLIST.md
 
 # Local research scratch notes
 .local-docs/
+.private-docs/
 A2A_*.md
 docs/GPU_ATTESTATION_EVIDENCE.md
 docs/GPU_BENCHMARK_BOUNDARIES.md

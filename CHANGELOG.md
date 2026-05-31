@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Local/offline semantic mode guidance**: Added `docs/LOCAL_SEMANTIC_MODE.md` plus deployment-doc updates for Ollama, LM Studio, llama.cpp, and OpenAI-compatible local endpoints.
-- **GPU R&D hardening artifacts**: Added curated GPU-lab extraction, bypass mapping, prompt hardening, L1/L2 boundary, rule-candidate, benchmark-boundary, and adopt/defer/archive notes while keeping raw R&D claims out of the public release promise.
+- **GPU-derived benchmark hardening**: Added curated adversarial, benign false-positive, and semantic-threshold corpora while keeping raw R&D notes out of the public release promise.
 - **Hardening benchmark corpora**: Added paired adversarial and benign false-positive benchmark corpora, plus a synthetic semantic-threshold corpus.
 - **New benchmark commands**: Added `vanguard gpu-harden` and `vanguard gpu-thresholds` for repeatable hardening smoke tests and threshold-sensitivity checks.
 - **Phase 7 measurement tooling**: Added local measurement, mock L2, Redis code-path, live-evidence, closeout, status, markdown-report, and results-log draft scripts, plus a scheduled/manual `phase7-measurement` GitHub Actions workflow.
