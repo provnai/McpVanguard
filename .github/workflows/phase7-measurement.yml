@@ -54,7 +54,7 @@ jobs:
             --output phase7-results-log.draft.md
 
       - name: Upload measurement artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: phase7-measurement-artifacts
           path: |
