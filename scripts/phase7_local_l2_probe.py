@@ -175,9 +175,13 @@ def main() -> int:
     payload["note"] = "This is a mock local L2 probe, not a real backend measurement."
 
     if args.output_json:
-        Path(args.output_json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        output_json = Path(args.output_json)
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     if args.output_md:
-        Path(args.output_md).write_text(
+        output_md = Path(args.output_md)
+        output_md.parent.mkdir(parents=True, exist_ok=True)
+        output_md.write_text(
             "\n".join(
                 [
                     "# Local L2 Mock Probe",
