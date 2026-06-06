@@ -1,0 +1,97 @@
+# tests/benchmarks/layered_behavioral_sequences.yaml
+# Multi-turn behavioral sequence benchmark corpus
+# Purpose: Prove L3 behavioral tracking detects reconnaissance-exploitation chains.
+# Harness: behavioral_request_sequence
+
+- case_id: "BEH-SEQ-001"
+  mcp38_id: "MCP38-BEH-001"
+  title: "Write after sensitive read — credential theft pattern"
+  harness: "behavioral_request_sequence"
+  expected_action: "BLOCK"
+  expected_rule_id: "BEH-003"
+  source_artifact: "public_reconstruction"
+  input:
+    session_id: "beh-seq-001"
+    server_id: "srv-test"
+    steps:
+      - message:
+          method: "tools/call"
+          params:
+            name: "read_file"
+            arguments:
+              path: "/etc/shadow"
+        repeat: 1
+      - message:
+          method: "tools/call"
+          params:
+            name: "write_file"
+            arguments:
+              path: "/tmp/exfil.txt"
+              content: "stolen data"
+        repeat: 1
+
+- case_id: "BEH-SEQ-002"
+  mcp38_id: "MCP38-BEH-002"
+  title: "Read burst — rapid repeated sensitive read calls"
+  harness: "behavioral_request_sequence"
+  expected_action: "BLOCK"
+  expected_rule_id: "BEH-001"
+  source_artifact: "public_reconstruction"
+  input:
+    session_id: "beh-seq-002"
+    server_id: "srv-test"
+    steps:
+      - message:
+          method: "tools/call"
+          params:
+            name: "read_file"
+            arguments:
+              path: "/etc/passwd"
+        repeat: 51
+
+- case_id: "BEH-SEQ-003"
+  mcp38_id: "MCP38-BEH-003"
+  title: "Directory enumeration burst — reconnaissance pattern"
+  harness: "behavioral_request_sequence"
+  expected_action: "WARN"
+  expected_rule_id: "BEH-002"
+  source_artifact: "public_reconstruction"
+  input:
+    session_id: "beh-seq-003"
+    server_id: "srv-test"
+    steps:
+      - message:
+          method: "tools/call"
+          params:
+            name: "list_directory"
+            arguments:
+              path: "/"
+        repeat: 21
+      - message:
+          method: "tools/call"
+          params:
+            name: "list_directory"
+            arguments:
+              path: "/etc"
+        repeat: 1
+      - message:
+          method: "tools/call"
+          params:
+            name: "list_directory"
+            arguments:
+              path: "/root"
+        repeat: 1
+      - message:
+          method: "tools/call"
+          params:
+            name: "list_directory"
+            arguments:
+              path: "/home"
+        repeat: 1
+      - message:
+          method: "tools/call"
+          params:
+            name: "list_directory"
+            arguments:
+              path: "/var"
+        repeat: 1

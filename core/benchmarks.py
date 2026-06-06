@@ -343,6 +343,9 @@ async def _run_proxy_auth_policy(case: BenchmarkCase):
         config=config,
         principal=principal,
     )
+    # Keep this harness focused on auth policy; safe-zone behavior is covered
+    # separately by rules/jail benchmarks and can otherwise mask WARN cases.
+    proxy.rules_engine.safe_zones = []
     message = input_payload.get("message")
     if not isinstance(message, dict):
         raise ValueError(f"Proxy auth benchmark case {case.case_id} is missing a message mapping.")

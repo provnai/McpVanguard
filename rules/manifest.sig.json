@@ -2,6 +2,6 @@
   "version": 1,
   "algorithm": "ed25519",
   "key_id": "provnai-rules-2026q2",
-  "manifest_sha256": "4c413a87b12209b880cc8d98827639cdc7ae21d4ed538ed55edc45b6114fd303",
-  "signature": "byKuXbmbg0BYvUur9EGzfp10iBjJl8m0oY+yMzKvavRNa294R9ycqIzIGBgH5aaWeD/m0F5oW6I4MyJy7++YDA=="
+  "manifest_sha256": "389cb94a645f25656c6f48d64cf3bbafe269dc0ddc2f0fe795af6cee3526470a",
+  "signature": "L92Cjd3osvoYNpjcgYyQFlI3WCWVaN2P/wGvZgACllb7JaqXXexr+KbaosOh8Hd1QFXjcqOxMDMt6l17X6sSCQ=="
 }

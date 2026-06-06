@@ -164,6 +164,11 @@ def start(
         "--server", "-s",
         help='The MCP server command to wrap. e.g. "npx @modelcontextprotocol/server-filesystem ."',
     ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help="Named security profile: monitor | balanced | strict. Overrides VANGUARD_PROFILE.",
+    ),
     rules_dir: str = typer.Option(
         "rules",
         "--rules-dir", "-r",
@@ -217,6 +222,10 @@ def start(
         stream=sys.stderr,
     )
 
+    # Apply --profile before building ProxyConfig so env resolution works correctly.
+    if profile is not None:
+        os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
+
     # Load config from options + environment
     resolved_rules_dir = _resolve_option_or_env(rules_dir, "rules", "VANGUARD_RULES_DIR")
     config = ProxyConfig()
@@ -255,16 +264,21 @@ def start(
     # Load and display rules summary
     engine = RulesEngine(rules_dir=resolved_rules_dir)
 
+    from core.profiles import PROFILES
+    active_profile = config.profile
+    profile_color = {"monitor": "yellow", "balanced": "green", "strict": "red"}.get(active_profile, "green")
+
     proxy_console.print(Panel.fit(
         f"[bold green]McpVanguard v{__version__}[/bold green]\n"
         f"[dim]Real-time security layer for MCP agents[/dim]",
         border_style="green",
     ))
     proxy_console.print(f"[bold]Server:[/bold]    {server}")
+    proxy_console.print(f"[bold]Profile:[/bold]   [{profile_color}]{active_profile}[/{profile_color}]")
     proxy_console.print(f"[bold]Rules:[/bold]     {engine.rule_count} loaded from '{resolved_rules_dir}/'")
     proxy_console.print("[bold]Layer 1:[/bold]    [green]Enabled[/green] (Static rules)")
     
-    if behavioral:
+    if config.behavioral_enabled:
         proxy_console.print("[bold]Layer 3:[/bold]    [green]Enabled[/green] (Behavioral analysis)")
     else:
         proxy_console.print("[bold]Layer 3:[/bold]    [yellow]Disabled[/yellow] (Behavioral analysis)")
@@ -274,11 +288,17 @@ def start(
     else:
         proxy_console.print("[bold]Mgmt:[/bold]       [dim]Disabled[/dim] (Native Vanguard tools hidden)")
     
-    if semantic:
+    if config.semantic_enabled:
         status = "Ready" if semantic_ready else "Offline (Scoring will be skipped)"
         proxy_console.print(f"[bold]Layer 2:[/bold]    {status} — Ollama ({ollama_model})")
     else:
         proxy_console.print("[bold]Layer 2:[/bold]    [dim]Disabled[/dim] (Semantic scoring)")
+
+    if active_profile == "strict" and not config.redis_url:
+        proxy_console.print(
+            "[bold yellow]Warning:[/bold yellow] strict profile — "
+            "VANGUARD_REDIS_URL not set. Behavioral state is [bold]single-instance only[/bold]."
+        )
     
     proxy_console.print(f"[bold]Audit log:[/bold]  {log_file}\n")
     proxy_console.print("[dim]Press Ctrl+C to stop[/dim]\n")
@@ -314,6 +334,11 @@ def sse(
         "--port", "-p",
         help="Port to listen on. Defaults to $PORT or 8080.",
     ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help="Named security profile: monitor | balanced | strict. Overrides VANGUARD_PROFILE.",
+    ),
     rules_dir: str = typer.Option("rules", "--rules-dir", "-r"),
     log_file: str = typer.Option("audit.log", "--log-file", "-l"),
     semantic: Optional[bool] = typer.Option(None, "--semantic/--no-semantic"),
@@ -333,10 +358,15 @@ def sse(
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(message)s", stream=sys.stderr)
 
+    # Apply --profile before building ProxyConfig.
+    if profile is not None:
+        os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
+
     # Load config
     resolved_rules_dir = _resolve_option_or_env(rules_dir, "rules", "VANGUARD_RULES_DIR")
     config = ProxyConfig()
     config.rules_dir = resolved_rules_dir
+    config.receipt_transport = "sse"
     
     if os.getenv("VANGUARD_LOG_FILE") and log_file == "audit.log":
         pass 
@@ -967,10 +997,17 @@ def benchmark_run(
         "--json-output",
         help="Emit machine-readable JSON instead of rich text output.",
     ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help="Named security profile for benchmark evaluation: monitor | balanced | strict.",
+    ),
 ):
     """
     Execute the current MCP-38 benchmark corpus and report pass/fail status.
     """
+    if profile is not None:
+        os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
     try:
         cases = benchmarks.load_cases(benchmark_file)
         evaluations = benchmarks.evaluate_cases(cases)

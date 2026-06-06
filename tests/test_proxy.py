@@ -364,7 +364,10 @@ async def test_proxy_warns_on_destructive_tool_when_principal_has_auth_warnings(
         "params": {"name": "write_file", "arguments": {"path": "notes.txt", "content": "hi"}},
     }
 
-    result = await proxy._inspect_message(msg)
+    with patch.object(proxy.rules_engine, "check", return_value=InspectionResult.allow()), \
+         patch("core.behavioral.inspect_request", return_value=None), \
+         patch("core.semantic.score_intent", new_callable=AsyncMock, return_value=None):
+        result = await proxy._inspect_message(msg)
 
     assert result.allowed is True
     assert result.action == "WARN"

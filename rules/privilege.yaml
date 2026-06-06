@@ -45,6 +45,7 @@
   description: "Block /etc/hosts modification (DNS poisoning)"
   severity: HIGH
   action: BLOCK
+  match_tools: ["write_file", "edit_file", "update_file", "replace_file"]
   match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
   pattern: '/etc/hosts$'
   message: "Modification of /etc/hosts is not permitted."

@@ -31,6 +31,7 @@ class Telemetry:
     def _init_metrics(self):
         self.start_time = time.time()
         self.layers: Dict[str, LayerMetrics] = {
+            "L0": LayerMetrics(),
             "L1": LayerMetrics(),
             "L2": LayerMetrics(),
             "L3": LayerMetrics(),
@@ -41,6 +42,7 @@ class Telemetry:
             "blocked": 0,
             "warned": 0,
             "error_fail_closed": 0,
+            "l0_findings": 0,
         }
 
     def reset(self):
@@ -59,6 +61,11 @@ class Telemetry:
     def record_error(self, layer: str):
         if layer in self.layers:
             self.layers[layer].errors += 1
+
+    # L0 preflight specific counter
+    def record_l0_finding(self):
+        if "l0_findings" in self.counts:
+            self.counts["l0_findings"] += 1
 
     def get_stats(self) -> Dict:
         now = time.time()

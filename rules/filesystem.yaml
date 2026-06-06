@@ -2,12 +2,12 @@
 # Blocks access to sensitive system paths and directory traversal attacks.
 
 - id: "FS-001"
-  description: "Block access to /etc/ directory (Linux system config)"
+  description: "Block access to sensitive Linux account and privilege files"
   severity: CRITICAL
   action: BLOCK
   match_fields: ["params.arguments.path", "params.path", "params.arguments.source", "params.arguments.destination"]
-  pattern: '(^|[\\/])etc[\\/]'
-  message: "Access to /etc/ system directory is not permitted."
+  pattern: '(^|[\\/])etc[\\/](passwd|shadow|sudoers|gshadow|group|secrets?)([\\/]|$)'
+  message: "Access to sensitive Linux account or privilege files is not permitted."
 
 - id: "FS-001b"
   description: "Block null byte injection in paths"
@@ -86,6 +86,5 @@
   severity: HIGH
   action: BLOCK
   match_fields: ["params.arguments.path", "params.path", "params.arguments.destination"]
-  # Comprehensive list of confusable characters (Cyrillic, Greek, etc. that look like Latin)
-  pattern: '[\u0410-\u044F\u0510-\u0513\u0370-\u03FF\u1D00-\u1D7F\uFF21-\uFF5A\u2100-\u214F\u13A0-\u13FF]'
+  matcher: "mixed_script"
   message: "Visual spoofing/homograph characters detected in path."

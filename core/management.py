@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional
@@ -18,12 +19,93 @@ RUNTIME_RULE_APPLY_LIMIT = 5
 RUNTIME_RULE_APPLY_WINDOW_SECS = 60.0
 _RUNTIME_RULE_APPLY_WINDOWS: dict[str, deque[float]] = {}
 
+# ---------------------------------------------------------------------------
+# Management plane privilege separation
+# ---------------------------------------------------------------------------
+
+# Allowed values for VANGUARD_MANAGEMENT_PLANE_MODE
+#   disabled         - management tools hidden from agent (default)
+#   same_session_dev - dev/local only; tools shared with governed session
+#   operator_only    - mutating tools require admin scope in same session
+MANAGEMENT_PLANE_DISABLED = "disabled"
+MANAGEMENT_PLANE_DEV = "same_session_dev"
+MANAGEMENT_PLANE_OPERATOR = "operator_only"
+
+# Read-only management tools: safe for any authenticated principal.
+READ_ONLY_MANAGEMENT_TOOLS = {
+    "get_vanguard_status",
+    "get_vanguard_audit",
+    "vanguard_get_auth_stats",
+}
+
+# Mutating management tools: require admin scope in operator_only mode.
+MUTATING_MANAGEMENT_TOOLS = {
+    "vanguard_apply_rule",
+    "vanguard_reload_rules",
+    "vanguard_reset_session",
+    "vanguard_flush_auth_cache",
+    "vanguard_refresh_auth_cache",
+}
+
+# Admin scope/role identifiers (checked in principal.roles/attributes)
+ADMIN_SCOPES = {"scope:admin", "vanguard:admin", "vanguard:management", "admin"}
+ADMIN_ROLES = {"admin", "vanguard_admin", "operator"}
+
+
+def is_management_tool(name: str) -> bool:
+    """Return True if a tool name is one of Vanguard's native management tools."""
+    return name in READ_ONLY_MANAGEMENT_TOOLS or name in MUTATING_MANAGEMENT_TOOLS
+
 
 @dataclass
 class ManagementContext:
     session_id: Optional[str] = None
     log_file: str = "audit.log"
     rules_engine: Any = None
+    principal: Any = None  # AuthPrincipal | None; carries roles/scopes.
+    plane_mode: str = MANAGEMENT_PLANE_DEV  # default dev mode; proxy sets from env
+
+
+def _get_plane_mode() -> str:
+    """Read VANGUARD_MANAGEMENT_PLANE_MODE from env at call time."""
+    return os.getenv("VANGUARD_MANAGEMENT_PLANE_MODE", MANAGEMENT_PLANE_DISABLED)
+
+
+def _principal_has_admin(principal: Any) -> bool:
+    """Return True if the principal carries any recognised admin role or scope."""
+    if principal is None:
+        return False
+    roles = set(getattr(principal, "roles", []) or [])
+    attrs = getattr(principal, "attributes", {}) or {}
+    scopes: set[str] = set()
+    for key in ("scope", "token_scope"):
+        raw = attrs.get(key, "")
+        if isinstance(raw, str):
+            scopes.update(raw.split())
+        elif isinstance(raw, (list, tuple, set)):
+            scopes.update(str(item) for item in raw)
+    return bool(roles & ADMIN_ROLES) or bool(scopes & ADMIN_SCOPES)
+
+
+def _audit_management_denied(name: str, context: "ManagementContext", reason: str) -> None:
+    """Record a denied management attempt in telemetry and optionally RiskEngine."""
+    import logging
+    log = logging.getLogger("vanguard.management")
+    log.warning(
+        "Management op DENIED | tool=%s session=%s reason=%s",
+        name, context.session_id, reason,
+    )
+    # Forward to risk engine if available
+    try:
+        from core.risk import RiskEngine
+        RiskEngine.get_instance().record_event(
+            session_id=context.session_id or "unknown",
+            event_type="management_denied",
+            severity="HIGH",
+            metadata={"tool": name, "reason": reason},
+        )
+    except Exception:
+        pass  # risk engine may not be initialised; non-fatal
 
 
 def get_vanguard_tools() -> List[Dict[str, Any]]:
@@ -169,7 +251,6 @@ def _consume_runtime_rule_budget(context: ManagementContext) -> bool:
     window.append(now)
     return True
 
-
 async def handle_vanguard_tool(
     name: str,
     arguments: Dict[str, Any],
@@ -177,6 +258,26 @@ async def handle_vanguard_tool(
 ) -> Dict[str, Any]:
     """Execute a Vanguard native tool and return a JSON-RPC-style tool result."""
     context = context or ManagementContext()
+
+    # Management plane gate.
+    plane_mode = _get_plane_mode()
+
+    if plane_mode == MANAGEMENT_PLANE_DISABLED:
+        reason = "Management plane is disabled (VANGUARD_MANAGEMENT_PLANE_MODE=disabled)."
+        _audit_management_denied(name, context, reason)
+        return _result_text(reason, is_error=True)
+
+    if plane_mode == MANAGEMENT_PLANE_OPERATOR and name in MUTATING_MANAGEMENT_TOOLS:
+        if not _principal_has_admin(context.principal):
+            reason = f"Mutating management op '{name}' requires admin scope; principal lacks required role."
+            _audit_management_denied(name, context, reason)
+            return _result_text(reason, is_error=True)
+
+    # Rate-limit mutating ops per session.
+    if name in MUTATING_MANAGEMENT_TOOLS and not _consume_runtime_rule_budget(context):
+        reason = "Management op rate limit exceeded."
+        _audit_management_denied(name, context, reason)
+        return _result_text("Runtime management rate limit exceeded. Try again later.", is_error=True)
 
     if name == "get_vanguard_status":
         stats = telemetry.metrics.get_stats()
@@ -228,8 +329,6 @@ async def handle_vanguard_tool(
             )
         if context.rules_engine is None:
             return _result_text("Active rules engine unavailable for runtime patching.", is_error=True)
-        if not _consume_runtime_rule_budget(context):
-            return _result_text("Runtime rule apply limit exceeded. Try again later.", is_error=True)
 
         try:
             added_ids = context.rules_engine.add_runtime_rules(rule_yaml, source_file="runtime")

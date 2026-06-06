@@ -1,14 +1,21 @@
 # McpVanguard - Deployment Guide
-**Current version**: `2.0.1`
+**Release target**: `2.1.0` layered enforcement release candidate.
+
+After the GitHub release and PyPI publication are complete, this document applies to the published `2.1.0` line.
 
 McpVanguard is a security gateway that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
-It adds three layers of protection - deterministic Safe Zones, semantic scoring, and behavioral analysis - without requiring any changes to your existing agent or server code.
+It adds a layered enforcement path - L0 preflight normalization, L1 deterministic Safe Zones and rules, L1.5 camouflage detection, L2 semantic scoring (advisor), and L3 behavioral analysis - without requiring any changes to your existing agent or server code.
+
+**Product profiles** control how aggressively each layer enforces:
+- `monitor` — audit-only discovery; logs violations but forwards traffic
+- `balanced` — default OSS behavior; blocks high-confidence threats, warns on ambiguity
+- `strict` — production hardening; enables all layers, fail-closed semantic, blocks enumeration
 
 This guide covers how to deploy Vanguard in different environments.
 
 ### 0. Define Your Safe Zones (L1 Perimeter)
-Before deploying, define exact directory bounds for your MCP tools in `rules/safe_zones.yaml`. Vanguard uses OS-level kernel checks to guarantee agents cannot break out of these prefix paths.
+Before deploying, define exact directory bounds for your MCP tools in `rules/safe_zones.yaml`. Vanguard applies deterministic path-boundary checks before upstream execution; it should be paired with normal OS, container, or cloud isolation for production workloads. See [SAFE_ZONES.md](SAFE_ZONES.md) for tuning guidance.
 
 Vanguard is transport-agnostic and supports two main deployment modes:
 1.  **Local Stdio Mode**: For CLI-based agents running on the same machine.
@@ -22,21 +29,47 @@ Vanguard is transport-agnostic and supports two main deployment modes:
 
 Because Vanguard communicates via JSON-RPC 2.0 over `stdin`/`stdout`, your agent believes it is talking directly to the server.
 
-### 1. Local Stdio Mode
+### 1. Profile-Aware Deployment
+
+Choose a profile before starting. The profile determines default enforcement behavior, semantic enablement, and behavioral settings.
+
+```bash
+# Monitor mode — audit only, good for initial evaluation
+vanguard start --profile monitor --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
+
+# Balanced mode — default OSS behavior (recommended for developers)
+vanguard start --profile balanced --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
+
+# Strict mode — full hardening (recommended for production-sensitive systems)
+vanguard start --profile strict --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
+```
+
+Environment variables override profile defaults:
+```bash
+VANGUARD_PROFILE=strict VANGUARD_SEMANTIC_ENABLED=false vanguard start ...
+```
+This runs strict profile but disables semantic scoring (useful if no backend is available).
+
+### 2. Local Stdio Mode
 
 To wrap a local MCP server, use the `start` command:
 
 ```bash
-vanguard start --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
+vanguard start --profile balanced --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
 ```
 
-### 2. Cloud SSE Mode (Gateway)
+### 3. Cloud SSE Mode (Gateway)
 
 To expose Vanguard as an internet-reachable security gateway (e.g., on Railway), use the `sse` command:
 
 ```bash
-vanguard sse --server "npx -y @modelcontextprotocol/server-filesystem /var/data" --port 8080
+vanguard sse --profile balanced --server "npx -y @modelcontextprotocol/server-filesystem /var/data" --port 8080
 ```
+
+**Staged rollout recommendation:**
+1. **Week 1-2:** Deploy `monitor` profile. Review audit logs to understand your traffic patterns.
+2. **Week 3-4:** Switch to `balanced` profile. Fix any false positives that block benign developer workflows.
+3. **Month 2+:** For sensitive production agents, switch to `strict` profile. Ensure Redis is configured for multi-instance behavioral state.
 
 ## 2. L2 Semantic Scalability (Cloud LLM Integration)
 
@@ -142,9 +175,23 @@ export VANGUARD_LOG_FILE="/var/log/vanguard/audit.log"
 export VANGUARD_AUDIT_FORMAT="json" # Set to 'json' for SIEM ingest (Elastic, Splunk)
 ```
 
+### Runtime Receipts For mcp-receipt
+
+McpVanguard can optionally emit a dedicated `receipt_v1` JSONL stream for the standalone `mcp-receipt` verifier. This is separate from the human/SIEM audit log and is disabled by default.
+
+```bash
+export VANGUARD_RECEIPTS_ENABLED=true
+export VANGUARD_RECEIPT_LOG_FILE="/var/log/vanguard/receipts.jsonl"
+export VANGUARD_RECEIPT_REDACTION_MODE="partial"
+```
+
+The receipt stream contains canonical request hashes, normalized-message hashes, policy decisions, profile metadata, rule findings, and runtime context. It does not write raw tool arguments into the receipt event. Use `mcp-receipt` to export, sign, and verify these events offline.
+
 ## Summary
 
-With these environment variables configured, Vanguard can intercept threats via static rules, semantically score complex payloads via OpenAI/MiniMax/Ollama, track behavior via Redis, and log all defense actions via VEX.
+With these environment variables configured, Vanguard can intercept threats via static rules, semantically score complex payloads via OpenAI/MiniMax/Ollama, track behavior via Redis, and log defense actions for operational review.
+
+Before promoting a profile change, run the packaged benchmark corpora and interpret the results using [BENCHMARKS.md](BENCHMARKS.md).
 
 ### Operator Warnings For Semantic Mode
 

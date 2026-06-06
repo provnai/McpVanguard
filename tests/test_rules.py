@@ -45,6 +45,28 @@ class TestFilesystemRules:
         result = engine.check(msg)
         assert not result.allowed
 
+    def test_allows_non_sensitive_etc_path(self, engine):
+        msg = make_tool_call("read_file", path="/etc/hosts")
+        result = engine.check(msg)
+        assert result.allowed
+
+    def test_blocks_etc_hosts_modification(self, engine):
+        msg = make_tool_call("write_file", path="/etc/hosts", content="127.0.0.1 attacker")
+        result = engine.check(msg)
+        assert not result.allowed
+        assert result.rule_matches[0].rule_id == "PRIV-006"
+
+    def test_blocks_mixed_script_homograph_path(self, engine):
+        msg = make_tool_call("read_file", path="/tmp/p\u0430sswd")
+        result = engine.check(msg)
+        assert not result.allowed
+        assert result.rule_matches[0].rule_id == "FS-009"
+
+    def test_allows_single_script_cyrillic_path(self, engine):
+        msg = make_tool_call("read_file", path="/tmp/\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442.txt")
+        result = engine.check(msg)
+        assert result.allowed
+
     def test_blocks_ssh_key(self, engine):
         msg = make_tool_call("read_file", path="/home/user/.ssh/id_rsa")
         result = engine.check(msg)
@@ -208,6 +230,16 @@ class TestInspectionResultShape:
         result = engine.check(msg)
         assert result.allowed
         assert len(result.rule_matches) == 0
+
+    def test_allow_notification_with_null_params(self, engine):
+        result = engine.check(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": None,
+            }
+        )
+        assert result.allowed
 
     def test_block_has_block_reason(self, engine):
         msg = make_tool_call("shell", command="rm -rf /")

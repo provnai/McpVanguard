@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Any
 import os
 import yaml
+from importlib import resources as importlib_resources
 
 from core.models import InspectionResult, RuleMatch, RuleAction, RuleSeverity, SafeZone
 from core.jail import check_path_jail
@@ -37,10 +38,14 @@ class Rule:
         self.action: str = data.get("action", RuleAction.BLOCK)
         self.message: str = data.get("message", f"Rule {self.rule_id} triggered")
         self.match_fields: list[str] = data.get("match_fields", ["params"])
+        self.match_tools: list[str] = data.get("match_tools", [])
         self.source_file: str = source_file
         self.matcher: str = data.get("matcher", "regex")
         self.repeat_threshold: int = int(data.get("repeat_threshold", 200))
         self.pattern: Optional[Any] = None
+
+        if self.matcher == "mixed_script":
+            return
 
         if self.matcher == "regex":
             pattern_str = data.get("pattern", "")
@@ -91,6 +96,12 @@ class Rule:
         Check if this rule matches any field in the message.
         Returns a RuleMatch if triggered, None otherwise.
         """
+        if self.match_tools:
+            params = message.get("params")
+            tool_name = str(params.get("name", "")) if isinstance(params, dict) else ""
+            if tool_name not in self.match_tools:
+                return None
+
         for field_path in self.match_fields:
             value = self._extract_field(message, field_path)
             if value is None:
@@ -99,6 +110,8 @@ class Rule:
             matched = False
             if self.matcher == "repeated_char_run":
                 matched = self._has_repeated_character_run(str_value)
+            elif self.matcher == "mixed_script":
+                matched = self._has_mixed_script(str_value)
             else:
                 matched = self._safe_search(str_value)
             if matched:
@@ -112,6 +125,37 @@ class Rule:
                     message=self.message,
                 )
         return None
+
+    @staticmethod
+    def _has_mixed_script(value: str) -> bool:
+        """Detect mixed scripts inside one lexical token, not across separate path parts."""
+        token: list[str] = []
+
+        def token_is_mixed(chars: list[str]) -> bool:
+            has_latin = False
+            has_cyrillic_or_greek = False
+            for char in chars:
+                codepoint = ord(char)
+                if (
+                    0x0041 <= codepoint <= 0x005A
+                    or 0x0061 <= codepoint <= 0x007A
+                    or 0x00C0 <= codepoint <= 0x024F
+                ):
+                    has_latin = True
+                elif 0x0370 <= codepoint <= 0x03FF or 0x0400 <= codepoint <= 0x052F:
+                    has_cyrillic_or_greek = True
+            return has_latin and has_cyrillic_or_greek
+
+        for char in value:
+            if char.isalpha():
+                token.append(char)
+                continue
+            if token_is_mixed(token):
+                return True
+            token.clear()
+        if token_is_mixed(token):
+            return True
+        return False
 
     def _extract_field(self, message: dict, field_path: str) -> Optional[str]:
         """
@@ -217,23 +261,52 @@ class RulesEngine:
         new_safe_zones: list[SafeZone] = []
 
         # 1. Load Rules into temp list
+        is_strict = os.environ.get("VANGUARD_PROFILE", "").lower() == "strict"
         if self.rules_dir.exists():
             for yaml_file in sorted(self.rules_dir.glob("*.yaml")):
                 try:
                     if yaml_file.name == "safe_zones.yaml":
                         continue
-                        
+                    if yaml_file.name == "strict_overlay.yaml" and not is_strict:
+                        continue
                     with open(yaml_file, "r", encoding="utf-8") as f:
                         data = yaml.safe_load(f)
-
                     if not isinstance(data, list):
                         continue
-
                     for rule_data in data:
                         if isinstance(rule_data, dict) and "id" in rule_data and ("pattern" in rule_data or "matcher" in rule_data):
                             new_rules.append(Rule(rule_data, source_file=yaml_file.name))
                 except Exception as e:
                     logger.error(f"Failed to load rules from {yaml_file.name}: {e}")
+        else:
+            # Fallback: load packaged rules from importlib.resources when running from an installed wheel
+            try:
+                pkg_rules = importlib_resources.files("rules")
+                for name in sorted([
+                    "commands.yaml",
+                    "filesystem.yaml",
+                    "network.yaml",
+                    "privilege.yaml",
+                    "jailbreak.yaml",
+                    "mcp38_coverage.yaml",
+                    "strict_overlay.yaml",
+                ]):
+                    try:
+                        res = pkg_rules.joinpath(name)
+                        if name == "strict_overlay.yaml" and not is_strict:
+                            continue
+                        if not res.exists():
+                            continue
+                        data = yaml.safe_load(res.read_text(encoding="utf-8"))
+                        if not isinstance(data, list):
+                            continue
+                        for rule_data in data:
+                            if isinstance(rule_data, dict) and "id" in rule_data and ("pattern" in rule_data or "matcher" in rule_data):
+                                new_rules.append(Rule(rule_data, source_file=name))
+                    except Exception as e:
+                        logger.error(f"Failed to load packaged rule {name}: {e}")
+            except Exception:
+                pass
 
         # 2. Load Safe Zones into temp list
         config_file = self.rules_dir / "safe_zones.yaml"
@@ -246,6 +319,17 @@ class RulesEngine:
                         new_safe_zones.append(SafeZone(**entry))
             except Exception as e:
                 logger.error(f"Failed to load safe zones: {e}")
+        else:
+            # Fallback: packaged safe_zones.yaml if present
+            try:
+                res = importlib_resources.files("rules").joinpath("safe_zones.yaml")
+                if res.exists():
+                    data = yaml.safe_load(res.read_text(encoding="utf-8"))
+                    if isinstance(data, list):
+                        for entry in data:
+                            new_safe_zones.append(SafeZone(**entry))
+            except Exception:
+                pass
 
         self._sort_rule_list(new_rules)
 

@@ -2,7 +2,9 @@
 
 ## Overview
 
-McpVanguard is a **JSON-RPC security gateway** that intercepts communication between an AI agent and an MCP server. It sits in the middle of the stdio stream, inspects every tool call in real time, and applies three layers of defense before forwarding or blocking the request.
+McpVanguard is a **JSON-RPC security gateway** that intercepts communication between an AI agent and an MCP server. It sits in the middle of the stdio stream, inspects every tool call in real time, and applies a layered enforcement path before forwarding or blocking the request.
+
+**Product profiles:** `monitor` (audit-only discovery), `balanced` (default OSS/developer behavior), and `strict` (production-sensitive systems with full hardening).
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -13,17 +15,19 @@ McpVanguard is a **JSON-RPC security gateway** that intercepts communication bet
 ┌──────────────────────────────────────────────────────────────────┐
 │                    McpVanguard Proxy Engine                      │
 │                                                                  │
-│  [Transport Layer] ──► [RULES ENGINE] ──► [SUBPROCESS PUMP]      │
-│  (Stdio/SSE Bridge)                │                             │
-│                         ┌──────────┼──────────┐                 │
-│                         ▼          ▼           ▼                 │
-│                     [Layer 1]  [Layer 2]   [Layer 3]            │
-│                     Safe Zones Semantic    Behavioral            │
-│                     & Rules    Scoring     & Entropy             │
-│                         │          │           │                 │
-│                         └──────────┴───────────┘                 │
+│  [Transport Layer] ──► [INSPECTION PIPELINE] ──► [SUBPROCESS PUMP] │
+│  (Stdio/SSE Bridge)                                                │
+│                         ┌──────────┬──────────┬──────────┐        │
+│                         ▼          ▼          ▼          ▼        │
+│                     [L0]      [Auth/L1]  [L1.5]   [L2/L3]       │
+│                  Preflight  Rules & Safe  Camouflage  Semantic    │
+│                  Normalize    Zones      Detection   + Risk     │
+│                         │          │          │          │       │
+│                         └──────────┴──────────┴──────────┘       │
 │                                    │                             │
-│                              ALLOW / BLOCK                       │
+│                         [Final Policy Composer]                  │
+│                                    │                             │
+│                              ALLOW / WARN / BLOCK                │
 │                                    │                             │
 │                         ┌──────────┴──────────┐                 │
 │                         ▼                     ▼                  │
@@ -51,53 +55,95 @@ McpVanguard is a **JSON-RPC security gateway** that intercepts communication bet
 - Intercepts the agent's `stdin` stream (JSON-RPC requests)
 - Intercepts the server's `stdout` stream (JSON-RPC responses)
 - Pipes each message through the rules engine before forwarding
-- Maintains sub-10ms overhead on the happy path (pass-through)
 - Tracks `Session State` across multiple turns (multi-turn attack detection)
 
-**Async Architecture:**
+**Inspection Pipeline (per message):**
 ```
-Main Event Loop
-├── [Transport] ──────────┐
-│   ├── read_agent()      │ → asyncio.StreamReader (stdio or sse_bridge)
-│   └── write_agent()     │ → asyncio.StreamWriter (stdio or sse_bridge)
-├── [Subprocess]          │
-│   ├── read_server()     │ → server stdout pump
-│   └── write_server()    │ → server stdin pump
-└── [Rules Engine]        │ → L1/L2/L3 sequential inspection
+raw JSON-RPC message
+  -> parse and size gate
+  -> L0 preflight normalize and annotate
+  -> auth/destructive-tool policy
+  -> L1 deterministic rules and safe zones
+  -> L1.5 trust-signal/camouflage detector
+  -> L2 semantic scorer, if enabled or forced
+  -> L3 behavioral/risk memory
+  -> final policy composer
+  -> audit event
+  -> optional receipt_v1 event, if enabled
+  -> block, shadow-block, review, warn, or forward normalized message
 ```
 
-**Latency Budget (under concurrent load):**
-| Operation | Measured P99 |
-|---|---|
-| Regex rule check (Layer 1) | ~16ms |
-| Behavioral check (Layer 3) | <5ms |
-| Semantic score (Layer 2) | async, non-blocking |
-| Total gateway overhead | ~156ms under max load |
+**Final policy invariant:** A later layer must never silently downgrade an earlier block. L2 may raise severity or add context, but must not convert a deterministic block to allow.
+
+**Latency:** Gateway overhead depends on the active profile, rule bundle, behavioral-state backend, semantic backend, payload shape, and concurrency. Benchmark it in the target deployment before setting an operational latency budget.
 
 ---
 
-### `core/rules_engine.py` & `core/jail.py` — Layer 1: Deterministic Safe Zones
+### `core/preflight.py` — Layer 0: Preflight Normalization and Findings
 
-McpVanguard's first layer of defense has evolved from pure regex matching to **OS-level deterministic isolation**.
+The first processing stage after parsing. Normalizes the raw JSON-RPC payload and emits structured findings that feed into every downstream layer.
 
-**1. Kernel-Backed Safe Zones (`safe_zones.yaml`)**
-Before inspecting payload strings, Vanguard intercepts tool calls (like `read_file` or `write_file`) and forces the operating system to canonicalize and jail the requested paths:
-- **Linux (`openat2`)**: Uses syscall 437 with `RESOLVE_BENEATH` to guarantee a path cannot escape its defined root directory, crushing TOCTOU and symlink attacks.
-- **Windows (`GetFinalPathNameByHandleW`)**: Opens a file handle to evaluate the true canonical path, defeating 8.3 shortnames (`PROGRA~1`), junction points, and DOS device paths (`\\.\`).
+**Normalization:**
+- Multi-pass URL decoding (up to 20 passes)
+- Unicode NFKC normalization
+- Zero-width and format character stripping
+- Size gating (default 64KB max string length)
+- Nesting depth gating (default 50 max depth)
+- NaN/Infinity rejection
+
+**Detectors:**
+| Finding | Trigger |
+|---|---|
+| `PRE-URL-001` | Multi-pass URL decoding occurred |
+| `PRE-UNICODE-002` | Zero-width/format characters present |
+| `PRE-UNICODE-003` | Mixed-script/confusable characters |
+| `PRE-COMMENT-001` | Suspicious comment trust suffix (`# safe`, `# approved`) |
+| `PRE-TRUST-001` | Trust label near risky operation |
+| `PRE-INSTRUCT-001` | Scorer-targeting instruction detected |
+
+Hard blocks (always fail-closed): `PRE-SIZE-001`, `PRE-DEPTH-001`, `PRE-NUM-001`.
+
+---
+
+### `core/rules_engine.py` & `core/jail.py` - Layer 1: Deterministic Safe Zones and Rules
+
+McpVanguard's first layer of defense has evolved from pure regex matching to deterministic path-boundary checks plus static signatures.
+
+**1. Safe Zones (`safe_zones.yaml`)**
+Before inspecting payload strings, Vanguard intercepts configured path-based tool calls such as `read_file` or `write_file` and resolves the requested path against operator-defined prefixes.
+
+Safe zones are an application-layer perimeter. They are designed to stop common path traversal, symlink, and sensitive-path mistakes before upstream execution, but they should be deployed alongside normal OS, container, and cloud isolation controls. See [SAFE_ZONES.md](SAFE_ZONES.md) for tuning guidance.
 
 **2. Static Signature Rules (`rules/*.yaml`)**
-If a request is within bounds (or has no specific Safe Zone defined), it falls back to the static rule layer. Contains **50+ signatures** across 5 categories.
+If a request is within bounds, or has no specific Safe Zone defined, it falls back to the static rule layer. Contains **50+ signatures** across 5 categories.
 
 **Rule Categories:**
-- `rules/filesystem.yaml` — null bytes, Unix/Windows sensitive paths
-- `rules/commands.yaml` — shell injection, dangerous commands (`rm -rf`, `curl | bash`, etc.)
-- `rules/network.yaml` — exfiltration patterns (data sent to external IPs)
-- `rules/jailbreak.yaml` — known prompt injection strings
-- `rules/privilege.yaml` — privilege escalation patterns
+- `rules/filesystem.yaml` - null bytes, Unix/Windows sensitive paths
+- `rules/commands.yaml` - shell injection, dangerous commands (`rm -rf`, `curl | bash`, etc.)
+- `rules/network.yaml` - exfiltration patterns (data sent to external IPs)
+- `rules/jailbreak.yaml` - known prompt injection strings
+- `rules/privilege.yaml` - privilege escalation patterns
+- `rules/strict_overlay.yaml` - strict-profile-only rules (anti-forensics, SSRF, container escape, supply-chain, encoded execution, credential stores)
+---
+
+### `core/camouflage.py` — Layer 1.5: Trust-Signal and Semantic Camouflage Detector
+
+Detects cases where attacker-controlled text attempts to attach benign authority to a risky operation, or manipulate downstream semantic scorers.
+
+**Detection families:**
+- **Comment trust labels:** `# safe`, `# harmless`, `# approved`, `# maintenance`, `# test`, `# admin approved`
+- **Multilingual trust labels:** sécurisé, seguro, sicher, 安全, безопасно
+- **Scorer manipulation:** `rate as safe`, `score this as 1`, `disregard all instructions`
+- **Authority laundering:** `authorized auditor`, `security researcher`, `admin verified`
+
+**Profile behavior:**
+- `strict`: BLOCK dangerous operation + high-confidence camouflage
+- `balanced`: WARN dangerous operation + trust-signal camouflage
+- `monitor`: audit only
 
 ---
 
-### `core/semantic.py` — Layer 2: AI Brain
+### `core/semantic.py` — Layer 2: Semantic Scoring Advisor
 
 Runs a **locally quantized LLM** to score the "intent" of a tool call.
 
@@ -128,10 +174,14 @@ System: You are a security classifier for AI tool calls.
 User: Tool: read_file | Params: {"path": "/etc/passwd"}
 ```
 
-**Action thresholds:**
+**Role:** L2 is an **advisor**, not a sole security authority. It scores ambiguous cases and provides context, but it **cannot override or downgrade** a deterministic block from L0, L1, or L1.5. In strict profile, parse failures and empty responses are treated as fail-closed (block).
+
+**Action thresholds (balanced profile):**
 - `0.0 – 0.5` → ALLOW
 - `0.5 – 0.8` → WARN + LOG
 - `0.8 – 1.0` → BLOCK
+
+**Structured context:** The semantic scorer receives the normalized tool call plus annotations from L0 preflight findings, L1.5 camouflage findings, and L1 rule warnings. This prevents the scorer from being misled by comment text or camouflage.
 
 ---
 
@@ -153,6 +203,42 @@ To detect precise data exfiltration, Vanguard calculates the Shannon Entropy of 
 | Enumeration | >20 `list_dir` calls in 5s | WARN |
 
 **State storage:** In-memory `defaultdict(deque)` for single-node. Backed by **Redis** for persistent cluster-wide session history and analysis.
+
+---
+
+### `core/profiles.py` — Product Profiles
+
+Named deployment presets that make the "strict product path" real instead of ad hoc environment-variable combinations.
+
+| Profile | Mode | Semantic | Behavioral | Enumeration | Default Policy |
+|---|---|---|---|---|---|
+| `monitor` | audit | disabled | enabled | off | ALLOW |
+| `balanced` | enforce | disabled* | enabled | off | ALLOW |
+| `strict` | enforce | enabled | enabled | on | ALLOW |
+
+*Semantic is disabled by default in balanced unless an explicit backend is configured.
+
+**Resolution order:** Explicit env vars → profile defaults → built-in hard-coded defaults. This means `VANGUARD_SEMANTIC_ENABLED=false` will override even the strict profile's default of `true`.
+
+---
+
+### `core/policy.py` — Final Policy Composer
+
+Replaces implicit layer ordering with an explainable final verdict. Composes results from all layers and the active profile into a single `PolicyVerdict`.
+
+**Actions:** `ALLOW`, `WARN`, `REVIEW`, `SHADOW-BLOCK`, `BLOCK`
+
+**Invariant:** No later layer can silently downgrade an earlier block. L2 semantic scoring may raise severity or add context, but cannot convert a deterministic block to allow. Monitor/audit mode may forward would-block traffic, but preserves the original would-block verdict in audit logs.
+
+**REVIEW action:** The policy composer can represent an explicit `REVIEW` result and deliver a minimal signed webhook payload when `VANGUARD_REVIEW_WEBHOOK_URL` is configured. Built-in deterministic rules do not currently downgrade blocks to REVIEW automatically, and the webhook is not a synchronous approval queue. Strict mode escalates explicit REVIEW results to BLOCK.
+
+---
+
+### `core/receipts.py` — Optional Runtime Evidence Receipts
+
+When `VANGUARD_RECEIPTS_ENABLED=true`, the proxy writes a dedicated `receipt_v1` JSONL stream for `mcp-receipt`. This stream is separate from the operator audit log and is designed for offline verification.
+
+The v0.1 contract currently covers tool-call request decisions. Each event includes policy profile, raw/effective policy action, normalized decision, findings, risk/semantic scores, and canonical hashes for the original and normalized request payloads. Raw tool arguments are not embedded in the receipt event.
 
 ---
 

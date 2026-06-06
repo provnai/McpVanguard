@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-05 (Layered Enforcement Release)
+
+### Security
+
+- **Layer 0 Preflight** (`core/preflight.py`): Added explicit preflight normalization layer with structured findings (URL decoding, NFKC, zero-width stripping, mixed-script detection, oversize/depth/NaN gating, comment trust suffix detection, authority laundering, scorer-targeting instructions). Preflight findings feed into audit, telemetry, risk engine, and semantic context.
+- **Layer 1.5 Camouflage Detector** (`core/camouflage.py`): Added trust-signal and semantic camouflage detection for shell/SQL/Python/config comment trust labels, multilingual trust labels, scorer manipulation, and authority laundering. Camouflage findings are wired into risk engine and semantic prompt context.
+- **Layer 7 Final Policy Composition** (`core/policy.py`): Added explicit policy composer with `PolicyVerdict`, `PolicyAction` (ALLOW/WARN/REVIEW/SHADOW-BLOCK/BLOCK), and `compose_verdict` function. Enforces the invariant that no later layer downgrades an earlier deterministic block. Added minimal `REVIEW` webhook payload path.
+- **Product Profiles** (`core/profiles.py`): Added named deployment profiles (`monitor`, `balanced`, `strict`) with immutable defaults. Profile resolution respects explicit environment variable overrides. Strict profile enables semantic by default, blocks enumeration, forces fail-closed semantic behavior, and warns when Redis is absent.
+- **Strict Overlay Rules** (`rules/strict_overlay.yaml`): Added strict-only deterministic rules for anti-forensics, procfs exposure, SSRF (localhost + RFC1918), container escape (Docker + Kubernetes), resource exhaustion, supply-chain/package hooks, encoded execution (base64, hex, octal, ROT13), and expanded credential stores (cloud CLI configs, browser stores, keychains).
+- **Management Plane Privilege Separation** (`core/management.py`): Added `VANGUARD_MANAGEMENT_PLANE_MODE` (`disabled` / `same_session_dev` / `operator_only`). Mutating management operations require admin scope. All management attempts are auditable and recorded in RiskEngine.
+- **L2 Semantic Advisor Hardening** (`core/semantic.py`): Semantic scoring now receives structured context from L0 preflight, L1.5 camouflage, and L1 rule findings. Added provider metadata to results. Parse failures and empty content are treated as fail-closed in strict profile. Added tests proving L2 cannot downgrade deterministic blocks.
+- **L3 Behavioral/Risk Productization** (`core/behavioral.py`, `core/risk.py`): Strict profile enables behavioral by default. Added Redis startup warnings. Added risk events for L0 and L1.5 findings, and repeated deterministic blocks. Multi-turn behavioral sequences tested.
+- **Runtime Receipt Emission** (`core/receipts.py`): Added opt-in `receipt_v1` JSONL emission for `mcp-receipt`. Receipt events are disabled by default, separate from audit logs, and include canonical request/normalized-message hashes, profile context, policy decisions, and findings without embedding raw tool arguments.
+
+### Added
+
+- **Profile-aware CLI**: `--profile` flag on `vanguard start`, `vanguard sse`, and `vanguard benchmark-run`.
+- **Benchmark profile support**: Benchmark runner evaluates cases with the selected profile, loading strict overlay rules when `VANGUARD_PROFILE=strict`.
+- **Layered benchmark corpora**: Added `layered_strict_adversarial_cases.yaml`, `layered_balanced_benign_cases.yaml`, `layered_behavioral_sequences.yaml`, and `layered_profile_matrix.yaml`.
+- **Packaged rules fallback**: `RulesEngine` loads rules from `importlib.resources` when `rules/` directory is not present on disk, enabling correct benchmark execution from installed wheels.
+- **L0 telemetry**: Added `l0_findings` counter to telemetry metrics.
+- **Safe-zone operator guide**: Added explicit documentation for tuning `rules/safe_zones.yaml` so filesystem perimeter blocks are intentional rather than surprising.
+- **Benchmark interpretation guide**: Added public guidance explaining what the benchmark suites do and do not prove, including why curated pass rates are not universal security claims.
+
+### Changed
+
+- **Inspection pipeline order**: Formalized layer order: L0 Preflight → Auth Policy → L1 Rules → L1.5 Camouflage → L2 Semantic → L3 Behavioral → Final Policy Composer → Audit.
+- **RulesEngine reload**: Now supports atomic reload from both filesystem and packaged resources.
+- **Profile-specific rule isolation**: Proxy construction now reloads the singleton rules engine through the constructor path so strict-only overlays cannot leak into later balanced/monitor proxies in the same Python process.
+- **Benchmark harness isolation**: Auth-policy benchmark cases now clear safe zones inside the auth harness so jail policy cannot mask WARN/BLOCK auth expectations.
+
+### Packaging and Release Gates
+
+- Release gate targets: wheel build, sdist build, `twine check`, clean-venv smoke install, and CLI entrypoint validation.
+- Verified layered benchmark corpora load correctly outside repo cwd during local development.
+- Strict layered benchmark suite: 35/35 cases pass locally when `VANGUARD_PROFILE=strict`.
+- GPU hardening suite remains covered by the existing benchmark corpus.
+- Full local verification before release cut: Linux/WSL `445 passed`; Windows `443 passed, 2 documented platform skips`.
+- GitHub CI, CodeQL, dependency audit, SBOM, Railway deployment, and PyPI Trusted Publishing remain external release gates after push.
+
 ## [2.0.1] - 2026-05-29 (Post-Release Hardening Patch)
 
 ### Security and Correctness
@@ -215,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-03-15 (Titan-Grade L1 Perimeter)
 
 ### Security (TitanGate Alignment)
-- **Kernel-Level Jailing (Linux )** (`core/jail.py`): Replaced fragile string-matching with deterministic path resolution using the `openat2` syscall (`RESOLVE_BENEATH`). It is now mathematically impossible for an agent to use symlinks or `../` to escape a designated Safe Zone.
+- **Linux path-boundary hardening** (`core/jail.py`): Replaced fragile string matching with deterministic path resolution using `openat2` (`RESOLVE_BENEATH`) where available. This materially strengthens Safe Zone enforcement against symlink and `../` escape attempts, while still relying on normal OS/container isolation for complete sandboxing.
 - **Handle-Based Canonicalization (Windows)** (`core/jail.py`): Defeated 8.3 shortname bypasses (`PROGRA~1`) and junction point tricks utilizing `GetFinalPathNameByHandleW`. Explicitly blocks extended paths (`\\?\`) and DOS device namespaces (`\\.\`).
 - **Risk-Weighted Entropy Throttling** (`core/behavioral.py`): The rate-limiter now acts as a Shannon Entropy ($H(X)$) scouter. It samples payload data to instantly detect cryptographic keys, binary data, or encrypted exfiltration attempts.
   - Payloads with $H > 7.5$ trigger an immediate `BEH-006` block.

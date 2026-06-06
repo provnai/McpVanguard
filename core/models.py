@@ -95,6 +95,8 @@ class InspectionResult(BaseModel):
     """Result of running a message through all inspection layers."""
     allowed: bool
     action: str  # ALLOW | BLOCK | WARN
+    raw_policy_action: Optional[str] = None
+    effective_policy_action: Optional[str] = None
     layer_triggered: Optional[int] = None  # 1, 2, or 3
     rule_matches: list[RuleMatch] = Field(default_factory=list)
     semantic_score: Optional[float] = None
@@ -141,6 +143,7 @@ class AuditEvent(BaseModel):
     principal_id: Optional[str] = None
     auth_type: Optional[str] = None
     server_id: Optional[str] = None  # Phase 6: upstream server identity
+    profile: Optional[str] = None   # Active named profile (monitor|balanced|strict).
     direction: str  # "agent→server" | "server→agent"
     method: Optional[str] = None
     tool_name: Optional[str] = None
@@ -163,6 +166,7 @@ class AuditEvent(BaseModel):
         tag = f"[{self.action}]"
         principal = f" [{self.principal_id}]" if self.principal_id else ""
         srv = f" [srv:{self.server_id}]" if self.server_id else ""
+        prof = f" [prof:{self.profile}]" if self.profile else ""
         risk = ""
         if self.risk_score is not None:
             enforcement = self.risk_enforcement or "UNKNOWN"
@@ -170,7 +174,7 @@ class AuditEvent(BaseModel):
         tool = f" [{self.tool_name}]" if self.tool_name else ""
         reason = f" — {self.blocked_reason}" if self.blocked_reason else ""
         layer = f" (Layer {self.layer_triggered})" if self.layer_triggered else ""
-        return f"[{ts}] {tag:<9} {layer:<10} | {self.session_id[:8]} | {self.direction}{principal}{srv}{risk}{tool}{reason}"
+        return f"[{ts}] {tag:<9} {layer:<10} | {self.session_id[:8]} | {self.direction}{principal}{srv}{prof}{risk}{tool}{reason}"
 
 
 # ---------------------------------------------------------------------------

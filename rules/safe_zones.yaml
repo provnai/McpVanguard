@@ -4,19 +4,19 @@
 
 - tool: "read_file"
   allowed_prefixes:
-    - "/home/project"
-    - "C:\\Users\\quint\\Desktop\\provnai"
+    - "/workspace"
+    - "C:\\mcp-workspace"
   max_entropy: 7.0
   recursive: true
 
 - tool: "write_file"
   allowed_prefixes:
-    - "/home/project/output"
-    - "C:\\Users\\quint\\Desktop\\provnai\\output"
+    - "/workspace/output"
+    - "C:\\mcp-workspace\\output"
   recursive: true
 
 - tool: "list_directory"
   allowed_prefixes:
-    - "/home/project"
-    - "C:\\Users\\quint\\Desktop\\provnai"
+    - "/workspace"
+    - "C:\\mcp-workspace"
   recursive: false

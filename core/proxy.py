@@ -38,8 +38,10 @@ from core.models import (
     InspectionResult,
     RuleMatch,
     make_block_response,
+    RuleAction,
 )
 from core.rules_engine import RulesEngine
+from core import camouflage
 from core.session import SessionManager, SessionState
 from core import semantic, behavioral, telemetry
 from core.vex_client import submit_blocked_call
@@ -51,7 +53,9 @@ from core import session_isolation
 from core import provenance
 from core import supplier_signatures
 from core import sigstore_bundle
+from core import receipts
 from core.risk import RiskEngine, EnforcementLevel
+from core.policy import compose_verdict, maybe_deliver_review, PolicyAction
 
 from core.auth import TOOL_SCOPE_MAPPING
 
@@ -63,9 +67,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class ProxyConfig:
-    """Runtime configuration for the proxy, loaded from env vars."""
+    """Runtime configuration for the proxy, loaded from env vars.
+
+    Env-var resolution order (highest priority first):
+      1. Explicit env var set by the operator.
+      2. Profile default (from VANGUARD_PROFILE).
+      3. Built-in default coded in this __init__.
+
+    Named profiles: monitor | balanced | strict
+    Set via VANGUARD_PROFILE or --profile CLI flag.
+    """
 
     def __init__(self):
+        # ---- Core ----
         self.log_level: str = os.getenv("VANGUARD_LOG_LEVEL", "INFO")
         self.log_file: str = os.getenv("VANGUARD_LOG_FILE", "audit.log")
         self.rules_dir: str = os.getenv("VANGUARD_RULES_DIR", "rules")
@@ -81,9 +95,14 @@ class ProxyConfig:
         # Off by default in production to avoid leaking rule internals.
         self.expose_block_reason: bool = os.getenv("VANGUARD_EXPOSE_BLOCK_REASON", "false").lower() == "true"
         # Maximum string length allowed in incoming tool calls (prevents memory exhaustion)
-        self.max_string_len: int = int(os.getenv("VANGUARD_MAX_STRING_LEN", "65536")) # 64KB default
+        self.max_string_len: int = int(os.getenv("VANGUARD_MAX_STRING_LEN", "65536"))  # 64 KB default
         # Audit format: "text" (human-readable) or "json" (SIEM ingest)
         self.audit_format: str = os.getenv("VANGUARD_AUDIT_FORMAT", "text").lower()
+        # Runtime receipt_v1 JSONL emission for mcp-receipt. Disabled by default.
+        self.receipts_enabled: bool = os.getenv("VANGUARD_RECEIPTS_ENABLED", "false").lower() == "true"
+        self.receipt_log_file: str = os.getenv("VANGUARD_RECEIPT_LOG_FILE", "receipts.jsonl")
+        self.receipt_transport: str = os.getenv("VANGUARD_RECEIPT_TRANSPORT", "stdio").lower()
+        self.receipt_redaction_mode: str = os.getenv("VANGUARD_RECEIPT_REDACTION_MODE", "partial").lower()
         self.metadata_inspection_enabled: bool = os.getenv("VANGUARD_METADATA_INSPECTION_ENABLED", "true").lower() == "true"
         self.metadata_policy: str = os.getenv("VANGUARD_METADATA_POLICY", "block").lower()
         self.server_manifest_file: str = os.getenv("VANGUARD_SERVER_MANIFEST_FILE", "")
@@ -192,6 +211,52 @@ class ProxyConfig:
             value.strip() for value in os.getenv("VANGUARD_REQUIRED_DESTRUCTIVE_SCOPES", "").split(",") if value.strip()
         ]
 
+        # ---- Profile-aware fields (defaults here; profile may override) ----
+        # Fail-closed for L2 semantic scoring (strict: always true).
+        self.semantic_fail_closed: bool = os.getenv("VANGUARD_SEMANTIC_FAIL_CLOSED", "false").lower() == "true"
+        # Default policy when no layer fires (ALLOW is safe-for-OSS; strict keeps ALLOW unless operator opts in to DENY).
+        self.default_policy: str = os.getenv("VANGUARD_DEFAULT_POLICY", "ALLOW").upper()
+        # Block directory enumeration tool calls in strict mode.
+        self.block_enumeration: bool = os.getenv("VANGUARD_BLOCK_ENUMERATION", "false").lower() == "true"
+        # Redis URL used by L3 behavioral state and risk engine.
+        self.redis_url: str = os.getenv("VANGUARD_REDIS_URL", "")
+        # Management plane mode: disabled | same_session_dev | operator_only.
+        self.management_plane_mode: str = os.getenv("VANGUARD_MANAGEMENT_PLANE_MODE", "disabled").lower()
+
+        # ---- Profile resolution (lowest priority; explicit env wins) ----
+        # Read the profile name from VANGUARD_PROFILE (may be overridden by --profile CLI flag later).
+        self.profile: str = os.getenv("VANGUARD_PROFILE", "balanced").strip().lower()
+        self._apply_profile_defaults()
+
+
+    def _apply_profile_defaults(self) -> None:
+        """Apply profile defaults for any ProxyConfig field not already set by an explicit env var.
+
+        This method is called once at the end of __init__ after all env-var
+        reads.  It overwrites only the attributes whose corresponding env var
+        was absent (empty string counts as absent for boolean/numeric fields).
+
+        Invariant: if VANGUARD_PROFILE is itself not set, the built-in
+        "balanced" profile defaults are used, which match the original
+        hard-coded env-var defaults so existing behavior is unchanged.
+        """
+        try:
+            from core.profiles import resolve_profile
+            overrides = resolve_profile(self.profile, dict(os.environ))
+        except ValueError as exc:
+            logger.warning("[Vanguard] Invalid VANGUARD_PROFILE — falling back to 'balanced'. Reason: %s", exc)
+            self.profile = "balanced"
+            from core.profiles import resolve_profile
+            overrides = resolve_profile("balanced", dict(os.environ))
+
+        for attr, value in overrides.items():
+            if hasattr(self, attr):
+                setattr(self, attr, value)
+
+        # Sync threshold aliases: profile may have set warn_threshold / block_threshold
+        # via semantic_threshold_warn / semantic_threshold_block env-var absence path.
+        # No additional action needed — resolve_profile already maps to proxy attr names.
+
 
 # ---------------------------------------------------------------------------
 # Audit Logger
@@ -254,7 +319,10 @@ class VanguardProxy:
         # Phase 6: derive a stable identity for the upstream server
         self._server_id: str = server_id or session_isolation.derive_server_id(server_command)
         self.session_manager = SessionManager()
-        self.rules_engine = RulesEngine.get_instance()
+        # Constructor calls force a reload, which prevents profile-specific
+        # rule bundles (for example strict_overlay.yaml) from leaking across
+        # same-process profile switches in tests, benchmarks, and embedded use.
+        self.rules_engine = RulesEngine(rules_dir=self.config.rules_dir)
         self.risk_engine = RiskEngine.get_instance()
         self.audit = setup_audit_logger(self.config.log_file)
         self._server_process: Optional[asyncio.subprocess.Process] = None
@@ -294,12 +362,13 @@ class VanguardProxy:
             return {}
 
     def _build_audit_event(self, **kwargs) -> AuditEvent:
-        """Build a normalized audit event with principal/server/risk context."""
+        """Build a normalized audit event with principal/server/risk/profile context."""
         event_kwargs: dict[str, Any] = {
             "session_id": self._session.session_id if self._session else "N/A",
             "principal_id": self.principal.principal_id if self.principal else None,
             "auth_type": self.principal.auth_type if self.principal else None,
             "server_id": self._server_id,
+            "profile": self.config.profile,
         }
         event_kwargs.update(self._current_risk_context())
         event_kwargs.update(kwargs)
@@ -309,6 +378,45 @@ class VanguardProxy:
         event = self._build_audit_event(**kwargs)
         self.audit.info(event.to_log_line(format=self.config.audit_format))
 
+    def _emit_tool_call_receipt(
+        self,
+        *,
+        method: str,
+        tool_name: str | None,
+        raw_message: dict[str, Any],
+        normalized_message: dict[str, Any] | None,
+        result: InspectionResult,
+    ) -> None:
+        """Emit one receipt_v1 JSONL event for a tool-call decision if enabled."""
+        if not self.config.receipts_enabled or method != "tools/call" or not tool_name:
+            return
+
+        try:
+            risk_context = self._current_risk_context()
+            event = receipts.build_tool_call_receipt_event(
+                timestamp=None,
+                session_id=self._session.session_id if self._session else None,
+                server_id=self._server_id,
+                principal_ref=self.principal.principal_id if self.principal else None,
+                policy_profile=self.config.profile,
+                rules_dir=self.config.rules_dir,
+                jsonrpc_method=method,
+                transport=self.config.receipt_transport,
+                direction="agent_to_server",
+                tool_name=tool_name,
+                raw_policy_action=result.raw_policy_action or result.action,
+                effective_policy_action=result.effective_policy_action or result.action,
+                rule_matches=result.rule_matches,
+                semantic_score=result.semantic_score,
+                risk_score=risk_context.get("risk_score"),
+                request_message=raw_message,
+                normalized_message=normalized_message,
+                redaction_mode=self.config.receipt_redaction_mode,
+            )
+            receipts.append_receipt_event(self.config.receipt_log_file, event)
+        except Exception as exc:
+            logger.debug("[Vanguard] Failed to emit receipt_v1 event: %s", exc)
+
     # -----------------------------------------------------------------------
     # Main entry point
     # -----------------------------------------------------------------------
@@ -317,6 +425,15 @@ class VanguardProxy:
         """Start the proxy."""
         self._session = self.session_manager.create(principal=self.principal, server_id=self._server_id)
         logger.info(f"[Vanguard] Session {self._session.session_id} started (server={self._server_id})")
+
+        # Emit profile startup summary and strict Redis warning.
+        from core.profiles import profile_startup_summary, warn_strict_redis_if_needed, resolve_profile
+        try:
+            _applied = resolve_profile(self.config.profile, {})
+        except ValueError:
+            _applied = {}
+        logger.info(profile_startup_summary(self.config.profile, _applied))
+        warn_strict_redis_if_needed(self.config.profile, self.config.redis_url or None)
 
         self._check_server_integrity_baseline()
         self._load_capability_manifest_baseline()
@@ -988,7 +1105,7 @@ class VanguardProxy:
                         continue
 
             # 1. Handle native Vanguard tools
-            if method == "tools/call" and tool_name and tool_name.startswith("vanguard_"):
+            if method == "tools/call" and tool_name and management.is_management_tool(tool_name):
                 self._stats["total"] += 1
                 if self._session:
                     self._session.record_call(
@@ -1051,6 +1168,8 @@ class VanguardProxy:
                         session_id=self._session.session_id if self._session else None,
                         log_file=self.config.log_file,
                         rules_engine=self.rules_engine,
+                        principal=self.principal,
+                        plane_mode=self.config.management_plane_mode,
                     ),
                 )
                 response = {
@@ -1067,24 +1186,54 @@ class VanguardProxy:
             elif method == "initialize" and request_id:
                 self._pending_initializations.add(request_id)
 
-            # Normalize the message before inspection to prevent encoding bypasses
+            # L0 Preflight: Normalize and detect anomalies
+            from core.preflight import run_preflight
             try:
-                normalized_message = self._normalize_message(raw_message)
+                preflight_result = run_preflight(
+                    raw_message,
+                    self.config.max_string_len,
+                    self._is_destructive_tool_name,
+                )
+                normalized_message = preflight_result.normalized_message
             except ValueError as e:
-                # MED-2 Fix: Reject oversized messages instead of truncating and allowing bypass
-                logger.warning(f"[Vanguard] REJECTED: Message contains oversized field: {e}")
+                # MED-2 Fix: Reject oversized messages or deep nesting
+                logger.warning(f"[Vanguard] REJECTED: Preflight hard failure: {e}")
+                rule_id = "VANGUARD-DEPTH-001" if "depth" in str(e).lower() else "VANGUARD-SIZE-001"
+                if "nan" in str(e).lower() or "infinity" in str(e).lower():
+                    rule_id = "VANGUARD-NUM-001"
+
                 block_response = make_block_response(
                     request_id=request_id,
-                    reason=f"Security Policy: Message contains a field exceeding the {self.config.max_string_len} byte limit.",
-                    rule_id="VANGUARD-SIZE-001",
+                    reason=f"Security Policy: {e}",
+                    rule_id=rule_id,
                 )
                 await self._write_to_agent(json.dumps(block_response))
                 continue
 
+            # Log L0 findings and feed into risk engine
+            for finding in preflight_result.findings:
+                logger.warning(f"[Vanguard] PREFLIGHT FINDING: {finding.rule_id} - {finding.message}")
+                telemetry.metrics.record_l0_finding()
+                self._log_audit_event(
+                    direction="agent→server",
+                    method=method,
+                    tool_name=tool_name,
+                    action=finding.action,
+                    rule_id=finding.rule_id,
+                    blocked_reason=finding.message,
+                )
+                if self._session and finding.severity in ("HIGH", "CRITICAL"):
+                    self.risk_engine.record_event(
+                        self._session.session_id,
+                        self._server_id,
+                        "PREFLIGHT_HIGH_RISK",
+                        {"rule": finding.rule_id, "evidence": finding.evidence},
+                    )
+
             # Inspect the message (with 5s Fail-Closed timeout)
             try:
                 result = await asyncio.wait_for(
-                    self._inspect_message(normalized_message), timeout=5.0
+                    self._inspect_message(normalized_message, preflight_result=preflight_result), timeout=5.0
                 )
             except asyncio.TimeoutError:
                 logger.error(f"[Vanguard] Inspection TIMEOUT (Fail-Closed) for {method}")
@@ -1151,6 +1300,13 @@ class VanguardProxy:
                 semantic_score=result.semantic_score,
                 latency_ms=round(latency_ms, 2),
                 blocked_reason=result.block_reason,
+            )
+            self._emit_tool_call_receipt(
+                method=method,
+                tool_name=tool_name,
+                raw_message=raw_message,
+                normalized_message=normalized_message,
+                result=result,
             )
 
             is_audit = (self.config.mode == "audit")
@@ -1383,6 +1539,14 @@ class VanguardProxy:
             
         return all_tools
 
+    def _is_destructive(self, message: dict) -> bool:
+        """Determine if a tool call is potentially destructive based on its name."""
+        if message.get("method") != "tools/call":
+            return False
+        tool_name = message.get("params", {}).get("name", "")
+        WRITE_PREFIXES = ("delete_", "remove_", "update_", "set_", "write_", "enforce_", "block_", "reset_", "clear_", "apply_", "push_", "exec_", "shell_")
+        return any(tool_name.startswith(p) for p in WRITE_PREFIXES)
+
     def _metadata_policy_action(self, result: Optional[InspectionResult]) -> Optional[str]:
         if not result or result.allowed:
             return None
@@ -1411,60 +1575,274 @@ class VanguardProxy:
     # Inspection pipeline
     # -----------------------------------------------------------------------
 
-    async def _inspect_message(self, message: dict) -> InspectionResult:
+    async def _inspect_message(
+        self,
+        message: dict,
+        preflight_result: Optional[Any] = None,
+    ) -> InspectionResult:
+        # 0. Auth Policy
         auth_result = self._inspect_auth_policy(message)
-        if auth_result:
-            return auth_result
 
+        # 1. Preflight (L0)
+        if preflight_result is None:
+            from core.preflight import run_preflight
+            try:
+                preflight_result = run_preflight(
+                    message,
+                    self.config.max_string_len,
+                    self._is_destructive_tool_name,
+                )
+            except ValueError as e:
+                rule_id = "VANGUARD-DEPTH-001" if "depth" in str(e).lower() else "VANGUARD-SIZE-001"
+                if "nan" in str(e).lower() or "infinity" in str(e).lower():
+                    rule_id = "VANGUARD-NUM-001"
+                preflight_inspection = InspectionResult(
+                    allowed=False,
+                    action="BLOCK",
+                    layer_triggered=0,
+                    rule_matches=[
+                        RuleMatch(
+                            rule_id=rule_id,
+                            rule_name="Preflight failure",
+                            severity="CRITICAL",
+                            action="BLOCK",
+                            message=str(e),
+                        )
+                    ],
+                    block_reason=f"Security Policy: {e}",
+                )
+                preflight_result = None
+            else:
+                preflight_inspection = self._map_preflight_findings(preflight_result.findings)
+        else:
+            preflight_inspection = self._map_preflight_findings(preflight_result.findings)
+
+        # 2. L1 Rules
         t_start = time.monotonic()
-        result = self.rules_engine.check(message)
+        l1_result = self.rules_engine.check(message)
         telemetry.metrics.record_latency("L1", (time.monotonic() - t_start) * 1000)
 
-        if not result.allowed:
-            return result
+        # 3. L1.5 Camouflage
+        camo_findings = camouflage.detect_camouflage(message, is_destructive=self._is_destructive(message))
+        camo_result = self._map_camo_findings(camo_findings)
 
-        # Parallel L2/L3 execution to minimize latency
-        beh_task = None
-        if self.config.behavioral_enabled and self._session:
-            beh_task = asyncio.create_task(behavioral.inspect_request(
-                self._session.session_id, message, self._server_id
-            ))
+        # Wire camouflage findings into RiskEngine.
+        if camo_findings and self._session:
+            has_camo_block = any(f.action == RuleAction.BLOCK for f in camo_findings)
+            event_type = "CAMOUFLAGE_BLOCK" if has_camo_block else "CAMOUFLAGE_WARN"
+            self.risk_engine.record_event(
+                self._session.session_id,
+                self._server_id,
+                event_type,
+                {"rules": [f.rule_id for f in camo_findings]},
+            )
 
-        sem_task = None
+        # 4. Early-exit if deterministic layers already block (skip concurrent L2/L3)
+        early_verdict = compose_verdict(
+            profile=self.config.profile,
+            mode=self.config.mode,
+            auth_result=auth_result,
+            preflight_result=preflight_inspection,
+            l1_result=l1_result,
+            camo_result=camo_result,
+        )
+
+        l2_result = None
+        l3_result = None
         semantic_enabled = self.config.semantic_enabled or self._semantic_forced
-        if semantic_enabled:
-            from dataclasses import replace
-            settings = semantic._get_settings()
-            settings = replace(settings, enabled=semantic_enabled)
-            sem_task = asyncio.create_task(semantic.score_intent(message, settings=settings))
 
-        if beh_task:
-            t_start_l3 = time.monotonic()
-            beh_result = await beh_task
-            telemetry.metrics.record_latency("L3", (time.monotonic() - t_start_l3) * 1000)
-            if beh_result:
-                if not beh_result.allowed:
-                    if sem_task and not sem_task.done():
-                        sem_task.cancel()
-                        await asyncio.gather(sem_task, return_exceptions=True)
-                    return beh_result
-                if beh_result.action == "WARN":
-                    result.action = "WARN"
-                    result.rule_matches.extend(beh_result.rule_matches)
+        if early_verdict.action == PolicyAction.BLOCK:
+            # Deterministic layers already decided — skip L2/L3 entirely
+            pass
+        else:
+            # 5. Launch L2 (semantic) and L3 (behavioral) concurrently.
+            # When L3 finishes with a BLOCK verdict, the semantic task is cancelled
+            # immediately to avoid wasted API cost / latency.
+            from dataclasses import replace as dc_replace
 
-        if sem_task:
-            t_start_l2 = time.monotonic()
-            sem_result = await sem_task
-            telemetry.metrics.record_latency("L2", (time.monotonic() - t_start_l2) * 1000)
-            if sem_result:
-                if not sem_result.allowed:
-                    return sem_result
-                result.semantic_score = sem_result.semantic_score
-                if sem_result.action == "WARN":
-                    result.action = "WARN"
-                    result.rule_matches.extend(sem_result.rule_matches)
+            # Build semantic coroutine (may be skipped if disabled)
+            sem_task = None
+            if semantic_enabled:
+                settings = semantic._get_settings()
+                settings = dc_replace(
+                    settings,
+                    enabled=semantic_enabled,
+                    fail_closed=self.config.semantic_fail_closed,
+                    threshold_warn=self.config.warn_threshold,
+                    threshold_block=self.config.block_threshold,
+                )
+                preflight_list = preflight_result.findings if preflight_result else None
+                l1_rule_ids = [m.rule_id for m in l1_result.rule_matches] if l1_result else None
 
-        return result
+                sem_coro = semantic.score_intent(
+                    message,
+                    settings=settings,
+                    camouflage_findings=camo_findings,
+                    preflight_findings=preflight_list,
+                    l1_rule_ids=l1_rule_ids,
+                    profile=self.config.profile,
+                )
+                sem_task = asyncio.create_task(sem_coro)
+
+            # Build behavioral coroutine (may be skipped if disabled or no session)
+            beh_task = None
+            if self.config.behavioral_enabled and self._session:
+                beh_task = asyncio.create_task(
+                    behavioral.inspect_request(
+                        self._session.session_id, message, self._server_id
+                    )
+                )
+
+            # Await L3 first; if it blocks, cancel L2 to save cost
+            if beh_task is not None:
+                t_start_l3 = time.monotonic()
+                l3_result = await beh_task
+                telemetry.metrics.record_latency("L3", (time.monotonic() - t_start_l3) * 1000)
+
+                if l3_result is not None and not l3_result.allowed and sem_task is not None:
+                    sem_task.cancel()
+                    try:
+                        await sem_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    sem_task = None
+
+            # Await L2 (semantic) if not already cancelled
+            if sem_task is not None:
+                t_start_l2 = time.monotonic()
+                try:
+                    l2_result = await sem_task
+                except asyncio.CancelledError:
+                    l2_result = None
+                telemetry.metrics.record_latency("L2", (time.monotonic() - t_start_l2) * 1000)
+
+        # 6. Final unified Policy Composition
+        final_verdict = compose_verdict(
+            profile=self.config.profile,
+            mode=self.config.mode,
+            auth_result=auth_result,
+            preflight_result=preflight_inspection,
+            l1_result=l1_result,
+            camo_result=camo_result,
+            l2_result=l2_result,
+            l3_result=l3_result,
+        )
+
+        # Deliver REVIEW webhook if verdict is REVIEW
+        is_strict = self.config.profile == "strict"
+        maybe_deliver_review(
+            final_verdict,
+            message,
+            session_id=self._session.session_id if self._session else "unknown",
+            server_id=self._server_id,
+            principal_id=self.principal.principal_id if self.principal else None,
+            profile=self.config.profile,
+            strict_mode=is_strict,
+        )
+
+        # 7. Map final PolicyVerdict back to a standard InspectionResult
+        allowed = final_verdict.effective_action in (
+            PolicyAction.ALLOW,
+            PolicyAction.WARN,
+            PolicyAction.SHADOW_BLOCK,
+            PolicyAction.REVIEW,
+        )
+
+        all_matches = []
+        for res in final_verdict.findings:
+            if res and hasattr(res, "rule_matches"):
+                all_matches.extend(res.rule_matches)
+
+        layer_map = {"AUTH": 0, "L0": 0, "L1": 1, "L1.5": 1, "L3": 3, "L2": 2}
+        layer_triggered = layer_map.get(final_verdict.primary_layer, 1)
+
+        return InspectionResult(
+            allowed=allowed,
+            action=final_verdict.effective_action.value,
+            raw_policy_action=final_verdict.action.value,
+            effective_policy_action=final_verdict.effective_action.value,
+            layer_triggered=layer_triggered,
+            rule_matches=all_matches,
+            semantic_score=final_verdict.semantic_score,
+            block_reason=final_verdict.reason,
+        )
+
+    def _map_preflight_findings(self, findings: list) -> Optional[InspectionResult]:
+        if not findings:
+            return None
+        block_findings = [f for f in findings if f.action == "BLOCK"]
+        warn_findings = [f for f in findings if f.action == "WARN"]
+        if block_findings:
+            return InspectionResult(
+                allowed=False,
+                action="BLOCK",
+                layer_triggered=0,
+                rule_matches=[
+                    RuleMatch(
+                        rule_id=f.rule_id,
+                        description=f.message,
+                        severity=f.severity,
+                        action="BLOCK",
+                    )
+                    for f in block_findings
+                ],
+                block_reason=block_findings[0].message,
+            )
+        elif warn_findings:
+            return InspectionResult(
+                allowed=True,
+                action="WARN",
+                layer_triggered=0,
+                rule_matches=[
+                    RuleMatch(
+                        rule_id=f.rule_id,
+                        description=f.message,
+                        severity=f.severity,
+                        action="WARN",
+                    )
+                    for f in warn_findings
+                ],
+            )
+        return None
+
+    def _map_camo_findings(self, findings: list) -> Optional[InspectionResult]:
+        if not findings:
+            return None
+        block_findings = [f for f in findings if f.action == RuleAction.BLOCK]
+        warn_findings = [f for f in findings if f.action == RuleAction.WARN]
+        if block_findings:
+            return InspectionResult(
+                allowed=False,
+                action="BLOCK",
+                layer_triggered=1,
+                rule_matches=[
+                    RuleMatch(
+                        rule_id=f.rule_id,
+                        description=f.message,
+                        severity=f.severity,
+                        action="BLOCK",
+                    )
+                    for f in block_findings
+                ],
+                block_reason="Blocked due to trust-signal camouflage on a destructive tool call.",
+            )
+        elif warn_findings:
+            return InspectionResult(
+                allowed=True,
+                action="WARN",
+                layer_triggered=1,
+                rule_matches=[
+                    RuleMatch(
+                        rule_id=f.rule_id,
+                        description=f.message,
+                        severity=f.severity,
+                        action="WARN",
+                    )
+                    for f in warn_findings
+                ],
+            )
+        return None
+
 
     def _inspect_auth_policy(self, message: dict) -> Optional[InspectionResult]:
         if message.get("method") != "tools/call":
@@ -1585,45 +1963,12 @@ class VanguardProxy:
 
     def _normalize_message(self, message: Any, _depth: int = 0) -> Any:
         """
-        Recursively URL-decodes and Unicode-normalizes (NFKC) all string values
-        in a message to prevent encoding-based rule bypasses.
-        Loops URL decode until the value stabilizes to handle double/triple encoding.
+        Compatibility wrapper for existing tests.
+        In normal proxy operation, L0 preflight runs before _inspect_message.
         """
-        # #5 Fix: Depth limit prevents stack overflow from deeply nested JSON payloads
-        if _depth > 50:
-            raise ValueError("Message nesting depth exceeds limit (50 levels). Possible DoS payload.")
-
-        if isinstance(message, dict):
-            return {k: self._normalize_message(v, _depth + 1) for k, v in message.items()}
-        elif isinstance(message, list):
-            return [self._normalize_message(v, _depth + 1) for v in message]
-        elif isinstance(message, str):
-            # 1. Loop URL decode until stable (handles %252F triple encoding etc.)
-            value = message
-            for _ in range(20):  # max 20 passes prevents deep-nested exfiltration
-                decoded = urllib.parse.unquote(value)
-                decoded = decoded.replace("%5c", "\\").replace("%5C", "\\")
-                if decoded == value:
-                    break
-                value = decoded
-            # 2. Unicode NFKC (Handles lookalikes where possible)
-            value = unicodedata.normalize("NFKC", value)
-            # 3. Strip zero-width / invisible characters
-            value = ''.join(
-                ch for ch in value
-                if unicodedata.category(ch) not in ('Cf',)
-            )
-            # 4. Length safeguard (prevents memory/CPU exhaustion)
-            # MED-2 Fix: Raise error on oversize instead of truncating to prevent bypass
-            if len(value) > self.config.max_string_len:
-                raise ValueError(f"String length {len(value)} exceeds limit {self.config.max_string_len}")
-            
-            return value
-        elif isinstance(message, float):
-            # 5. Reject NaN and Infinity to prevent downstream crashes/bypasses
-            if math.isnan(message) or math.isinf(message):
-                raise ValueError("NaN/Infinity values are not permitted in McpVanguard messages.")
-        return message
+        from core.preflight import run_preflight
+        result = run_preflight(message, self.config.max_string_len, self._is_destructive_tool_name)
+        return result.normalized_message
 
     # -----------------------------------------------------------------------
     # I/O helpers

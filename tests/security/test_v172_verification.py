@@ -76,7 +76,18 @@ async def test_v172_semantic_fail_closed():
             
             # Mock _score_sync to simulate total failure after retries
             with patch("core.semantic._score_sync") as mock_score:
-                mock_score.return_value = (1.0, "FAIL-CLOSED: All 3 semantic attempts failed")
+                mock_score.return_value = (
+                    1.0,
+                    "FAIL-CLOSED: All 3 semantic attempts failed",
+                    semantic.SemanticProviderMetadata(
+                        provider_kind="ollama",
+                        model="phi4-mini",
+                        base_url_host="localhost",
+                        threshold_warn=0.5,
+                        threshold_block=0.8,
+                        fail_closed=True,
+                    ),
+                )
                 
                 message = {"method": "tools/call", "params": {"name": "read_file"}}
                 result = await semantic.score_intent(message)

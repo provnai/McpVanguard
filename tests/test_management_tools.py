@@ -12,6 +12,10 @@ from core.management import ManagementContext, handle_vanguard_tool
 from core.rules_engine import RulesEngine
 
 
+@pytest.fixture(autouse=True)
+def enable_management_plane(monkeypatch):
+    monkeypatch.setenv("VANGUARD_MANAGEMENT_PLANE_MODE", "same_session_dev")
+
 def test_get_vanguard_audit_reads_real_log(tmp_path):
     log_file = tmp_path / "audit.log"
     log_file.write_text(

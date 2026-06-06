@@ -100,7 +100,7 @@ Verify the service is running:
 curl https://your-project.up.railway.app/health
 # Expected: {
 #   "status": "ok",
-#   "version": "2.0.1",
+#   "version": "2.1.0",
 #   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
 #   "timestamp": 1711022400.0
 # }
@@ -135,11 +135,11 @@ The most powerful enterprise configuration runs **both** McpVanguard and VEX nat
 
 ```
 [AI Agent (Vercel / OpenAI)] 
-    -> [McpVanguard on Railway] - blocks attacks in <1ms
-        -> [VEX on Railway]    - cryptographically anchors every blocked call to Postgres
+    -> [McpVanguard on Railway] - inspects and enforces MCP tool-call policy
+        -> [VEX on Railway]    - optionally records submitted audit evidence
 ```
 
-This topology has been validated in the repository's Railway-focused benchmark and certification test suite, including burst and audit-finality scenarios. See the [certification report](https://github.com/provnai/McpVanguard/blob/main/tests/benchmarks/railway_cloud_certification.py) for the exact test harness.
+The repository includes a Railway-focused integration harness for this topology. Treat its results as environment-specific evidence, not a latency or audit-finality guarantee. See the [certification harness](https://github.com/provnai/McpVanguard/blob/main/tests/benchmarks/railway_cloud_certification.py) for the exact scenarios.
 
 **To set it up:**
 1. Deploy [VEX on Railway](https://railway.com/deploy/N9-iqS?referralCode=4AXmAG) separately.
@@ -159,7 +159,7 @@ The instance is pre-configured with a `/health` endpoint:
 GET /health
 -> {
   "status": "ok",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
   "timestamp": 1711022400.0
 }

@@ -1,0 +1,91 @@
+# McpVanguard — Strict Overlay Rules (Layer 1)
+# These rules are loaded dynamically when the Vanguard profile is set to 'strict'.
+# They cover highly adversarial edge cases that may generate false positives in benign doc generation workflows.
+
+- id: "STRICT-AF-001"
+  description: "Block anti-forensics history clearing"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: '(set\s+\+o\s+history|unset\s+HISTFILE|HISTSIZE=0)'
+  message: "Anti-forensics history manipulation is strictly blocked."
+
+- id: "STRICT-AF-002"
+  description: "Block anti-forensics log truncation"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: '>\s*/var/log/(wtmp|lastlog|btmp)'
+  message: "Truncating authentication logs is strictly blocked."
+
+- id: "STRICT-AF-003"
+  description: "Block auditd tampering"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: '(systemctl\s+(stop|disable)\s+auditd|service\s+auditd\s+stop)'
+  message: "Tampering with auditd is strictly blocked."
+
+- id: "STRICT-ENV-001"
+  description: "Block procfs environment exposure"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.arguments.path"]
+  pattern: '/proc/(\*|self|[0-9]+)/environ'
+  message: "Accessing process environment variables via procfs is strictly blocked."
+
+- id: "STRICT-ENV-002"
+  description: "Block procfs kernel tampering/exposure"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.arguments.path"]
+  pattern: '/proc/(sys/kernel/randomize_va_space|kcore)'
+  message: "Accessing sensitive kernel procfs nodes is strictly blocked."
+
+- id: "STRICT-NET-001"
+  description: "Block explicit localhost/SSRF targets"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.url", "params.url", "params.arguments.command", "params.command"]
+  pattern: '(?i)(://(127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})|\b(127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b)'
+  message: "Localhost and metadata IP ranges are strictly blocked to prevent SSRF."
+
+- id: "STRICT-CONT-001"
+  description: "Block container escape primitives"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: '(?i)(docker\s+run.*--privileged|--pid=host|--net=host|--security-opt\s+apparmor=unconfined|-v\s+/:/host|hostPath.*privileged.*true|\/host\s*:\s*\/host|mount\s+/dev/\w+\s+/mnt)'
+  message: "Container escape primitives are strictly blocked."
+
+- id: "STRICT-RES-001"
+  description: "Block resource exhaustion attacks"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: '(while\s+true;\s*do|yes\s+>\s*/dev/null|stress-ng|dd\s+if=/dev/zero)'
+  message: "Resource exhaustion commands are strictly blocked."
+
+- id: "STRICT-SC-001"
+  description: "Block suspicious package execution and hooks"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: '(?i)(npm\s+(preinstall|postinstall)|pip\s+install.*(http|git\+)|curl.*\|\s*(bash|sh|zsh)\s+-s\s+--)'
+  message: "Suspicious package installation hooks or supply-chain vectors are strictly blocked."
+
+- id: "STRICT-ENC-001"
+  description: "Block broad encoded execution"
+  severity: HIGH
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.code", "params.code"]
+  pattern: "(base64\\s+-d.*\\|\\s*(sh|bash|zsh|python|ruby|perl)|eval\\s*\\(\\s*base64|\\\\x[0-9a-fA-F]{2}.*\\\\x[0-9a-fA-F]{2}.*sh|\\\\[0-7]{3}.*bash|tr\\s+'A-Za-z'\\s+'N-ZA-Mn-za-m'.*\\|\\s*sh)"
+  message: "Broad base64-encoded execution patterns are strictly blocked."
+
+- id: "STRICT-CRED-001"
+  description: "Block access to common credential stores"
+  severity: CRITICAL
+  action: BLOCK
+  match_fields: ["params.arguments.command", "params.command", "params.arguments.path", "params.path", "params.arguments.code"]
+  pattern: '(?i)(\.kube/config|\.docker/config\.json|\.npmrc|\.pypirc|/\.aws/credentials|/\.ssh/id_|/\.config/gcloud|/\.azure|/\.aliyun|/\.tencent|/AppData/Roaming/Mozilla/Firefox/Profiles|/AppData/Local/Google/Chrome/User\s+Data|/Library/Keychains|login\.keychain)'
+  message: "Access to developer credential stores is strictly blocked."

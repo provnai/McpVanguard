@@ -2,7 +2,9 @@
 
 Security gateway for MCP agents and tool servers.
 
-McpVanguard sits between an AI agent and an MCP server, inspects tool traffic in real time, and enforces policy before sensitive calls reach the underlying tool. It runs locally in front of stdio servers or as a hosted gateway over SSE and Streamable HTTP.
+McpVanguard sits between an AI agent and an MCP server, normalizes and inspects tool traffic in real time, and enforces a layered policy before sensitive calls reach the underlying tool. It runs locally in front of stdio servers or as a hosted gateway over SSE and Streamable HTTP.
+
+**Product profiles** — `monitor`, `balanced`, `strict` — let you adopt incrementally: start with audit-only discovery, move to balanced enforcement, then enable strict hardening for production-sensitive systems.
 
 Existing MCP servers do not need to be rewritten.
 
@@ -65,14 +67,18 @@ pip install mcp-vanguard
 Wrap a local stdio MCP server:
 
 ```bash
-vanguard start --server "npx @modelcontextprotocol/server-filesystem ."
+# Balanced profile (default OSS/developer behavior)
+vanguard start --profile balanced --server "npx @modelcontextprotocol/server-filesystem ."
+
+# Strict profile (production hardening)
+vanguard start --profile strict --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
 Run as a hosted gateway:
 
 ```bash
 export VANGUARD_API_KEY="your-secret-key"
-vanguard sse --server "npx @modelcontextprotocol/server-filesystem ."
+vanguard sse --profile balanced --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
 Deploy on Railway:
@@ -101,15 +107,23 @@ vanguard audit-compliance
 
 ## How It Works
 
-Every tool call is inspected before it reaches the upstream MCP server.
+McpVanguard uses five core inspection layers, `L0` through `L3` plus `L1.5`, with auth policy and a final policy composer around them. Every tool call is inspected before it reaches the upstream MCP server.
 
 | Layer | Purpose | Notes |
 |---|---|---|
+| **L0 - Preflight** | Normalize and annotate (URL decode, NFKC, strip zero-width, size/depth gates) | Always on |
+| **Auth** | OAuth scope enforcement and destructive-tool policy | Role-aware |
 | **L1 - Rules** | Deterministic blocking using signatures and safe boundaries | Fast path |
-| **L2 - Semantic** | Optional intent scoring | Async |
+| **L1.5 - Camouflage** | Detect trust-signal camouflage and scorer manipulation | Profile-sensitive |
+| **L2 - Semantic** | Optional intent scoring (advisor, cannot downgrade blocks) | Async |
 | **L3 - Behavioral** | Session and sequence-aware anomaly checks | Stateful |
+| **Policy Composer** | Final verdict: ALLOW / WARN / REVIEW / SHADOW-BLOCK / BLOCK | Explainable |
 
-If a request is blocked, the agent receives a standard JSON-RPC error and the upstream server never sees the call.
+The five core inspection layers are `L0`, `L1`, `L1.5`, `L2`, and `L3`. Auth policy and the final policy composer sit around that core path.
+
+If a request is blocked, the agent receives a standard JSON-RPC error and the upstream server never sees the call. The audit log records the primary reason and all supporting findings.
+
+Safe zones are deterministic path-boundary checks, not a substitute for OS sandboxing or container isolation. Before enforcing production traffic, tune `rules/safe_zones.yaml` for the directories your MCP tools are actually allowed to touch. See [docs/SAFE_ZONES.md](docs/SAFE_ZONES.md).
 
 ## Deployment Model
 
@@ -133,6 +147,19 @@ AI Agent -> McpVanguard -> MCP Server -> Tools / Files / External Systems
 - cross-server isolation and `server_id` traceability
 - signed-manifest, provenance, detached signature, and Sigstore-backed trust verification
 - benchmark and taxonomy tooling for measurable coverage
+- optional `receipt_v1` JSONL emission for offline-verifiable runtime evidence with `mcp-receipt`
+
+## Benchmarks
+
+McpVanguard includes packaged benchmark corpora for adversarial and benign MCP traffic. Use them to compare profiles before deployment:
+
+```bash
+vanguard benchmark-run --profile monitor
+vanguard benchmark-run --profile balanced
+vanguard benchmark-run --profile strict
+```
+
+The benchmark results are a release and tuning signal, not a promise of universal detection or zero false positives. See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for interpretation guidance and the recommended release gate.
 
 ## Authentication Modes
 
@@ -168,9 +195,10 @@ This should be described as server integrity, baseline verification, and trust v
 
 ## Project Status
 
-- `2.0.1` is the current release line
-- the core gateway and integrity features are the main shipped scope
-- broader research and future control-plane work are intentionally outside the core OSS release scope
+- `2.1.0` is the layered enforcement release candidate on this branch
+- layered enforcement path (`L0 -> L1 -> L1.5 -> L2 -> L3 -> Policy Composer`) is implemented and covered by local verification
+- product profiles (`monitor` / `balanced` / `strict`) are the supported deployment modes for this release line
+- broader research-only features (GPU attestation, hardware-rooted provenance, zero-FP claims) are intentionally outside the core OSS release scope
 
 See [CHANGELOG.md](CHANGELOG.md) for the release history and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for deployment details.
 
