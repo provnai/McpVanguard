@@ -164,6 +164,14 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
+def _tamper_jwt_signature(token: str) -> str:
+    header, payload, signature = token.rsplit(".", 2)
+    padded = signature + "=" * (-len(signature) % 4)
+    signature_bytes = bytearray(base64.urlsafe_b64decode(padded.encode("ascii")))
+    signature_bytes[0] ^= 0x01
+    return f"{header}.{payload}.{_b64url(bytes(signature_bytes))}"
+
+
 def _rsa_jwk_and_token(claims: dict, kid: str = "test-key-1") -> tuple[dict, str]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_numbers = private_key.public_key().public_numbers()
@@ -558,7 +566,7 @@ async def test_check_auth_oauth_mode_rejects_invalid_signature(monkeypatch):
             "exp": now + 300,
         }
     )
-    tampered = token[:-2] + ("aa" if token[-2:] != "aa" else "bb")
+    tampered = _tamper_jwt_signature(token)
     monkeypatch.setenv("VANGUARD_AUTH_MODE", "oauth")
     monkeypatch.setenv("VANGUARD_JWKS_JSON", json.dumps({"keys": [jwk]}))
     monkeypatch.setenv("VANGUARD_EXPECTED_BEARER_ISSUER", "https://issuer.example")
