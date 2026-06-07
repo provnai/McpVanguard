@@ -71,26 +71,18 @@ For hosted deployments, also verify:
 - one balanced-profile smoke request
 - clean install from the published PyPI artifact
 
-## Public Claim Guidance
+## How To Describe The Results
 
-Good public wording:
+The clearest public framing is:
 
 > The public regression suite passes for the shipped benchmark corpora, and each metric is scoped to its corpus and active profile.
 
-Avoid:
+These results support McpVanguard's layered enforcement model at the MCP execution boundary. They should not be presented as proof of:
 
-> McpVanguard blocks all MCP attacks.
-
-Avoid:
-
-> Zero false positives.
-
-Avoid:
-
-> Fully sandboxed.
-
-Avoid:
-
-> Semantic scoring is the security boundary.
+- blocking every possible MCP attack
+- zero false positives in all deployments
+- full sandboxing of the underlying execution environment
+- hardware-rooted provenance or GPU-accelerated enforcement
+- semantic scoring as the primary security boundary
 
 The accurate framing is: McpVanguard provides layered, configurable enforcement at the MCP execution boundary, with deterministic rules and safe zones carrying the primary blocking path.
