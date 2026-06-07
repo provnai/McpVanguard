@@ -161,6 +161,8 @@ vanguard benchmark-run --profile strict
 
 The benchmark results are a release and tuning signal, not a promise of universal detection or zero false positives. See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for interpretation guidance and the recommended release gate.
 
+For the public research note behind the layered design, see [Why MCP Security Needs Layered Runtime Enforcement](docs/RESEARCH_LAYERED_MCP_ENFORCEMENT.md).
+
 ## Authentication Modes
 
 McpVanguard is local-first and supports stronger hosted-gateway controls when needed.
