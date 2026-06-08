@@ -1059,6 +1059,17 @@ class VanguardProxy:
                 raw_message = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(raw_message, dict):
+                invalid_response = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request: JSON-RPC message must be an object.",
+                    },
+                }
+                await self._write_to_agent(json.dumps(invalid_response))
+                continue
 
             method = raw_message.get("method", "")
             request_id = raw_message.get("id")

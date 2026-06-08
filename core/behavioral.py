@@ -83,14 +83,16 @@ class _RedisWindow:
     def record(self) -> None:
         if not _redis_client:
             return
-        now = time.monotonic()
+        # Redis windows are shared across processes/replicas, so use epoch
+        # time. ``time.monotonic()`` is process-local and breaks HA counts.
+        now = time.time()
         _redis_client.zadd(self.key, {str(uuid.uuid4()): now})
         _redis_client.expire(self.key, 65)
 
     def count_in(self, window_secs: float) -> int:
         if not _redis_client:
             return 0
-        now = time.monotonic()
+        now = time.time()
         cutoff = now - window_secs
         _redis_client.zremrangebyscore(self.key, "-inf", cutoff - 0.1)
         return _redis_client.zcard(self.key)

@@ -291,6 +291,36 @@ async def test_proxy_records_semantic_block_as_semantic_risk_event():
 
 
 @pytest.mark.asyncio
+async def test_proxy_rejects_non_object_json_rpc_without_crashing():
+    config = ProxyConfig()
+    config.semantic_enabled = False
+    config.behavioral_enabled = False
+
+    class Reader:
+        def __init__(self):
+            self.lines = [b'[{"jsonrpc":"2.0","method":"tools/list"}]\n', b""]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    proxy = VanguardProxy(
+        server_command=["python", "-c", "pass"],
+        config=config,
+        agent_reader=Reader(),
+        agent_writer=AsyncMock(),
+    )
+    proxy._write_to_agent = AsyncMock()
+    proxy._write_to_server = AsyncMock()
+
+    await proxy._pump_agent_to_server()
+
+    proxy._write_to_server.assert_not_awaited()
+    proxy._write_to_agent.assert_awaited_once()
+    payload = json.loads(proxy._write_to_agent.await_args.args[0])
+    assert payload["error"]["code"] == -32600
+
+
+@pytest.mark.asyncio
 async def test_proxy_blocks_destructive_tool_without_required_role(mock_config):
     mock_config.required_destructive_roles = ["admin"]
     proxy = VanguardProxy(

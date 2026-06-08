@@ -19,6 +19,8 @@ def get_free_port():
 
 @pytest.fixture(autouse=True)
 def _reset_streamable_http_env(monkeypatch):
+    from core import sse_server
+
     for key in (
         "VANGUARD_DEFAULT_POLICY",
         "VANGUARD_BIND_STREAMABLE_SESSIONS",
@@ -26,6 +28,9 @@ def _reset_streamable_http_env(monkeypatch):
         "VANGUARD_TRUSTED_PROXY_IPS",
     ):
         monkeypatch.delenv(key, raising=False)
+    sse_server._rate_limiters.clear()
+    sse_server._active_connections.clear()
+    sse_server._total_active_connections = 0
 
 
 @pytest.mark.asyncio

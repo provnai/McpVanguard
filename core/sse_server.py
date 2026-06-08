@@ -601,6 +601,7 @@ class VanguardStreamableSessionManager:
         self._bindings: dict[str, StreamableSessionBinding] = {}
         self._principals: dict[str, Optional[AuthPrincipal]] = {}
         self._lock = asyncio.Lock()
+        self.max_sessions = int(os.getenv("VANGUARD_MAX_STREAMABLE_SESSIONS", "100"))
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -659,6 +660,10 @@ class VanguardStreamableSessionManager:
             await self._drop_session(transport.mcp_session_id)
 
     async def _create_session(self, scope) -> StreamableHTTPServerTransport:
+        async with self._lock:
+            if len(self._sessions) >= self.max_sessions:
+                raise RuntimeError("Streamable HTTP session limit reached.")
+
         transport = StreamableHTTPServerTransport(
             mcp_session_id=os.urandom(16).hex(),
             is_json_response_enabled=False,
@@ -950,6 +955,7 @@ async def handle_messages(scope, receive, send, ctx: ServerContext):
 
 
 async def handle_mcp(scope, receive, send, ctx: ServerContext):
+    global _total_active_connections
     assert scope["type"] == "http"
     ok, status, message = _check_origin(scope, ctx.cfg)
     if not ok:
@@ -981,7 +987,43 @@ async def handle_mcp(scope, receive, send, ctx: ServerContext):
         await _send_error(send, 500, "Streamable HTTP transport is not initialized.")
         return
 
-    await ctx.streamable_manager.handle_request(scope, receive, send)
+    client_ip = _effective_client_ip(scope, ctx.cfg)
+    counted_connection = False
+
+    async with _registry_lock:
+        if client_ip not in _rate_limiters:
+            _rate_limiters[client_ip] = RateLimiter(ctx.cfg["RATE_LIMIT_PER_SEC"], ctx.cfg["MAX_CONCURRENCY"] * 2)
+        limiter = _rate_limiters[client_ip]
+
+        if _total_active_connections >= ctx.cfg["MAX_GLOBAL_CONNECTIONS"]:
+            await _send_error(send, 503, "Server too busy. Global connection limit reached.")
+            return
+
+        if _active_connections[client_ip] >= ctx.cfg["MAX_CONCURRENCY"]:
+            await _send_error(send, 429, f"Concurrent connection limit ({ctx.cfg['MAX_CONCURRENCY']}) reached.")
+            return
+
+        _active_connections[client_ip] += 1
+        _total_active_connections += 1
+        counted_connection = True
+
+    try:
+        if not await limiter.consume():
+            await _send_error(send, 429, "Too Many Requests. Rate limit exceeded.")
+            return
+
+        try:
+            await ctx.streamable_manager.handle_request(scope, receive, send)
+        except RuntimeError as exc:
+            if "session limit" in str(exc).lower():
+                await _send_error(send, 503, "Server too busy. Streamable HTTP session limit reached.")
+                return
+            raise
+    finally:
+        if counted_connection:
+            async with _registry_lock:
+                _active_connections[client_ip] -= 1
+                _total_active_connections -= 1
 
 async def health_check_handler(scope, receive, send):
     """Deep health check for Railway/Cloud readiness."""

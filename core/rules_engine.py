@@ -22,6 +22,60 @@ from core import safe_regex
 
 logger = logging.getLogger(__name__)
 _REPEATED_CHAR_BACKREF = stdlib_re.compile(r"^\(\.\)\\1\{(\d+),\}$")
+_RECURSIVE_MATCH_RULE_FILES = {
+    "commands.yaml",
+    "filesystem.yaml",
+    "network.yaml",
+    "privilege.yaml",
+    "strict_overlay.yaml",
+}
+_PATH_LIKE_KEYS = {
+    "path",
+    "file",
+    "filepath",
+    "filename",
+    "directory",
+    "dir",
+    "destination",
+    "dest",
+    "dst",
+    "source",
+    "src",
+    "target",
+    "location",
+    "from",
+    "to",
+    "uri",
+    "url",
+    "base_dir",
+    "root",
+    "cwd",
+    "input",
+    "output",
+}
+_COMMAND_LIKE_KEYS = {
+    "command",
+    "cmd",
+    "shell",
+    "script",
+    "code",
+    "args",
+    "argv",
+    "exec",
+    "execute",
+    "executable",
+}
+_URL_LIKE_KEYS = {
+    "url",
+    "uri",
+    "endpoint",
+    "host",
+    "hostname",
+    "target",
+    "address",
+    "proxy",
+    "webhook",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +96,9 @@ class Rule:
         self.source_file: str = source_file
         self.matcher: str = data.get("matcher", "regex")
         self.repeat_threshold: int = int(data.get("repeat_threshold", 200))
+        self.recursive_match: bool = bool(
+            data.get("recursive_match", source_file in _RECURSIVE_MATCH_RULE_FILES)
+        )
         self.pattern: Optional[Any] = None
 
         if self.matcher == "mixed_script":
@@ -102,11 +159,10 @@ class Rule:
             if tool_name not in self.match_tools:
                 return None
 
-        for field_path in self.match_fields:
-            value = self._extract_field(message, field_path)
+        for field_path, value in self._candidate_values(message):
             if value is None:
                 continue
-            str_value = str(value)
+            str_value = self._stringify_for_match(value)
             matched = False
             if self.matcher == "repeated_char_run":
                 matched = self._has_repeated_character_run(str_value)
@@ -125,6 +181,87 @@ class Rule:
                     message=self.message,
                 )
         return None
+
+    def _candidate_values(self, message: dict) -> list[tuple[str, Any]]:
+        """Return explicit rule fields plus recursive params fallbacks.
+
+        Existing YAML fields remain authoritative, but high-risk rule families
+        also inspect all normalized params values so custom MCP tool schemas
+        cannot bypass L1 by renaming ``path`` to ``file`` or ``command`` to
+        ``cmd``. Container values are included because command arguments are
+        often represented as arrays.
+        """
+        candidates: list[tuple[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(field_path: str, value: Any) -> None:
+            if value is None:
+                return
+            marker = (field_path, repr(value)[:500])
+            if marker in seen:
+                return
+            seen.add(marker)
+            candidates.append((field_path, value))
+
+        for field_path in self.match_fields:
+            add(field_path, self._extract_field(message, field_path))
+
+        if self.recursive_match:
+            params = message.get("params")
+            if params is not None:
+                for field_path, value in self._iter_recursive_values(params, "params"):
+                    if self._allow_recursive_candidate(field_path):
+                        add(field_path, value)
+
+        return candidates
+
+    def _allow_recursive_candidate(self, field_path: str) -> bool:
+        key = self._last_field_key(field_path)
+        if not key:
+            return False
+        if self.source_file == "filesystem.yaml":
+            return key in _PATH_LIKE_KEYS
+        if self.source_file == "commands.yaml":
+            return key in _COMMAND_LIKE_KEYS
+        if self.source_file == "network.yaml":
+            return key in _URL_LIKE_KEYS or key in _COMMAND_LIKE_KEYS
+        if self.source_file in {"privilege.yaml", "strict_overlay.yaml"}:
+            return key in _PATH_LIKE_KEYS or key in _COMMAND_LIKE_KEYS or key in _URL_LIKE_KEYS
+        return False
+
+    @classmethod
+    def _iter_recursive_values(cls, value: Any, path: str, depth: int = 0):
+        if depth > 50:
+            return
+        if isinstance(value, dict):
+            yield path, value
+            for key, child in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                yield from cls._iter_recursive_values(child, child_path, depth + 1)
+        elif isinstance(value, list):
+            yield path, value
+            for index, child in enumerate(value):
+                yield from cls._iter_recursive_values(child, f"{path}[{index}]", depth + 1)
+        else:
+            yield path, value
+
+    @classmethod
+    def _stringify_for_match(cls, value: Any) -> str:
+        if isinstance(value, dict):
+            return " ".join(
+                f"{key} {cls._stringify_for_match(child)}"
+                for key, child in value.items()
+            )
+        if isinstance(value, list):
+            return " ".join(cls._stringify_for_match(child) for child in value)
+        return str(value)
+
+    @staticmethod
+    def _last_field_key(field_path: str) -> str:
+        if not field_path:
+            return ""
+        last = field_path.rsplit(".", 1)[-1]
+        return last.split("[", 1)[0].lower()
 
     @staticmethod
     def _has_mixed_script(value: str) -> bool:
@@ -420,64 +557,53 @@ class RulesEngine:
         if not relevant_zones:
             return None
 
-        # Check for path-like arguments
-        path_keys = [
-            "path",
-            "filepath",
-            "filename",
-            "directory",
-            "dir",
-            "destination",
-            "source",
-            "target",
-            "location",
-            "from",
-            "to",
-            "uri",
-            "url",
-            "base_dir",
-            "root",
-            "cwd",
-        ]
-        
-        for key in path_keys:
-            if key in args:
-                requested_path = str(args[key])
-                allowed = False
-                
-                for zone in relevant_zones:
-                    if check_path_jail(requested_path, zone.allowed_prefixes, recursive=zone.recursive):
-                        # Entropy check if restricted
-                        if zone.max_entropy:
-                            content = args.get("content") or args.get("data")
-                            if content:
-                                from core.behavioral import compute_shannon_entropy
-                                h = compute_shannon_entropy(str(content).encode())
-                                if h > zone.max_entropy:
-                                    logger.warning(f"ENTROPY BREACH: {tool_name} content entropy {h} > limit {zone.max_entropy}")
-                                    return InspectionResult.block(
-                                        reason=f"Policy Block: High-entropy content ({h:.2f}) exceeds Safe Zone limit ({zone.max_entropy}) for path '{requested_path}'.",
-                                        layer=1,
-                                    )
-                        
-                        allowed = True
-                        break
-                
-                if not allowed:
-                    logger.warning(f"SAFE ZONE BREACH: Tool '{tool_name}' attempted to access '{requested_path}' outside of allowed zones.")
-                    return InspectionResult.block(
-                        reason=f"Access denied: Path '{requested_path}' is outside the authorized Safe Zone for tool '{tool_name}'.",
-                        layer=1,
-                        rule_matches=[RuleMatch(
-                            rule_id="VANGUARD-SAFEZONE-001",
-                            rule_name="Safe Zone Violation",
-                            severity=RuleSeverity.CRITICAL,
-                            action=RuleAction.BLOCK,
-                            message=f"Deterministic jail failure for {tool_name}"
-                        )]
-                    )
+        for key, requested_value in self._iter_path_candidates(args):
+            requested_path = Rule._stringify_for_match(requested_value)
+            allowed = False
+
+            for zone in relevant_zones:
+                if check_path_jail(requested_path, zone.allowed_prefixes, recursive=zone.recursive):
+                    # Entropy check if restricted
+                    if zone.max_entropy:
+                        content = args.get("content") or args.get("data")
+                        if content:
+                            from core.behavioral import compute_shannon_entropy
+                            h = compute_shannon_entropy(str(content).encode())
+                            if h > zone.max_entropy:
+                                logger.warning(f"ENTROPY BREACH: {tool_name} content entropy {h} > limit {zone.max_entropy}")
+                                return InspectionResult.block(
+                                    reason=f"Policy Block: High-entropy content ({h:.2f}) exceeds Safe Zone limit ({zone.max_entropy}) for path '{requested_path}'.",
+                                    layer=1,
+                                )
+
+                    allowed = True
+                    break
+
+            if not allowed:
+                logger.warning(f"SAFE ZONE BREACH: Tool '{tool_name}' attempted to access '{requested_path}' outside of allowed zones.")
+                return InspectionResult.block(
+                    reason=f"Access denied: Path '{requested_path}' is outside the authorized Safe Zone for tool '{tool_name}'.",
+                    layer=1,
+                    rule_matches=[RuleMatch(
+                        rule_id="VANGUARD-SAFEZONE-001",
+                        rule_name="Safe Zone Violation",
+                        severity=RuleSeverity.CRITICAL,
+                        action=RuleAction.BLOCK,
+                        message=f"Deterministic jail failure for {tool_name}"
+                    )]
+                )
         
         return None
+
+    @classmethod
+    def _iter_path_candidates(cls, args: dict):
+        """Yield path-like arguments recursively across custom tool schemas."""
+        for field_path, value in Rule._iter_recursive_values(args, ""):
+            if not field_path:
+                continue
+            key = Rule._last_field_key(field_path)
+            if key in _PATH_LIKE_KEYS:
+                yield field_path, value
 
     def check(self, message: dict) -> InspectionResult:
         """

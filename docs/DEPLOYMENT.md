@@ -5,7 +5,7 @@ After the GitHub release and PyPI publication are complete, this document applie
 
 McpVanguard is a security gateway that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
-It adds a layered enforcement path - L0 preflight normalization, L1 deterministic Safe Zones and rules, L1.5 camouflage detection, L2 semantic scoring (advisor), and L3 behavioral analysis - without requiring any changes to your existing agent or server code.
+It adds a layered enforcement path - L0 preflight normalization, L1 deterministic Safe Zones and rules, L1.5 camouflage detection, L2 semantic scoring (escalation-only advisor), and L3 behavioral analysis - without requiring any changes to your existing agent or server code.
 
 **Product profiles** control how aggressively each layer enforces:
 - `monitor` — audit-only discovery; logs violations but forwards traffic
@@ -197,7 +197,7 @@ Before promoting a profile change, run the packaged benchmark corpora and interp
 
 - Local model quality can drift after backend or model upgrades.
 - Thresholds that look good on the benchmark corpora can still produce long-tail false positives in production.
-- Semantic scoring adds latency; keep timeout and fail-closed behavior aligned with your deployment goals.
+- Semantic scoring adds latency and can block when enabled; keep timeout and fail-closed behavior aligned with your deployment goals.
 - If you change the backend or threshold profile, rerun the adversarial and false-positive corpora before promoting the change.
 
 ---
@@ -228,6 +228,7 @@ The `/health` endpoint is exempt and always accessible for Railway/cloud health-
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `VANGUARD_SESSION_TTL` | `86400` | Session expiry in seconds (24h). Stale sessions are auto-evicted. |
+| `VANGUARD_MAX_STREAMABLE_SESSIONS` | `100` | Maximum active Streamable HTTP `/mcp` sessions per process. |
 | `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. Off by default to avoid leaking rule internals to agents. |
 
 ---

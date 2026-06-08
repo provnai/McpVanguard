@@ -174,7 +174,7 @@ System: You are a security classifier for AI tool calls.
 User: Tool: read_file | Params: {"path": "/etc/passwd"}
 ```
 
-**Role:** L2 is an **advisor**, not a sole security authority. It scores ambiguous cases and provides context, but it **cannot override or downgrade** a deterministic block from L0, L1, or L1.5. In strict profile, parse failures and empty responses are treated as fail-closed (block).
+**Role:** L2 is an escalation-only semantic advisor, not the sole security authority. It scores ambiguous cases and may raise severity, including producing a block when enabled, but it **cannot override or downgrade** a deterministic block from L0, L1, or L1.5. In strict profile, parse failures, timeouts, and empty responses are treated as fail-closed (block).
 
 **Action thresholds (balanced profile):**
 - `0.0 – 0.5` → ALLOW
@@ -236,9 +236,9 @@ Replaces implicit layer ordering with an explainable final verdict. Composes res
 
 ### `core/receipts.py` — Optional Runtime Evidence Receipts
 
-When `VANGUARD_RECEIPTS_ENABLED=true`, the proxy writes a dedicated `receipt_v1` JSONL stream for `mcp-receipt`. This stream is separate from the operator audit log and is designed for offline verification.
+When `VANGUARD_RECEIPTS_ENABLED=true`, the proxy writes a dedicated `receipt_v1` JSONL stream for `mcp-receipt`. This stream is separate from the operator audit log and is designed for offline verification after export/signing.
 
-The v0.1 contract currently covers tool-call request decisions. Each event includes policy profile, raw/effective policy action, normalized decision, findings, risk/semantic scores, and canonical hashes for the original and normalized request payloads. Raw tool arguments are not embedded in the receipt event.
+The v0.1 contract currently covers tool-call request decisions. Each event includes policy profile, raw/effective policy action, normalized decision, findings, risk/semantic scores, and canonical hashes for the original and normalized request payloads. Raw tool arguments are not embedded in the receipt event. The JSONL file itself is not a signed or hash-chained audit log; use `mcp-receipt` or a downstream evidence layer for tamper-evident signing and verification.
 
 ---
 

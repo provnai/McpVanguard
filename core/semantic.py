@@ -435,6 +435,21 @@ async def score_intent(
         )
     except asyncio.TimeoutError:
         logger.warning("Semantic scoring timed out (async wrapper)")
+        if settings.fail_closed:
+            return InspectionResult(
+                allowed=False,
+                action="BLOCK",
+                layer_triggered=2,
+                rule_matches=[
+                    RuleMatch(
+                        rule_id="SEM-FAIL-CLOSED",
+                        description="Semantic scorer timed out and fail-closed mode is enabled.",
+                        severity="HIGH",
+                    )
+                ],
+                semantic_score=1.0,
+                block_reason="Semantic scoring timed out (fail-closed policy).",
+            )
         return None
 
     logger.debug("Semantic score=%.3f reason=%s provider=%s/%s",

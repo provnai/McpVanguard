@@ -113,9 +113,9 @@ McpVanguard uses five core inspection layers, `L0` through `L3` plus `L1.5`, wit
 |---|---|---|
 | **L0 - Preflight** | Normalize and annotate (URL decode, NFKC, strip zero-width, size/depth gates) | Always on |
 | **Auth** | OAuth scope enforcement and destructive-tool policy | Role-aware |
-| **L1 - Rules** | Deterministic blocking using signatures and safe boundaries | Fast path |
+| **L1 - Rules** | Deterministic blocking using signatures, recursive argument inspection, and safe boundaries | Fast path |
 | **L1.5 - Camouflage** | Detect trust-signal camouflage and scorer manipulation | Profile-sensitive |
-| **L2 - Semantic** | Optional intent scoring (advisor, cannot downgrade blocks) | Async |
+| **L2 - Semantic** | Optional intent scoring (can escalate/block, cannot downgrade deterministic blocks) | Async |
 | **L3 - Behavioral** | Session and sequence-aware anomaly checks | Stateful |
 | **Policy Composer** | Final verdict: ALLOW / WARN / REVIEW / SHADOW-BLOCK / BLOCK | Explainable |
 
@@ -123,7 +123,7 @@ The five core inspection layers are `L0`, `L1`, `L1.5`, `L2`, and `L3`. Auth pol
 
 If a request is blocked, the agent receives a standard JSON-RPC error and the upstream server never sees the call. The audit log records the primary reason and all supporting findings.
 
-Safe zones are deterministic path-boundary checks, not a substitute for OS sandboxing or container isolation. Before enforcing production traffic, tune `rules/safe_zones.yaml` for the directories your MCP tools are actually allowed to touch. See [docs/SAFE_ZONES.md](docs/SAFE_ZONES.md).
+Safe zones are deterministic path-boundary checks, not a substitute for OS sandboxing or container isolation. They inspect standard and common custom path-like argument names recursively, but production deployments should still tune `rules/safe_zones.yaml` for the actual schemas and directories your MCP tools are allowed to touch. See [docs/SAFE_ZONES.md](docs/SAFE_ZONES.md).
 
 ## Deployment Model
 
@@ -140,14 +140,14 @@ AI Agent -> McpVanguard -> MCP Server -> Tools / Files / External Systems
 
 ## Current Capabilities
 
-- hardened SSE and Streamable HTTP transport paths
+- hardened SSE and Streamable HTTP transport paths with request rate, concurrency, session-binding, and session-count controls
 - metadata poisoning inspection on `initialize` and `tools/list`
 - JWT, JWKS, issuer, audience, claim, and scope checks for bearer-auth deployments
 - server integrity and capability drift verification
 - cross-server isolation and `server_id` traceability
 - signed-manifest, provenance, detached signature, and Sigstore-backed trust verification
 - benchmark and taxonomy tooling for measurable coverage
-- optional `receipt_v1` JSONL emission for offline-verifiable runtime evidence with `mcp-receipt`
+- optional `receipt_v1` JSONL emission for offline-verifiable runtime evidence with `mcp-receipt` after export/signing
 
 ## Benchmarks
 

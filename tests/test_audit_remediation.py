@@ -1,6 +1,7 @@
 import os
 import pytest
 import time
+import os
 from pathlib import Path
 from core.rules_engine import RulesEngine
 from core.models import SafeZone, RuleAction
@@ -46,6 +47,45 @@ def test_safe_zone_blocks_nonstandard_target_argument():
     result = engine.check(msg)
     assert result.action == "BLOCK"
     assert "SAFEZONE" in result.rule_matches[0].rule_id
+
+
+@pytest.mark.parametrize("arg_name", ["file", "input", "output", "filepath", "target"])
+def test_safe_zone_blocks_recursive_nonstandard_path_arguments(arg_name):
+    engine = RulesEngine(rules_dir="rules")
+    engine.safe_zones = [SafeZone(tool="read_file", allowed_prefixes=["/safe/"], recursive=True)]
+
+    msg = {
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"nested": {arg_name: "/etc/passwd"}}},
+    }
+
+    result = engine.check(msg)
+    assert result.action == "BLOCK"
+    assert result.rule_matches[0].rule_id == "VANGUARD-SAFEZONE-001"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_rule"),
+    [
+        ({"file": "/etc/passwd"}, "FS-001"),
+        ({"nested": {"file": "/etc/passwd"}}, "FS-001"),
+        ({"cmd": "rm -rf /"}, "CMD-001"),
+        ({"command": ["rm", "-rf", "/"]}, "CMD-001"),
+        ({"nested": {"argv": ["rm", "-rf", "/"]}}, "CMD-001"),
+    ],
+)
+def test_l1_recursively_blocks_nonstandard_argument_names(arguments, expected_rule):
+    engine = RulesEngine(rules_dir="rules")
+    engine.safe_zones = []
+
+    msg = {
+        "method": "tools/call",
+        "params": {"name": "custom_tool", "arguments": arguments},
+    }
+
+    result = engine.check(msg)
+    assert result.action == "BLOCK"
+    assert result.rule_matches[0].rule_id == expected_rule
 
 def test_crit_2_default_deny_enforced():
     """Verify that VANGUARD_DEFAULT_POLICY=DENY works for unknown tools."""
@@ -115,6 +155,40 @@ def test_clear_all_states_uses_scan_iter_when_available(clean_behavioral):
 
     assert fake.deleted_batches == [("vguard:beh:1", "vguard:beh:2")]
     assert fake.keys_called is False
+
+
+def test_redis_window_uses_epoch_time_for_shared_process_counts(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.scores = []
+            self.removed_cutoff = None
+
+        def zadd(self, key, mapping):
+            self.scores.extend(mapping.values())
+
+        def expire(self, key, ttl):
+            pass
+
+        def zremrangebyscore(self, key, start, stop):
+            self.removed_cutoff = stop
+
+        def zcard(self, key):
+            return len(self.scores)
+
+    fake = FakeRedis()
+    original = behavioral._redis_client
+    behavioral._redis_client = fake
+    monkeypatch.setattr(behavioral.time, "time", lambda: 1_700_000_000.0)
+    monkeypatch.setattr(behavioral.time, "monotonic", lambda: 12.0)
+    try:
+        window = behavioral._RedisWindow("vguard:beh:test")
+        window.record()
+        assert fake.scores == [1_700_000_000.0]
+
+        assert window.count_in(60) == 1
+        assert fake.removed_cutoff == pytest.approx(1_699_999_939.9)
+    finally:
+        behavioral._redis_client = original
 
 def test_med_2_oversized_payload_rejection():
     """Verify that oversized payloads are REJECTED instead of truncated."""

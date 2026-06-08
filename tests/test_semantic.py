@@ -5,6 +5,7 @@ tests/test_semantic.py — Tests for Layer 2 semantic analysis using mocks.
 import json
 import pytest
 import asyncio
+import time
 from urllib.parse import urlparse
 from unittest.mock import patch, MagicMock
 from core import semantic
@@ -152,6 +153,30 @@ async def test_semantic_ollama_offline(mock_ollama_client, base_settings):
     
     assert res is not None
     assert res.action == "BLOCK"
+    assert "fail-closed" in res.block_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_semantic_async_timeout_honors_fail_closed(base_settings, monkeypatch):
+    from dataclasses import replace
+
+    def slow_score(*args, **kwargs):
+        time.sleep(2.0)
+        raise AssertionError("wait_for should time out before this returns")
+
+    monkeypatch.setattr(semantic, "_score_sync", slow_score)
+    settings = replace(base_settings, timeout=0.01, fail_closed=True)
+
+    msg = {
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "foo"}},
+    }
+
+    res = await semantic.score_intent(msg, settings=settings)
+
+    assert res is not None
+    assert res.action == "BLOCK"
+    assert res.rule_matches[0].rule_id == "SEM-FAIL-CLOSED"
     assert "fail-closed" in res.block_reason.lower()
 
 @pytest.mark.asyncio

@@ -26,7 +26,7 @@ It becomes:
 
 Our research direction points to one practical conclusion:
 
-> Semantic scoring is useful, but it should not be the primary security boundary. The stronger design is layered runtime enforcement: normalize inputs, block known hazards deterministically, detect camouflage, use semantic scoring as an advisor, track session behavior, and compose one explicit verdict before execution.
+> Semantic scoring is useful, but it should not be the primary security boundary. The stronger design is layered runtime enforcement: normalize inputs, block known hazards deterministically, detect camouflage, use semantic scoring as an escalation-only advisor, track session behavior, and compose one explicit verdict before execution.
 
 That is the model McpVanguard `v2.1.0` implements.
 
@@ -121,7 +121,7 @@ The strongest repeated result was that semantic scoring alone underperformed the
 | Live ablation set | `24/34` | `33/34` | `+9` blocked |
 | Definitive ablation set | `15/55` | `54/55` | `+39` blocked |
 
-This is the core empirical reason McpVanguard treats `L2` as an advisor rather than the whole security boundary.
+This is the core empirical reason McpVanguard treats `L2` as an escalation-only advisor rather than the whole security boundary.
 
 ### 2. Deterministic L1 Carried Most Of The Measured Blocking Value
 
@@ -263,7 +263,7 @@ The practical answer is not to remove semantic scoring. The practical answer is 
 - do not let it override deterministic blocks
 - feed it structured security annotations from earlier layers
 
-In McpVanguard `v2.1.0`, L2 is an advisor inside the policy composer, not the whole security boundary.
+In McpVanguard `v2.1.0`, L2 is an escalation-only advisor inside the policy composer, not the whole security boundary. When enabled, it may raise severity or block, but it cannot downgrade deterministic blocks from earlier layers.
 
 ## Finding 4: Camouflage Is A Runtime Pattern
 
@@ -328,7 +328,7 @@ This note should not be read as saying:
 
 The stronger and more accurate claim is:
 
-> McpVanguard provides layered, configurable enforcement at the MCP execution boundary. Deterministic rules and safe zones carry the primary blocking path, semantic scoring adds advisory context, and the final policy composer keeps decisions explicit and auditable.
+> McpVanguard provides layered, configurable enforcement at the MCP execution boundary. Deterministic rules and safe zones carry the primary blocking path, semantic scoring adds escalation-only context, and the final policy composer keeps decisions explicit and auditable.
 
 ## Reproducing The Public Path
 
