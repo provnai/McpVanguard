@@ -197,8 +197,8 @@ This should be described as server integrity, baseline verification, and trust v
 
 ## Project Status
 
-- `2.1.0` is the layered enforcement release candidate on this branch
-- layered enforcement path (`L0 -> L1 -> L1.5 -> L2 -> L3 -> Policy Composer`) is implemented and covered by local verification
+- `2.1.1` is the current runtime hardening patch for the layered enforcement release line
+- layered enforcement path (`L0 -> L1 -> L1.5 -> L2 -> L3 -> Policy Composer`) is implemented and covered by local and CI verification
 - product profiles (`monitor` / `balanced` / `strict`) are the supported deployment modes for this release line
 - broader research-only features (GPU attestation, hardware-rooted provenance, zero-FP claims) are intentionally outside the core OSS release scope
 

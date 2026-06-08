@@ -1,7 +1,7 @@
 # McpVanguard - Deployment Guide
-**Release target**: `2.1.0` layered enforcement release candidate.
+**Release target**: `2.1.1` runtime hardening patch for the layered enforcement release line.
 
-After the GitHub release and PyPI publication are complete, this document applies to the published `2.1.0` line.
+After the GitHub release and PyPI publication are complete, this document applies to the published `2.1.x` line.
 
 McpVanguard is a security gateway that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 

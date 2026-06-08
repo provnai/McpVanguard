@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-06-08 (Runtime Hardening Patch)
+
+### Security and Correctness
+
+- **Recursive L1 argument inspection** (`core/rules_engine.py`): Extended deterministic rule inspection beyond the standard MCP argument names so common custom fields such as `file`, `cmd`, nested path-like keys, and array-form commands are inspected before upstream execution.
+- **Safe-zone coverage expansion** (`core/rules_engine.py`): Safe-zone enforcement now checks recursive path-like arguments instead of relying only on top-level canonical path fields, reducing bypass risk for custom tool schemas.
+- **Semantic fail-closed behavior** (`core/semantic.py`): Layer 2 async timeout handling now preserves configured fail-closed behavior instead of silently degrading to an allow-path decision.
+- **Streamable HTTP resource guards** (`core/sse_server.py`): Added request-rate, concurrency, and session-count enforcement around the `/mcp` transport path to match the documented hosted-gateway hardening posture.
+- **JSON-RPC validation** (`core/proxy.py`): Non-object JSON-RPC requests now return `-32600 Invalid Request` instead of entering the normal forwarding path.
+- **Shared behavioral timing** (`core/behavioral.py`): Redis-backed behavioral windows now use epoch timestamps for safer multi-process/shared-state behavior.
+
+### CI and Tooling
+
+- **Phase 7 scheduled workflow repair** (`scripts/phase7_prepare_log.py`, `scripts/phase7_report.py`): Fixed direct script execution in the scheduled Phase 7 measurement workflow and made generated JSON artifact loading more robust across CI and Windows-local workflows.
+
+### Documentation
+
+- Updated README, deployment, benchmark, architecture, and research documentation to describe the layered enforcement path as the current public release posture rather than a release-candidate promise.
+- Added/clarified public research framing for layered MCP enforcement while keeping corpus-scoped metrics, false-positive tradeoffs, and research-only GPU/hardware-attestation work out of the product claim.
+
+### Verification
+
+- Full local verification before release prep: `460 passed, 2 skipped`.
+- Targeted Phase 7 report/log tests pass locally.
+- GitHub CI, CodeQL, dependency audit, SBOM, Railway deployment, and PyPI Trusted Publishing remain external release gates after push.
+
 ## [2.1.0] - 2026-06-05 (Layered Enforcement Release)
 
 ### Security
