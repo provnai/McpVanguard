@@ -7,8 +7,13 @@ from typing import Any
 
 
 def _load_json(path: str | Path) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    raw = Path(path).read_bytes()
+    for encoding in ("utf-8-sig", "utf-16"):
+        try:
+            return json.loads(raw.decode(encoding))
+        except UnicodeDecodeError:
+            continue
+    return json.loads(raw.decode("utf-8"))
 
 
 def _fmt_pct(value: float | int | None) -> str:

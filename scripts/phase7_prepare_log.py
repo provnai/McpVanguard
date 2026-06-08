@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from scripts.phase7_report import generate_phase7_report
+try:
+    from scripts.phase7_report import generate_phase7_report
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from phase7_report import generate_phase7_report
 
 
 def _field(label: str, value: str | None) -> str:
