@@ -12,7 +12,7 @@ Deploy the full McpVanguard stack in one click:
 
 - A [Railway Account](https://railway.app/)
 - The MCP server command you want to protect (e.g., `npx @modelcontextprotocol/server-filesystem /app/data`)
-- *(Optional)* A [VEX Protocol](https://github.com/provnai/vex) deployment for cryptographic audit logging
+- *(Optional)* `receipt_v1` JSONL emission for offline-verifiable runtime evidence with `mcp-receipt`
 
 ---
 
@@ -26,7 +26,8 @@ You **must** set the following variables for McpVanguard to start successfully:
 |----------|-------------|
 | `MCP_SERVER_COMMAND` | The MCP server command Vanguard will wrap and protect. e.g. `npx @modelcontextprotocol/server-filesystem /app/data` |
 | `VANGUARD_API_KEY` | A secret key to protect your SSE endpoint. Clients must send this in the `X-Api-Key` header. Generate a strong random string. |
-| `VANGUARD_MODE` | `enforce` | Set to `audit` for **Shadow Mode**. This logs violations without blocking them, perfect for initial testing. |
+| `VANGUARD_PROFILE` | `balanced` | Set to `monitor` for audit-only discovery or `strict` for production-sensitive systems. |
+| `VANGUARD_MODE` | `enforce` | Optional lower-level mode. Set to `audit` for shadow-mode evaluation if you are not using the `monitor` profile. |
 
 ### 2. Security & AI Intelligence (Optional)
 
@@ -78,16 +79,17 @@ If you need **multiple replicas** for high-availability, add an official Railway
 |----------|-------------|
 | `VANGUARD_REDIS_URL` | Auto-injected by Railway when you add a Redis service. Enables distributed session tracking across replicas. |
 
-### 5. VEX Protocol: Cryptographic Audit Logging (Optional)
+### 5. Runtime Receipts (Optional)
 
-For immutable, cryptographically anchored audit trails of every blocked attack, integrate with a [VEX Protocol](https://github.com/provnai/vex) deployment.
+For offline-verifiable runtime evidence, enable McpVanguard's dedicated `receipt_v1` JSONL stream. This stream is separate from the human/SIEM audit log and is intended to be exported, signed, and verified by the standalone `mcp-receipt` tooling.
 
 | Variable | Description |
 |----------|-------------|
-| `VANGUARD_VEX_URL` | Your VEX server URL. e.g. `https://vex-production.up.railway.app` |
-| `VANGUARD_VEX_KEY` | Your VEX agent JWT for authentication. |
+| `VANGUARD_RECEIPTS_ENABLED` | Set to `true` to emit `receipt_v1` events. Disabled by default. |
+| `VANGUARD_RECEIPT_LOG_FILE` | Path for the JSONL receipt stream, e.g. `/var/log/vanguard/receipts.jsonl`. |
+| `VANGUARD_RECEIPT_REDACTION_MODE` | Redaction mode for receipt emission. Defaults to `partial`. |
 
-You can deploy your own VEX instance alongside McpVanguard for a complete Cloud-to-Cloud security stack. See [Deploying VEX on Railway](https://github.com/provnai/vex/blob/main/docs/railway.md).
+The receipt stream contains canonical request hashes, normalized-message hashes, policy decisions, profile metadata, rule findings, and runtime context. Raw tool arguments are not embedded in the receipt event.
 
 ---
 
@@ -100,7 +102,7 @@ Verify the service is running:
 curl https://your-project.up.railway.app/health
 # Expected: {
 #   "status": "ok",
-#   "version": "2.1.0",
+#   "version": "2.1.1",
 #   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
 #   "timestamp": 1711022400.0
 # }
@@ -129,25 +131,25 @@ Every tool call the agent makes will be intercepted, inspected, and either allow
 
 ---
 
-## Advanced: McpVanguard + VEX (Cloud-to-Cloud Topology)
+## Advanced: External Evidence Backend
 
-The most powerful enterprise configuration runs **both** McpVanguard and VEX natively on Railway:
+McpVanguard can also forward blocked-call evidence to an external evidence backend when `VANGUARD_VEX_URL` and `VANGUARD_VEX_KEY` are configured. Treat this as an optional integration path rather than a requirement for the Railway template.
 
 ```
 [AI Agent (Vercel / OpenAI)] 
     -> [McpVanguard on Railway] - inspects and enforces MCP tool-call policy
-        -> [VEX on Railway]    - optionally records submitted audit evidence
+        -> [External evidence backend] - optionally records submitted audit evidence
 ```
 
 The repository includes a Railway-focused integration harness for this topology. Treat its results as environment-specific evidence, not a latency or audit-finality guarantee. See the [certification harness](https://github.com/provnai/McpVanguard/blob/main/tests/benchmarks/railway_cloud_certification.py) for the exact scenarios.
 
 **To set it up:**
-1. Deploy [VEX on Railway](https://railway.com/deploy/N9-iqS?referralCode=4AXmAG) separately.
-2. Copy the VEX public URL from your Railway dashboard.
+1. Deploy or configure your evidence backend separately.
+2. Copy its public URL from your Railway dashboard or provider console.
 3. Set `VANGUARD_VEX_URL` on your McpVanguard service to that URL.
-4. Set `VANGUARD_VEX_KEY` to your VEX JWT.
+4. Set `VANGUARD_VEX_KEY` to the backend credential expected by that deployment.
 
-VEX handles all the PostgreSQL logging, Merkle-tree anchoring, and CHORA evidence capsule generation remotely while Vanguard performs fast local policy blocking at the edge.
+The external evidence backend receives submitted blocked-call evidence while Vanguard performs local policy blocking at the edge.
 
 ---
 
@@ -159,7 +161,7 @@ The instance is pre-configured with a `/health` endpoint:
 GET /health
 -> {
   "status": "ok",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
   "timestamp": 1711022400.0
 }
@@ -174,4 +176,4 @@ Railway uses this for readiness checks during deployment orchestration.
 - [Open an Issue](https://github.com/provnai/McpVanguard/issues)
 - [Full Documentation](https://github.com/provnai/McpVanguard)
 - [Provnai Research Initiative](https://provnai.com)
-- [VEX Protocol](https://github.com/provnai/vex/blob/main/docs/railway.md)
+- [Runtime receipts](DEPLOYMENT.md#runtime-receipts-for-mcp-receipt)
