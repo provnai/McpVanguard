@@ -2,6 +2,7 @@ import json
 import re
 
 from core import receipts
+from core import __version__ as MCPVANGUARD_VERSION
 from core.models import InspectionResult, RuleMatch
 from core.proxy import ProxyConfig, VanguardProxy
 from core.session import SessionState
@@ -50,7 +51,7 @@ def test_build_tool_call_receipt_event_matches_v01_contract(tmp_path):
 
     assert event["event_type"] == "receipt_v1"
     assert event["schema_version"] == "0.1.0"
-    assert event["mcpvanguard_version"] == "2.1.0"
+    assert event["mcpvanguard_version"] == MCPVANGUARD_VERSION
     assert event["event_scope"] == "tool_call"
     assert event["jsonrpc_method"] == "tools/call"
     assert event["tool_name"] == "read_file"
