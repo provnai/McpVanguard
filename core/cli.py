@@ -17,7 +17,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 import typer
@@ -41,6 +41,7 @@ from core import active_probing
 from core import supplier_signatures
 from core import sigstore_bundle
 from core import conformance
+from core import management
 from core.proxy import VanguardProxy
 
 # Load environment variables from .env
@@ -151,6 +152,28 @@ def _verify_rule_bundle(
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
+def _print_management_plane_notice(config: ProxyConfig) -> None:
+    """Print the effective management-plane posture for server commands."""
+    if not config.management_tools_enabled:
+        return
+    mode = config.management_plane_mode
+    if mode == management.MANAGEMENT_PLANE_DEV:
+        proxy_console.print(
+            "[bold yellow]Warning:[/bold yellow] management plane is in same_session_dev mode. "
+            "Mutating Vanguard tools share the governed MCP session; use only for local/dev workflows."
+        )
+    elif mode == management.MANAGEMENT_PLANE_OPERATOR:
+        proxy_console.print(
+            "[bold]Mgmt plane:[/bold] operator_only "
+            "(mutating tools require admin role or vanguard:admin/scope:admin scope)."
+        )
+    else:
+        proxy_console.print(
+            "[bold yellow]Warning:[/bold yellow] management tools were requested, "
+            "but VANGUARD_MANAGEMENT_PLANE_MODE is disabled; native tools will not be exposed."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +310,7 @@ def start(
         proxy_console.print("[bold]Mgmt:[/bold]       [green]Enabled[/green] (Native Vanguard tools exposed)")
     else:
         proxy_console.print("[bold]Mgmt:[/bold]       [dim]Disabled[/dim] (Native Vanguard tools hidden)")
+    _print_management_plane_notice(config)
     
     if config.semantic_enabled:
         status = "Ready" if semantic_ready else "Offline (Scoring will be skipped)"
@@ -379,6 +403,7 @@ def sse(
         config.behavioral_enabled = behavioral
     if management_tools is not None:
         config.management_tools_enabled = management_tools
+    _print_management_plane_notice(config)
 
     import shlex
     server_cmd = shlex.split(server)
@@ -1016,6 +1041,9 @@ def benchmark_run(
         raise typer.Exit(code=1)
 
     summary = benchmarks.summarize_evaluations(evaluations)
+    breakdowns = benchmarks.summarize_benchmark_breakdowns(evaluations)
+    confusion = benchmarks.summarize_confusion_matrix(evaluations)
+    latency = benchmarks.summarize_latency(evaluations)
     failures = [evaluation for evaluation in evaluations if not evaluation.passed]
 
     if json_output:
@@ -1023,9 +1051,14 @@ def benchmark_run(
             data={
                 "benchmark_file": benchmark_file,
                 "summary": summary,
+                "breakdowns": breakdowns,
+                "confusion": confusion,
+                "latency": latency,
                 "evaluations": [
                     {
                         "case_id": evaluation.case_id,
+                        "public_case_id": evaluation.public_case_id,
+                        "source_corpus": evaluation.source_corpus,
                         "mcp38_id": evaluation.mcp38_id,
                         "title": evaluation.title,
                         "expected_action": evaluation.expected_action,
@@ -1033,6 +1066,10 @@ def benchmark_run(
                         "passed": evaluation.passed,
                         "expected_rule_id": evaluation.expected_rule_id,
                         "actual_rule_id": evaluation.actual_rule_id,
+                        "actual_layer": evaluation.actual_layer,
+                        "actual_rule_family": evaluation.actual_rule_family,
+                        "actual_capabilities": evaluation.actual_capabilities,
+                        "latency_ms": evaluation.latency_ms,
                         "details": evaluation.details,
                     }
                     for evaluation in evaluations
@@ -1078,12 +1115,210 @@ def benchmark_run(
         )
 
     console.print(table)
+    if breakdowns["benign_blocks_by_layer"] or breakdowns["benign_blocks_by_rule_family"]:
+        console.print("[bold yellow]Benign block breakdown:[/bold yellow]")
+        console.print(f"  by layer: {breakdowns['benign_blocks_by_layer']}")
+        console.print(f"  by rule family: {breakdowns['benign_blocks_by_rule_family']}")
+    console.print("[bold]Expected vs actual actions:[/bold]")
+    for expected, row in confusion["matrix"].items():
+        console.print(f"  expected {expected}: {row}")
+    console.print(
+        "[bold]Latency:[/bold] "
+        f"mean={latency['mean_ms']:.3f}ms "
+        f"p95={latency['p95_ms']:.3f}ms "
+        f"max={latency['max_ms']:.3f}ms"
+    )
 
     if failures:
         console.print("[bold red]Failures:[/bold red]")
         for failure in failures:
             console.print(f"  - {failure.case_id}: {failure.details}")
         raise typer.Exit(code=1)
+
+
+@app.command("benchmark-profiles")
+def benchmark_profiles(
+    benchmark_file: str = typer.Option(
+        "tests/benchmarks/layered_profile_matrix.yaml",
+        "--benchmark-file",
+        help="Path to a benchmark corpus to evaluate across monitor, balanced, and strict.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json-output",
+        help="Emit machine-readable profile comparison JSON.",
+    ),
+):
+    """
+    Compare the same benchmark corpus across monitor, balanced, and strict profiles.
+    """
+    try:
+        report = benchmarks.profile_matrix_report([benchmark_file])
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/bold red] Failed to run profile comparison: {exc}")
+        raise typer.Exit(code=1)
+
+    if json_output:
+        console.print_json(data=report)
+        return
+
+    console.print(Panel.fit(
+        "[bold green]McpVanguard Profile Comparison[/bold green]\n"
+        f"[dim]{benchmark_file}[/dim]",
+        border_style="green",
+    ))
+
+    summary_table = Table(title="Profile Summary")
+    summary_table.add_column("Profile", style="cyan", no_wrap=True)
+    summary_table.add_column("Passed", no_wrap=True)
+    summary_table.add_column("Failed", no_wrap=True)
+    summary_table.add_column("Allow", no_wrap=True)
+    summary_table.add_column("Warn", no_wrap=True)
+    summary_table.add_column("Block", no_wrap=True)
+    summary_table.add_column("Pass Rate", no_wrap=True)
+    summary_table.add_column("Mean ms", no_wrap=True)
+    summary_table.add_column("P95 ms", no_wrap=True)
+
+    for profile in report["profiles"]:
+        entry = report["profile_reports"][profile]
+        summary = entry["summary"]
+        quality = entry["quality"]
+        latency = entry["latency"]
+        summary_table.add_row(
+            profile,
+            str(summary["passed"]),
+            str(summary["failed"]),
+            str(summary["ALLOW"]),
+            str(summary["WARN"]),
+            str(summary["BLOCK"]),
+            f"{quality['pass_rate']:.0%}",
+            f"{latency['mean_ms']:.3f}",
+            f"{latency['p95_ms']:.3f}",
+        )
+    console.print(summary_table)
+
+    action_table = Table(title="Action By Profile")
+    action_table.add_column("Case", style="cyan", no_wrap=True)
+    action_table.add_column("Expected", no_wrap=True)
+    for profile in report["profiles"]:
+        action_table.add_column(profile, no_wrap=True)
+    action_table.add_column("Delta", no_wrap=True)
+
+    for row in report["cases"]:
+        action_table.add_row(
+            row["case_id"],
+            row["expected_action"],
+            *[row["action_by_profile"].get(profile) or "-" for profile in report["profiles"]],
+            "yes" if row["action_delta"] else "-",
+        )
+    console.print(action_table)
+    console.print(
+        "[dim]Profile comparisons are corpus-scoped. Different actions across profiles "
+        "are expected and do not imply universal coverage or zero false positives.[/dim]"
+    )
+
+
+def _benchmark_evaluation_payload(evaluation) -> dict[str, Any]:
+    return {
+        "case_id": evaluation.case_id,
+        "public_case_id": evaluation.public_case_id,
+        "source_corpus": evaluation.source_corpus,
+        "mcp38_id": evaluation.mcp38_id,
+        "title": evaluation.title,
+        "expected_action": evaluation.expected_action,
+        "actual_action": evaluation.actual_action,
+        "passed": evaluation.passed,
+        "expected_rule_id": evaluation.expected_rule_id,
+        "actual_rule_id": evaluation.actual_rule_id,
+        "actual_layer": evaluation.actual_layer,
+        "actual_rule_family": evaluation.actual_rule_family,
+        "actual_capabilities": evaluation.actual_capabilities,
+        "latency_ms": evaluation.latency_ms,
+        "details": evaluation.details,
+    }
+
+
+@app.command("benchmark-baselines")
+def benchmark_baselines(
+    benchmark_file: str = typer.Option(
+        "tests/benchmarks/mcp38_cases.yaml",
+        "--benchmark-file",
+        help="Path to a benchmark corpus to compare against no-gateway, L1-only, L2-only, and configured-harness baselines.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json-output",
+        help="Emit machine-readable baseline comparison JSON.",
+    ),
+):
+    """
+    Compare a benchmark corpus against simple reproducible enforcement baselines.
+    """
+    try:
+        report = benchmarks.baseline_comparison_report([benchmark_file])
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/bold red] Failed to run baseline comparison: {exc}")
+        raise typer.Exit(code=1)
+
+    payload = {
+        "corpus_paths": report["corpus_paths"],
+        "baselines": {
+            name: {
+                "summary": entry["summary"],
+                "quality": entry["quality"],
+                "breakdowns": entry["breakdowns"],
+                "confusion": entry["confusion"],
+                "latency": entry["latency"],
+                "evaluations": [
+                    _benchmark_evaluation_payload(evaluation)
+                    for evaluation in entry["evaluations"]
+                ],
+            }
+            for name, entry in report["baselines"].items()
+        },
+    }
+
+    if json_output:
+        console.print_json(data=payload)
+        return
+
+    console.print(Panel.fit(
+        "[bold green]McpVanguard Baseline Comparison[/bold green]\n"
+        f"[dim]{benchmark_file}[/dim]",
+        border_style="green",
+    ))
+
+    table = Table(title="Baseline Summary")
+    table.add_column("Baseline", style="cyan", no_wrap=True)
+    table.add_column("Passed", no_wrap=True)
+    table.add_column("Failed", no_wrap=True)
+    table.add_column("Block Rate", no_wrap=True)
+    table.add_column("Benign Allow", no_wrap=True)
+    table.add_column("False Positive", no_wrap=True)
+    table.add_column("False Negative", no_wrap=True)
+    table.add_column("Mean ms", no_wrap=True)
+
+    for name, entry in payload["baselines"].items():
+        summary = entry["summary"]
+        quality = entry["quality"]
+        latency = entry["latency"]
+        table.add_row(
+            name,
+            str(summary["passed"]),
+            str(summary["failed"]),
+            f"{quality['adversarial_block_rate']:.0%}",
+            f"{quality['benign_allow_rate']:.0%}",
+            f"{quality['false_positive_rate']:.0%}",
+            f"{quality['false_negative_rate']:.0%}",
+            f"{latency['mean_ms']:.3f}",
+        )
+
+    console.print(table)
+    console.print(f"[bold]Baselines:[/bold] {', '.join(payload['baselines'].keys())}")
+    console.print(
+        "[dim]Baselines are diagnostic and corpus-scoped. `l2_threshold_only` only applies "
+        "to synthetic semantic-threshold cases; other cases are treated as ALLOW.[/dim]"
+    )
 
 
 @app.command("conformance-server")
@@ -1187,17 +1422,25 @@ def gpu_harden(
         console.print(json.dumps({
             "summary": summary,
             "quality": quality,
+            "breakdowns": report["breakdowns"],
+            "confusion": report["confusion"],
+            "latency": report["latency"],
             "corpora": [
                 {
                     "path": corpus["path"],
                     "summary": corpus["summary"],
                     "quality": corpus["quality"],
+                    "breakdowns": corpus["breakdowns"],
+                    "confusion": corpus["confusion"],
+                    "latency": corpus["latency"],
                 }
                 for corpus in report["corpora"]
             ],
             "cases": [
                 {
                     "case_id": case.case_id,
+                    "public_case_id": case.public_case_id,
+                    "source_corpus": case.source_corpus,
                     "mcp38_id": case.mcp38_id,
                     "title": case.title,
                     "harness": case.harness,
@@ -1209,11 +1452,17 @@ def gpu_harden(
             "evaluations": [
                 {
                     "case_id": evaluation.case_id,
+                    "public_case_id": evaluation.public_case_id,
+                    "source_corpus": evaluation.source_corpus,
                     "passed": evaluation.passed,
                     "expected_action": evaluation.expected_action,
                     "actual_action": evaluation.actual_action,
                     "expected_rule_id": evaluation.expected_rule_id,
                     "actual_rule_id": evaluation.actual_rule_id,
+                    "actual_layer": evaluation.actual_layer,
+                    "actual_rule_family": evaluation.actual_rule_family,
+                    "actual_capabilities": evaluation.actual_capabilities,
+                    "latency_ms": evaluation.latency_ms,
                     "details": evaluation.details,
                 }
                 for evaluation in report["evaluations"]
@@ -1233,6 +1482,9 @@ def gpu_harden(
     console.print(f"[bold]Adversarial block rate:[/bold] {quality['adversarial_block_rate']:.0%}")
     console.print(f"[bold]Benign allow rate:[/bold] {quality['benign_allow_rate']:.0%}")
     console.print(f"[bold]False positive rate:[/bold] {quality['false_positive_rate']:.0%}")
+    console.print(f"[bold]Benign blocks by layer:[/bold] {report['breakdowns']['benign_blocks_by_layer']}")
+    console.print(f"[bold]Benign blocks by rule family:[/bold] {report['breakdowns']['benign_blocks_by_rule_family']}")
+    console.print(f"[bold]Expected vs actual actions:[/bold] {report['confusion']['matrix']}")
 
     if summary["failed"]:
         raise typer.Exit(code=1)

@@ -202,7 +202,7 @@ To detect precise data exfiltration, Vanguard calculates the Shannon Entropy of 
 | Flood Exfiltration | Large outbound payload (>10KB in one call) | BLOCK |
 | Enumeration | >20 `list_dir` calls in 5s | WARN |
 
-**State storage:** In-memory `defaultdict(deque)` for single-node. Backed by **Redis** for persistent cluster-wide session history and analysis.
+**State storage:** In-memory `defaultdict(deque)` for single-node. Backed by **Redis** for persistent cluster-wide behavioral session history and analysis. Per-session budgets for tool-call rate, risky decisions, and blocked attempts are tracked per `(session_id, server_id)` as opt-in process-local circuit breakers. Atomic Redis/Lua budget counters remain a deferred hardening item for high-concurrency multi-replica deployments.
 
 ---
 
@@ -234,11 +234,33 @@ Replaces implicit layer ordering with an explainable final verdict. Composes res
 
 ---
 
+### `core/management.py` — Native Management Plane
+
+Native Vanguard tools are separated from normal upstream MCP tools and are hidden unless `VANGUARD_MANAGEMENT_TOOLS_ENABLED=true`.
+
+**Surfaces:**
+
+- read-only introspection: `get_vanguard_status`, `get_vanguard_audit`, `vanguard_get_auth_stats`
+- mutating operator actions: runtime rule injection, rule reload, session reset, auth-cache flush/refresh
+- local/dev-only mode: `same_session_dev`, which exposes mutating controls inside the governed MCP session and prints a warning
+
+**Modes:**
+
+- `disabled`: default; no native management tools are exposed
+- `same_session_dev`: local/dev workflows only
+- `operator_only`: mutating tools require an admin role or `vanguard:admin` / `scope:admin` scope
+
+The proxy filters exposed management tools by mode and principal. Management actions are logged through `vanguard.management`; denied attempts and successful mutations are also sent to the risk engine.
+
+---
+
 ### `core/receipts.py` — Optional Runtime Evidence Receipts
 
 When `VANGUARD_RECEIPTS_ENABLED=true`, the proxy writes a dedicated `receipt_v1` JSONL stream for `mcp-receipt`. This stream is separate from the operator audit log and is designed for offline verification after export/signing.
 
-The v0.1 contract currently covers tool-call request decisions. Each event includes policy profile, raw/effective policy action, normalized decision, findings, risk/semantic scores, and canonical hashes for the original and normalized request payloads. Raw tool arguments are not embedded in the receipt event. The JSONL file itself is not a signed or hash-chained audit log; use `mcp-receipt` or a downstream evidence layer for tamper-evident signing and verification.
+The v0.1 contract currently covers tool-call request decisions. Each event includes policy profile, raw/effective policy action, normalized decision, findings, risk/semantic scores, and canonical hashes for the original and normalized request payloads. Raw tool arguments are not embedded in the receipt event.
+
+By default, the JSONL stream is unsigned and unchained. Operators can enable local hash chaining with `VANGUARD_RECEIPT_CHAIN_ENABLED=true`, which adds `prev_receipt_hash`, `receipt_sequence`, and `receipt_hash` fields for deletion/reordering/mutation detection before export. This is still not a substitute for export/signing with `mcp-receipt` or downstream anchoring.
 
 ---
 

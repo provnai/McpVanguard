@@ -1,5 +1,5 @@
 # McpVanguard - Deployment Guide
-**Release target**: `2.1.1` runtime hardening patch for the layered enforcement release line.
+**Release target**: `2.1.x` runtime hardening patch line.
 
 After the GitHub release and PyPI publication are complete, this document applies to the published `2.1.x` line.
 
@@ -13,6 +13,26 @@ It adds a layered enforcement path - L0 preflight normalization, L1 deterministi
 - `strict` — production hardening; enables all layers, fail-closed semantic, blocks enumeration
 
 This guide covers how to deploy Vanguard in different environments.
+
+### Install Modes
+
+The base package keeps Redis and Google RE2 optional so local users can install quickly while hosted operators can opt into the stronger deployment stack they need.
+
+```bash
+# Base local/gateway install
+pip install mcp-vanguard
+
+# Redis-backed L3 state for multi-instance deployments
+pip install "mcp-vanguard[redis]"
+
+# RE2-backed regex engine where the wheel is available
+pip install "mcp-vanguard[re2]"
+
+# Full hosted/deployment extra set
+pip install "mcp-vanguard[full]"
+```
+
+If `google-re2` is unavailable, McpVanguard falls back to Python `re` with the existing timeout-based rule-evaluation protections. If Redis is not installed or `VANGUARD_REDIS_URL` is not set, L3 behavioral state remains in memory and is single-instance only.
 
 ### 0. Define Your Safe Zones (L1 Perimeter)
 Before deploying, define exact directory bounds for your MCP tools in `rules/safe_zones.yaml`. Vanguard applies deterministic path-boundary checks before upstream execution; it should be paired with normal OS, container, or cloud isolation for production workloads. See [SAFE_ZONES.md](SAFE_ZONES.md) for tuning guidance.
@@ -66,10 +86,88 @@ To expose Vanguard as an internet-reachable security gateway (e.g., on Railway),
 vanguard sse --profile balanced --server "npx -y @modelcontextprotocol/server-filesystem /var/data" --port 8080
 ```
 
+### Safe Hosted Baseline
+
+For public or non-loopback bindings such as `0.0.0.0`, treat transport authentication as mandatory.
+
+```bash
+export VANGUARD_API_KEY="your-long-random-secret"
+vanguard sse --profile strict --host 0.0.0.0 --port 8080 --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
+```
+
+`strict` profile is deployment-safe by default on hosted transports:
+
+- non-loopback startup fails closed unless `VANGUARD_API_KEY` or OAuth/JWKS auth is configured
+- bearer claim-policy mismatches default to `block`
+- `Origin` is required when `VANGUARD_ALLOWED_ORIGINS` is configured
+- Streamable HTTP session binding, request rate limits, concurrency caps, and session caps remain enabled by default
+- optional per-session budgets can circuit-break sessions that exceed tool-call, risky-call, or blocked-attempt limits
+- startup prints a hosted posture summary with profile, bind scope, auth mode, origin policy, claim policy, session binding, and Redis/shared-state status
+
+`balanced` profile remains usable for demos and staged rollouts. It will still start on a public bind without auth, but prints a loud warning so operators can discover unsafe deployments without breaking local experimentation.
+
 **Staged rollout recommendation:**
 1. **Week 1-2:** Deploy `monitor` profile. Review audit logs to understand your traffic patterns.
 2. **Week 3-4:** Switch to `balanced` profile. Fix any false positives that block benign developer workflows.
 3. **Month 2+:** For sensitive production agents, switch to `strict` profile. Ensure Redis is configured for multi-instance behavioral state.
+
+When tuning false positives, use the structured `policy_explanation` field in JSON audit logs. It records the primary layer, rule family, raw/effective policy action, whether the upstream server was called, and an operator hint. See [BLOCK_DECISIONS.md](BLOCK_DECISIONS.md).
+
+### Capability-Aware Behavioral Tracking
+
+Layer 3 classifies tool calls into coarse capabilities such as `filesystem_read`, `filesystem_write`, `shell_exec`, `network_request`, `database_query`, `browser_automation`, `credential_adjacent`, and `metadata_sensitive`. This helps behavioral detectors catch renamed tools such as `fetch_document` or `save_document` instead of relying only on literal names like `read_file`.
+
+Capability inference is heuristic unless you provide an explicit override:
+
+```bash
+export VANGUARD_TOOL_CAPABILITIES_JSON='{"company_fetch": ["filesystem_read"], "company_save": ["filesystem_write"]}'
+```
+
+Use overrides when your MCP server uses domain-specific tool names. Unknown capabilities are recorded as `unknown` and do not create stronger balanced-profile blocking by default.
+
+Repeated `network_request` capability calls produce a Layer 3 WARN/risk signal rather than a default block. Tune the threshold with:
+
+```bash
+export VANGUARD_BEH_NETWORK_LIMIT=30
+```
+
+### Per-Session Budgets
+
+Per-session budgets are opt-in circuit breakers for deployments that want hard limits around repeated activity. They are tracked per `(session_id, server_id)` so one upstream server cannot consume another server's budget.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `VANGUARD_MAX_TOOL_CALLS_PER_MINUTE` | `0` | Maximum `tools/call` requests per session/server in a rolling 60-second window. `0` disables the budget. |
+| `VANGUARD_MAX_RISKY_CALLS_PER_SESSION` | `0` | Maximum WARN/REVIEW/SHADOW-BLOCK/BLOCK decisions per session/server before later risky calls are blocked. `0` disables the budget. |
+| `VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION` | `0` | Maximum BLOCK/SHADOW-BLOCK decisions per session/server before the session is circuit-broken and later tool calls are blocked. `0` disables the budget. |
+
+Budget blocks use deterministic rule IDs:
+
+- `VANGUARD-BUDGET-001`: tool calls per minute exceeded
+- `VANGUARD-BUDGET-002`: risky calls per session exceeded
+- `VANGUARD-BUDGET-003`: blocked attempts per session exceeded
+
+Recommended hosted starting point:
+
+```bash
+export VANGUARD_MAX_TOOL_CALLS_PER_MINUTE=120
+export VANGUARD_MAX_RISKY_CALLS_PER_SESSION=10
+export VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION=3
+```
+
+Tune these limits in `monitor` or `balanced` before enforcing in `strict`. High-volume automation, crawling, migrations, and incident-response workflows may need higher limits or narrower safe-zone/profile tuning.
+
+### Redis And Shared State
+
+If `VANGUARD_REDIS_URL` is unset, behavioral state, risk state, and session-budget state are process-local. This is suitable for local development, single-process demos, and single-replica deployments.
+
+For hosted multi-replica deployments, configure Redis so L3 behavioral state and session tracking can be shared across instances. Without Redis, each replica only sees the traffic it handles.
+
+Current Redis-backed L3 state is suitable for shared behavioral visibility, but risk-engine state and session-budget counters are still process-local. Atomic Redis/Lua budget counters are a deferred hardening item. For strict, high-concurrency hosted deployments, validate limits under realistic concurrency before relying on budgets as the only abuse-control layer.
+
+For private-network MCP servers exposed through Anthropic MCP tunnels, route the tunnel to McpVanguard first and then forward to the private upstream MCP server. Tunnels reduce network exposure. McpVanguard enforces the execution boundary. See [ANTHROPIC_MCP_TUNNELS.md](ANTHROPIC_MCP_TUNNELS.md).
+
+McpVanguard is tracking the MCP 2026-07-28 release candidate. The current `2.1.x` line includes additive routing-header consistency checks when `Mcp-Method` / `Mcp-Name` are present and treats request `_meta` as security-relevant input. See [MCP_2026_07_28_RC_COMPATIBILITY.md](MCP_2026_07_28_RC_COMPATIBILITY.md).
 
 ## 2. L2 Semantic Scalability (Cloud LLM Integration)
 
@@ -175,6 +273,30 @@ export VANGUARD_LOG_FILE="/var/log/vanguard/audit.log"
 export VANGUARD_AUDIT_FORMAT="json" # Set to 'json' for SIEM ingest (Elastic, Splunk)
 ```
 
+JSON audit logs include `policy_explanation` for inspected requests. This field is intended for operators and SIEM pipelines; agent-facing error messages remain intentionally brief unless `VANGUARD_EXPOSE_BLOCK_REASON=true` is set.
+
+### Management Plane Separation
+
+Native Vanguard management tools are not part of the normal product surface unless explicitly enabled:
+
+```bash
+export VANGUARD_MANAGEMENT_TOOLS_ENABLED=true
+export VANGUARD_MANAGEMENT_PLANE_MODE=operator_only
+```
+
+Supported management-plane modes:
+
+- `disabled`: default; native management tools are not exposed and calls fail closed
+- `same_session_dev`: local/dev only; exposes read and mutating tools in the governed MCP session and prints a startup warning
+- `operator_only`: exposes read-only tools broadly but exposes/permits mutating tools only when the caller has an admin role or `vanguard:admin` / `scope:admin` scope
+
+Production guidance:
+
+- Keep `VANGUARD_MANAGEMENT_TOOLS_ENABLED=false` for ordinary governed agent sessions.
+- Use `operator_only` only when the transport/auth layer reliably supplies operator identity and scopes.
+- Prefer CLI/operator workflows such as signed rule updates, baseline bundle generation, server verification, and capability verification for production maintenance.
+- Every management action is logged through the management logger; denied and successful mutating actions are also recorded in the risk engine.
+
 ### Runtime Receipts For mcp-receipt
 
 McpVanguard can optionally emit a dedicated `receipt_v1` JSONL stream for the standalone `mcp-receipt` verifier. This is separate from the human/SIEM audit log and is disabled by default.
@@ -183,9 +305,30 @@ McpVanguard can optionally emit a dedicated `receipt_v1` JSONL stream for the st
 export VANGUARD_RECEIPTS_ENABLED=true
 export VANGUARD_RECEIPT_LOG_FILE="/var/log/vanguard/receipts.jsonl"
 export VANGUARD_RECEIPT_REDACTION_MODE="partial"
+# Optional local tamper-evidence before export/signing
+export VANGUARD_RECEIPT_CHAIN_ENABLED=true
+# Optional McpVanguard extension hashes/capability labels
+export VANGUARD_RECEIPT_EXTENSIONS_ENABLED=true
 ```
 
 The receipt stream contains canonical request hashes, normalized-message hashes, policy decisions, profile metadata, rule findings, and runtime context. It does not write raw tool arguments into the receipt event. Use `mcp-receipt` to export, sign, and verify these events offline.
+
+Important evidence boundaries:
+
+- Raw JSONL receipts are not signed evidence by themselves.
+- `VANGUARD_RECEIPT_CHAIN_ENABLED=true` adds `prev_receipt_hash`, `receipt_sequence`, and `receipt_hash` fields so local deletion, reordering, and mutation can be detected before export.
+- Receipt chaining is local tamper evidence, not a substitute for signing or external anchoring.
+- `VANGUARD_RECEIPT_EXTENSIONS_ENABLED=true` adds McpVanguard extension metadata such as policy-explanation hashes and tool-capability labels without embedding full raw policy explanations.
+- `receipt_v1` currently records request-side tool-call decisions. `response_hash` remains reserved/nullable unless response-side receipt support is explicitly added in a future schema.
+- ProvnCloud/VEX anchoring can prove that a signed/exported evidence packet existed at an anchoring time; it does not prove the underlying host was uncompromised or that an unsigned local JSONL file was complete before export.
+
+Retention and rotation guidance:
+
+- Treat receipt JSONL files as append-only evidence buffers.
+- Rotate by closing the current file, exporting/signing it with `mcp-receipt`, then starting a new file.
+- Do not edit chained receipt files in place; edits break `receipt_hash` verification.
+- If a chained stream is restarted after appending to an older unchained file, McpVanguard marks the new chained record with `chain_restart=true`.
+- Keep retention policy aligned with your audit/SIEM requirements; McpVanguard does not currently delete receipt files automatically.
 
 ## Summary
 
@@ -219,6 +362,8 @@ Authorization: Bearer your-long-random-secret
 
 The `/health` endpoint is exempt and always accessible for Railway/cloud health-checks.
 
+In `strict` profile, public/non-loopback binds refuse to start unless API-key auth or OAuth/JWKS auth is configured. For OAuth/JWKS deployments, set `VANGUARD_AUTH_MODE=oauth` and provide one of `VANGUARD_JWKS_FILE`, `VANGUARD_JWKS_JSON`, `VANGUARD_JWKS_URL`, or `VANGUARD_OAUTH_DISCOVERY_URL`.
+
 > **Deep Health Probes**: The `/health` endpoint performs live connectivity checks against Redis and the configured Semantic LLM backend, returning a `200 OK` only if all critical layers are accessible. It falls back to `503 Service Unavailable` if dependencies fail, enabling Railway to safely kill unresponsive containers during a rolling deploy.
 
 ---
@@ -230,6 +375,9 @@ The `/health` endpoint is exempt and always accessible for Railway/cloud health-
 | `VANGUARD_SESSION_TTL` | `86400` | Session expiry in seconds (24h). Stale sessions are auto-evicted. |
 | `VANGUARD_MAX_STREAMABLE_SESSIONS` | `100` | Maximum active Streamable HTTP `/mcp` sessions per process. |
 | `VANGUARD_EXPOSE_BLOCK_REASON` | `false` | Set to `true` to include detailed block reasons in JSON-RPC error responses. Off by default to avoid leaking rule internals to agents. |
+| `VANGUARD_MAX_TOOL_CALLS_PER_MINUTE` | `0` | Optional per-session/server rolling tool-call rate budget. |
+| `VANGUARD_MAX_RISKY_CALLS_PER_SESSION` | `0` | Optional per-session/server budget for WARN/REVIEW/SHADOW-BLOCK/BLOCK decisions. |
+| `VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION` | `0` | Optional per-session/server blocked-attempt circuit breaker. |
 
 ---
 

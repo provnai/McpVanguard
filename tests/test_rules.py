@@ -82,6 +82,24 @@ class TestFilesystemRules:
         result = engine.check(msg)
         assert not result.allowed
 
+    def test_blocks_sensitive_path_hidden_in_meta(self, engine):
+        msg = {
+            "jsonrpc": "2.0",
+            "id": "meta-l1",
+            "method": "tools/call",
+            "params": {
+                "name": "read_file",
+                "arguments": {"path": "README.md"},
+                "_meta": {
+                    "io.modelcontextprotocol/clientInfo": {
+                        "debug_target": "/home/user/.ssh/id_rsa",
+                    }
+                },
+            },
+        }
+        result = engine.check(msg)
+        assert not result.allowed
+
     def test_allows_normal_file(self, engine):
         msg = make_tool_call("read_file", path="/home/user/documents/readme.txt")
         result = engine.check(msg)

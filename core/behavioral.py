@@ -30,6 +30,7 @@ from typing import Deque, Optional, Any
 from core.risk import RiskEngine
 
 from core.models import InspectionResult, RuleMatch
+from core.tool_capabilities import ToolCapability, capability_values, infer_tool_capabilities
 
 logger = logging.getLogger("vanguard.behavioral")
 
@@ -38,6 +39,7 @@ logger = logging.getLogger("vanguard.behavioral")
 ENABLED = os.getenv("VANGUARD_BEHAVIORAL_ENABLED", "true").lower() == "true"
 MAX_READ_FILE_PER_10S = int(os.getenv("VANGUARD_BEH_READ_LIMIT", "50"))
 MAX_LIST_DIR_PER_5S = int(os.getenv("VANGUARD_BEH_LIST_LIMIT", "20"))
+MAX_NETWORK_REQUEST_PER_10S = int(os.getenv("VANGUARD_BEH_NETWORK_LIMIT", "30"))
 MAX_ANY_TOOL_PER_60S = int(os.getenv("VANGUARD_BEH_FLOOD_LIMIT", "200"))
 MAX_RESPONSE_BYTES = int(os.getenv("VANGUARD_BEH_PAYLOAD_LIMIT", str(10 * 1024)))
 VANGUARD_STRICT_REDIS = os.getenv("VANGUARD_STRICT_REDIS", "false").lower() == "true"
@@ -179,9 +181,15 @@ class BehavioralState:
                 self._windows[tool] = _Window()
         return self._windows[tool]
 
-    def record_call(self, tool_name: str, params: dict) -> None:
+    def record_call(self, tool_name: str, params: dict, capabilities: set[ToolCapability] | None = None) -> None:
         self.window(tool_name).record()
         self.window("*").record()
+        capabilities = capabilities or {ToolCapability.UNKNOWN}
+        for capability in capabilities:
+            self.window(f"cap:{capability.value}").record()
+
+        if _is_directory_listing_tool(tool_name):
+            self.window("cap:directory_list").record()
 
         # Track sensitive reads for priv-esc detector
         path = (
@@ -189,7 +197,11 @@ class BehavioralState:
             or params.get("path", "")
             or ""
         )
-        if path:
+        is_read_like = (
+            ToolCapability.FILESYSTEM_READ in capabilities
+            or ToolCapability.CREDENTIAL_ADJACENT in capabilities
+        )
+        if path and is_read_like:
             # Normalize to forward-slashes for consistent fragment matching
             path = path.replace("\\", "/")
             if any(frag.lower() in path.lower() for frag in _SENSITIVE_PATH_FRAGMENTS):
@@ -309,10 +321,16 @@ def prune_inactive_states(max_age_secs: int = 3600) -> int:
 
 _WRITE_TOOLS = frozenset({"write_file", "create_file", "append_file", "edit_file",
                            "run_shell", "execute", "bash", "eval"})
+_LIST_TOOL_HINTS = ("list", "ls", "dir", "enumerate", "discover")
 
 
 def _is_write_tool(tool_name: str) -> bool:
     return tool_name.lower() in _WRITE_TOOLS
+
+
+def _is_directory_listing_tool(tool_name: str) -> bool:
+    value = tool_name.lower()
+    return value in {"list_directory", "list_dir", "ls"} or any(hint in value for hint in _LIST_TOOL_HINTS)
 
 
 # ─── Public inspection API ────────────────────────────────────────────────────
@@ -358,12 +376,14 @@ def _inspect_request_sync(
     params = message.get("params", {})
     tool_name = params.get("name", "unknown")
     state = get_state(session_id, server_id)
+    capabilities = infer_tool_capabilities(message)
+    capability_list = capability_values(capabilities)
 
     # Record the call
-    state.record_call(tool_name, params)
+    state.record_call(tool_name, params, capabilities)
 
     # Track writes
-    if _is_write_tool(tool_name):
+    if _is_write_tool(tool_name) or ToolCapability.FILESYSTEM_WRITE in capabilities:
         state.record_write(tool_name)
 
     # ── BEH-003: Write-after-sensitive-read (privilege escalation sequence) ──
@@ -378,10 +398,11 @@ def _inspect_request_sync(
                 severity="CRITICAL",
             )],
             block_reason=f"Privilege escalation sequence: write following sensitive file read ({state.get_sensitive_reads()})",
+            tool_capabilities=capability_list,
         )
 
     # ── BEH-001: Data scraping detector ──
-    read_count = state.window("read_file").count_in(10.0)
+    read_count = state.window("cap:filesystem_read").count_in(10.0)
     if read_count > MAX_READ_FILE_PER_10S:
         return InspectionResult(
             allowed=False,
@@ -392,7 +413,8 @@ def _inspect_request_sync(
                 description=f"read_file called {read_count}× in 10s (limit {MAX_READ_FILE_PER_10S})",
                 severity="HIGH",
             )],
-            block_reason=f"Data scraping: {read_count} read_file calls in 10s",
+            block_reason=f"Data scraping: {read_count} filesystem_read-capable calls in 10s",
+            tool_capabilities=capability_list,
         )
     
     if read_count > (MAX_READ_FILE_PER_10S * 0.5):
@@ -401,7 +423,7 @@ def _inspect_request_sync(
     # ... and so on for other detectors ...
 
     # ── BEH-002: Directory enumeration detector ──
-    list_count = state.window("list_directory").count_in(5.0)
+    list_count = state.window("cap:directory_list").count_in(5.0)
     if list_count > MAX_LIST_DIR_PER_5S:
         return InspectionResult(
             allowed=not VANGUARD_BLOCK_ENUMERATION,
@@ -413,9 +435,34 @@ def _inspect_request_sync(
                 severity="HIGH" if VANGUARD_BLOCK_ENUMERATION else "MEDIUM",
             )],
             block_reason=f"Directory enumeration detected: {list_count} calls in 5s" if VANGUARD_BLOCK_ENUMERATION else None,
+            tool_capabilities=capability_list,
         )
 
     # ── BEH-005: Tool flood detector ──
+    network_count = state.window("cap:network_request").count_in(10.0)
+    if network_count > MAX_NETWORK_REQUEST_PER_10S:
+        RiskEngine.get_instance().record_event(
+            session_id,
+            server_id,
+            "BEHAVIORAL_WARN",
+            {"detector": "BEH-007", "count": network_count, "capability": "network_request"},
+        )
+        return InspectionResult(
+            allowed=True,
+            action="WARN",
+            layer_triggered=3,
+            rule_matches=[RuleMatch(
+                rule_id="BEH-007",
+                description=(
+                    f"network_request capability called {network_count} times in 10s "
+                    f"(limit {MAX_NETWORK_REQUEST_PER_10S})"
+                ),
+                severity="MEDIUM",
+            )],
+            block_reason="Network request burst detected; review egress policy and target allowlists.",
+            tool_capabilities=capability_list,
+        )
+
     total_count = state.window("*").count_in(60.0)
     if total_count > MAX_ANY_TOOL_PER_60S:
         return InspectionResult(
@@ -428,6 +475,7 @@ def _inspect_request_sync(
                 severity="HIGH",
             )],
             block_reason=f"Automated tool flood: {total_count} calls in 60s",
+            tool_capabilities=capability_list,
         )
 
     return None

@@ -216,6 +216,10 @@ class Rule:
         return candidates
 
     def _allow_recursive_candidate(self, field_path: str) -> bool:
+        # MCP 2026-07-28 moves more protocol/client context into request
+        # _meta. Treat it as security-relevant input instead of transport fluff.
+        if field_path == "params._meta" or field_path.startswith("params._meta."):
+            return True
         key = self._last_field_key(field_path)
         if not key:
             return False
@@ -581,6 +585,7 @@ class RulesEngine:
 
             if not allowed:
                 logger.warning(f"SAFE ZONE BREACH: Tool '{tool_name}' attempted to access '{requested_path}' outside of allowed zones.")
+                allowed_summary = ", ".join(prefix for zone in relevant_zones for prefix in zone.allowed_prefixes)
                 return InspectionResult.block(
                     reason=f"Access denied: Path '{requested_path}' is outside the authorized Safe Zone for tool '{tool_name}'.",
                     layer=1,
@@ -589,6 +594,9 @@ class RulesEngine:
                         rule_name="Safe Zone Violation",
                         severity=RuleSeverity.CRITICAL,
                         action=RuleAction.BLOCK,
+                        matched_field=key,
+                        matched_value=requested_path,
+                        description=f"Allowed prefixes for {tool_name}: {allowed_summary or '[none configured]'}",
                         message=f"Deterministic jail failure for {tool_name}"
                     )]
                 )

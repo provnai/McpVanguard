@@ -27,6 +27,19 @@ Key fields:
 
 When available, audit events also include `tool_capabilities`, a coarse list such as `filesystem_read`, `filesystem_write`, `network_request`, or `unknown`.
 
+Structured JSON audit logs also include SIEM-oriented top-level fields:
+
+| Field | Meaning |
+|---|---|
+| `audit_schema_version` | Stable audit schema identifier for downstream parsers. |
+| `event_category` | Current value: `mcp.policy`. |
+| `event_type` | Current value: `mcp.policy.decision`. |
+| `event_outcome` | Normalized outcome such as `success`, `warning`, `review`, `would_block`, or `blocked`. |
+| `event_severity` | Normalized severity such as `info`, `low`, `medium`, `high`, or `critical`. |
+| `decision` | Final effective policy decision. |
+| `raw_policy_action` | Layer-composed policy action before profile/mode adjustment. |
+| `effective_policy_action` | Action McpVanguard actually applied. |
+
 Agent-facing JSON-RPC errors stay intentionally brief unless `VANGUARD_EXPOSE_BLOCK_REASON=true` is set. Full explanations belong in operator logs and evidence streams, not necessarily in the model-visible error channel.
 
 ## Common Layers
@@ -39,6 +52,12 @@ Agent-facing JSON-RPC errors stay intentionally brief unless `VANGUARD_EXPOSE_BL
 | `L1.5` | Camouflage or trust-signal manipulation was detected. |
 | `L2` | Semantic scoring escalated an ambiguous request. Treat this as advisor context, not the whole boundary. |
 | `L3` | Session or behavioral risk triggered, such as repeated reads, enumeration, flooding, or high-entropy extraction. |
+
+Per-session budget blocks are reported as L3/session-governor decisions:
+
+- `VANGUARD-BUDGET-001`: tool calls per minute exceeded
+- `VANGUARD-BUDGET-002`: risky calls per session exceeded
+- `VANGUARD-BUDGET-003`: blocked attempts per session exceeded
 
 ## Safe-Zone Blocks
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-vanguard"
-version = "2.1.1"
+version = "2.1.2"
 description = "Security gateway and verification layer for the Model Context Protocol (MCP)"
 readme = "README.md"
 license = "MIT"
@@ -26,10 +26,8 @@ dependencies = [
     "typer>=0.9",
     "rich>=13.0",
     "httpx>=0.27",
-    "google-re2>=1.1.20240701",
     "cryptography>=48.0.0",
     "python-dotenv>=1.0",
-    "redis>=5.0",
     "starlette>=0.30.0",
     "uvicorn>=0.23.0",
     "mcp>=1.0.0",
@@ -40,8 +38,21 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "google-re2>=1.1.20240701",
+    "redis>=5.0",
+]
+redis = [
+    "redis>=5.0",
+]
+re2 = [
+    "google-re2>=1.1.20240701",
+]
+hosted = [
+    "redis>=5.0",
 ]
 full = [
+    "google-re2>=1.1.20240701",
+    "redis>=5.0",
     "uvloop>=0.19; sys_platform != 'win32'",
 ]
 

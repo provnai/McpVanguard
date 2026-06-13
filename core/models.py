@@ -101,6 +101,8 @@ class InspectionResult(BaseModel):
     rule_matches: list[RuleMatch] = Field(default_factory=list)
     semantic_score: Optional[float] = None
     block_reason: Optional[str] = None
+    policy_explanation: Optional[dict[str, Any]] = None
+    tool_capabilities: list[str] = Field(default_factory=list)
 
     @classmethod
     def allow(cls) -> "InspectionResult":
@@ -137,8 +139,13 @@ class AuthPrincipal(BaseModel):
 
 class AuditEvent(BaseModel):
     """An entry written to audit.log for every proxied message."""
+    audit_schema_version: str = "mcpvanguard.audit.v1"
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     timestamp: float = Field(default_factory=time.time)
+    event_category: str = "mcp.policy"
+    event_type: str = "mcp.policy.decision"
+    event_outcome: str = "unknown"
+    event_severity: str = "info"
     session_id: str
     principal_id: Optional[str] = None
     auth_type: Optional[str] = None
@@ -148,6 +155,9 @@ class AuditEvent(BaseModel):
     method: Optional[str] = None
     tool_name: Optional[str] = None
     action: str  # ALLOW | BLOCK | WARN
+    decision: Optional[str] = None
+    raw_policy_action: Optional[str] = None
+    effective_policy_action: Optional[str] = None
     layer_triggered: Optional[int] = None
     rule_id: Optional[str] = None
     semantic_score: Optional[float] = None
@@ -155,6 +165,8 @@ class AuditEvent(BaseModel):
     risk_enforcement: Optional[str] = None
     latency_ms: Optional[float] = None
     blocked_reason: Optional[str] = None
+    policy_explanation: Optional[dict[str, Any]] = None
+    tool_capabilities: list[str] = Field(default_factory=list)
     auth_warnings: list[str] = Field(default_factory=list)
 
     def to_log_line(self, format: str = "text") -> str:

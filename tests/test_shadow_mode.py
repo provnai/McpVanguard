@@ -62,3 +62,60 @@ async def test_shadow_mode_allows_violation():
         
     # 3. Stats reflect shadow block
     assert proxy._stats.get("shadow_blocked", 0) == 1
+
+
+@pytest.mark.asyncio
+async def test_audit_mode_records_would_block_policy_explanation():
+    """Audit mode forwards the call but preserves the would-block explanation in JSON logs."""
+    config = ProxyConfig()
+    config.mode = "audit"
+
+    mock_reader = AsyncMock()
+    mock_writer = AsyncMock()
+    mock_reader.readline.side_effect = [
+        json.dumps({
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {"path": "/etc/shadow"}},
+            "id": 1,
+        }).encode("utf-8"),
+        None,
+    ]
+
+    proxy = VanguardProxy(
+        server_command=["mock-server"],
+        config=config,
+        agent_reader=mock_reader,
+        agent_writer=mock_writer,
+    )
+    proxy._setup_subprocess = AsyncMock()
+    proxy._write_to_server = AsyncMock()
+    proxy._write_to_agent = AsyncMock()
+    proxy._log_audit_event = MagicMock()
+
+    from core.models import InspectionResult, RuleMatch
+
+    with patch.object(proxy, "_inspect_message") as mock_inspect:
+        mock_inspect.return_value = InspectionResult(
+            allowed=False,
+            action="BLOCK",
+            layer_triggered=1,
+            block_reason="Path outside configured safe zone",
+            rule_matches=[RuleMatch(rule_id="VANGUARD-SAFEZONE-001", severity="CRITICAL")],
+            policy_explanation={
+                "schema_version": "policy_explanation_v1",
+                "primary_layer": "L1",
+                "primary_rule_id": "VANGUARD-SAFEZONE-001",
+                "raw_policy_action": "BLOCK",
+                "effective_policy_action": "SHADOW-BLOCK",
+                "upstream_called": True,
+            },
+        )
+
+        await proxy._pump_agent_to_server()
+
+    assert proxy._write_to_server.called
+    tool_event = proxy._log_audit_event.call_args.kwargs
+    assert tool_event["action"] == "SHADOW-BLOCK"
+    assert tool_event["policy_explanation"]["primary_rule_id"] == "VANGUARD-SAFEZONE-001"
+    assert tool_event["policy_explanation"]["upstream_called"] is True

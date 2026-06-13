@@ -63,12 +63,21 @@ class ManagementContext:
     log_file: str = "audit.log"
     rules_engine: Any = None
     principal: Any = None  # AuthPrincipal | None; carries roles/scopes.
-    plane_mode: str = MANAGEMENT_PLANE_DEV  # default dev mode; proxy sets from env
+    plane_mode: Optional[str] = None  # proxy sets from config; direct calls fall back to env
 
 
-def _get_plane_mode() -> str:
-    """Read VANGUARD_MANAGEMENT_PLANE_MODE from env at call time."""
-    return os.getenv("VANGUARD_MANAGEMENT_PLANE_MODE", MANAGEMENT_PLANE_DISABLED)
+def _normalize_plane_mode(value: str | None) -> str:
+    raw = (value or MANAGEMENT_PLANE_DISABLED).strip().lower()
+    if raw in {MANAGEMENT_PLANE_DISABLED, MANAGEMENT_PLANE_DEV, MANAGEMENT_PLANE_OPERATOR}:
+        return raw
+    return MANAGEMENT_PLANE_DISABLED
+
+
+def _get_plane_mode(context: "ManagementContext" | None = None) -> str:
+    """Resolve the active management plane mode from context or env."""
+    if context is not None and context.plane_mode is not None:
+        return _normalize_plane_mode(context.plane_mode)
+    return _normalize_plane_mode(os.getenv("VANGUARD_MANAGEMENT_PLANE_MODE"))
 
 
 def _principal_has_admin(principal: Any) -> bool:
@@ -87,29 +96,70 @@ def _principal_has_admin(principal: Any) -> bool:
     return bool(roles & ADMIN_ROLES) or bool(scopes & ADMIN_SCOPES)
 
 
-def _audit_management_denied(name: str, context: "ManagementContext", reason: str) -> None:
-    """Record a denied management attempt in telemetry and optionally RiskEngine."""
+def _management_surface(name: str) -> str:
+    if name in READ_ONLY_MANAGEMENT_TOOLS:
+        return "read_only"
+    if name in MUTATING_MANAGEMENT_TOOLS:
+        return "mutating"
+    return "unknown"
+
+
+def _principal_id(principal: Any) -> str | None:
+    if principal is None:
+        return None
+    return getattr(principal, "principal_id", None) or getattr(principal, "sub", None)
+
+
+def _audit_management_action(
+    name: str,
+    context: "ManagementContext",
+    *,
+    outcome: str,
+    reason: str = "",
+    plane_mode: str | None = None,
+) -> None:
+    """Record management-plane activity in logs and RiskEngine where useful."""
     import logging
+
     log = logging.getLogger("vanguard.management")
-    log.warning(
-        "Management op DENIED | tool=%s session=%s reason=%s",
-        name, context.session_id, reason,
+    level = logging.WARNING if outcome in {"DENIED", "ERROR"} else logging.INFO
+    log.log(
+        level,
+        "Management op %s | tool=%s surface=%s plane=%s session=%s principal=%s reason=%s",
+        outcome,
+        name,
+        _management_surface(name),
+        plane_mode or _get_plane_mode(context),
+        context.session_id,
+        _principal_id(context.principal) or "anonymous",
+        reason or "-",
     )
-    # Forward to risk engine if available
+
     try:
         from core.risk import RiskEngine
-        RiskEngine.get_instance().record_event(
-            session_id=context.session_id or "unknown",
-            event_type="management_denied",
-            severity="HIGH",
-            metadata={"tool": name, "reason": reason},
-        )
+        event_type = None
+        if outcome == "DENIED":
+            event_type = "MANAGEMENT_DENIED"
+        elif outcome == "SUCCESS" and name in MUTATING_MANAGEMENT_TOOLS:
+            event_type = "MANAGEMENT_MUTATION"
+        if event_type:
+            RiskEngine.get_instance().record_event(
+                context.session_id or "unknown",
+                "management",
+                event_type,
+                {
+                    "tool": name,
+                    "surface": _management_surface(name),
+                    "plane_mode": plane_mode or _get_plane_mode(context),
+                    "principal_id": _principal_id(context.principal),
+                    "reason": reason,
+                },
+            )
     except Exception:
         pass  # risk engine may not be initialised; non-fatal
 
 
-def get_vanguard_tools() -> List[Dict[str, Any]]:
-    """Return the list of native Vanguard tools with safety hints."""
+def _base_vanguard_tools() -> List[Dict[str, Any]]:
     return [
         {
             "name": "get_vanguard_status",
@@ -218,6 +268,29 @@ def get_vanguard_tools() -> List[Dict[str, Any]]:
     ]
 
 
+def get_vanguard_tools(
+    *,
+    plane_mode: str | None = None,
+    principal: Any = None,
+) -> List[Dict[str, Any]]:
+    """Return native Vanguard tools visible to the current management surface."""
+    resolved_mode = _normalize_plane_mode(plane_mode or os.getenv("VANGUARD_MANAGEMENT_PLANE_MODE"))
+    if resolved_mode == MANAGEMENT_PLANE_DISABLED:
+        return []
+
+    tools = _base_vanguard_tools()
+    if resolved_mode == MANAGEMENT_PLANE_DEV:
+        return tools
+
+    if resolved_mode == MANAGEMENT_PLANE_OPERATOR and _principal_has_admin(principal):
+        return tools
+
+    return [
+        tool for tool in tools
+        if tool.get("name") in READ_ONLY_MANAGEMENT_TOOLS
+    ]
+
+
 def _result_text(text: str, is_error: bool = False, extra: Optional[dict[str, Any]] = None) -> Dict[str, Any]:
     payload = {"content": [{"type": "text", "text": text}]}
     if is_error:
@@ -260,27 +333,28 @@ async def handle_vanguard_tool(
     context = context or ManagementContext()
 
     # Management plane gate.
-    plane_mode = _get_plane_mode()
+    plane_mode = _get_plane_mode(context)
 
     if plane_mode == MANAGEMENT_PLANE_DISABLED:
         reason = "Management plane is disabled (VANGUARD_MANAGEMENT_PLANE_MODE=disabled)."
-        _audit_management_denied(name, context, reason)
+        _audit_management_action(name, context, outcome="DENIED", reason=reason, plane_mode=plane_mode)
         return _result_text(reason, is_error=True)
 
     if plane_mode == MANAGEMENT_PLANE_OPERATOR and name in MUTATING_MANAGEMENT_TOOLS:
         if not _principal_has_admin(context.principal):
             reason = f"Mutating management op '{name}' requires admin scope; principal lacks required role."
-            _audit_management_denied(name, context, reason)
+            _audit_management_action(name, context, outcome="DENIED", reason=reason, plane_mode=plane_mode)
             return _result_text(reason, is_error=True)
 
     # Rate-limit mutating ops per session.
     if name in MUTATING_MANAGEMENT_TOOLS and not _consume_runtime_rule_budget(context):
         reason = "Management op rate limit exceeded."
-        _audit_management_denied(name, context, reason)
+        _audit_management_action(name, context, outcome="DENIED", reason=reason, plane_mode=plane_mode)
         return _result_text("Runtime management rate limit exceeded. Try again later.", is_error=True)
 
     if name == "get_vanguard_status":
         stats = telemetry.metrics.get_stats()
+        _audit_management_action(name, context, outcome="SUCCESS", plane_mode=plane_mode)
         return {
             "content": [
                 {
@@ -311,8 +385,10 @@ async def handle_vanguard_tool(
         lines = lines[-limit:]
 
         if not lines:
+            _audit_management_action(name, context, outcome="SUCCESS", reason="no matching audit entries", plane_mode=plane_mode)
             return _result_text("No matching audit entries found.")
 
+        _audit_management_action(name, context, outcome="SUCCESS", plane_mode=plane_mode)
         return {
             "content": [{"type": "text", "text": "\n".join(lines)}],
             "entries": lines,
@@ -321,20 +397,25 @@ async def handle_vanguard_tool(
     if name == "vanguard_apply_rule":
         rule_yaml = arguments.get("rule_yaml", "")
         if not isinstance(rule_yaml, str) or not rule_yaml.strip():
+            _audit_management_action(name, context, outcome="ERROR", reason="empty rule_yaml", plane_mode=plane_mode)
             return _result_text("rule_yaml must be a non-empty YAML string.", is_error=True)
         if len(rule_yaml.encode("utf-8")) > MAX_RUNTIME_RULE_YAML_BYTES:
+            _audit_management_action(name, context, outcome="ERROR", reason="oversized rule_yaml", plane_mode=plane_mode)
             return _result_text(
                 f"rule_yaml exceeds the {MAX_RUNTIME_RULE_YAML_BYTES}-byte runtime safety limit.",
                 is_error=True,
             )
         if context.rules_engine is None:
+            _audit_management_action(name, context, outcome="ERROR", reason="rules engine unavailable", plane_mode=plane_mode)
             return _result_text("Active rules engine unavailable for runtime patching.", is_error=True)
 
         try:
             added_ids = context.rules_engine.add_runtime_rules(rule_yaml, source_file="runtime")
         except Exception as exc:
+            _audit_management_action(name, context, outcome="ERROR", reason=str(exc), plane_mode=plane_mode)
             return _result_text(f"Failed to apply runtime rule: {exc}", is_error=True)
 
+        _audit_management_action(name, context, outcome="SUCCESS", reason=f"added={len(added_ids)}", plane_mode=plane_mode)
         return {
             "content": [{"type": "text", "text": f"Applied {len(added_ids)} runtime rule(s): {', '.join(added_ids)}"}],
             "rule_ids": added_ids,
@@ -342,11 +423,13 @@ async def handle_vanguard_tool(
 
     if name == "vanguard_reset_session":
         if not context.session_id:
+            _audit_management_action(name, context, outcome="ERROR", reason="no active session", plane_mode=plane_mode)
             return _result_text("No active session is available to reset.", is_error=True)
 
         from core import behavioral
 
         behavioral.clear_state(context.session_id)
+        _audit_management_action(name, context, outcome="SUCCESS", plane_mode=plane_mode)
         return {
             "content": [{"type": "text", "text": f"Behavioral counters reset for session {context.session_id}."}],
             "session_id": context.session_id,
@@ -358,11 +441,14 @@ async def handle_vanguard_tool(
         scope = arguments.get("scope", "all")
         target_url = arguments.get("target_url")
         if target_url is not None and not isinstance(target_url, str):
+            _audit_management_action(name, context, outcome="ERROR", reason="invalid target_url", plane_mode=plane_mode)
             return _result_text("target_url must be a string when provided.", is_error=True)
         try:
             summary = auth.clear_auth_caches(scope=scope, target_url=target_url)
         except ValueError as exc:
+            _audit_management_action(name, context, outcome="ERROR", reason=str(exc), plane_mode=plane_mode)
             return _result_text(str(exc), is_error=True)
+        _audit_management_action(name, context, outcome="SUCCESS", reason=f"scope={summary['scope']}", plane_mode=plane_mode)
         return {
             "content": [
                 {
@@ -385,8 +471,10 @@ async def handle_vanguard_tool(
         try:
             summary = await auth.refresh_auth_caches(auth.load_auth_config(), scope=scope)
         except ValueError as exc:
+            _audit_management_action(name, context, outcome="ERROR", reason=str(exc), plane_mode=plane_mode)
             return _result_text(str(exc), is_error=True)
         except auth.AuthValidationError as exc:
+            _audit_management_action(name, context, outcome="ERROR", reason=str(exc), plane_mode=plane_mode)
             return _result_text(f"Failed to refresh auth cache: {exc}", is_error=True)
 
         lines = [
@@ -399,6 +487,7 @@ async def handle_vanguard_tool(
             lines.append(f"JWKS source: {summary['jwks_source']}")
         if summary.get("jwks_key_count") is not None:
             lines.append(f"JWKS key count: {summary.get('jwks_key_count', 0)}")
+        _audit_management_action(name, context, outcome="SUCCESS", reason=f"scope={summary['scope']}", plane_mode=plane_mode)
         return {
             "content": [{"type": "text", "text": "\n".join(lines)}],
             "summary": summary,
@@ -408,6 +497,7 @@ async def handle_vanguard_tool(
         from core import auth
 
         stats = auth.get_auth_cache_stats()
+        _audit_management_action(name, context, outcome="SUCCESS", plane_mode=plane_mode)
         return {
             "content": [
                 {
@@ -430,6 +520,7 @@ async def handle_vanguard_tool(
         from core.rules_engine import RulesEngine
         
         count = RulesEngine.get_instance().reload()
+        _audit_management_action(name, context, outcome="SUCCESS", reason=f"rule_count={count}", plane_mode=plane_mode)
         return {
             "content": [
                 {
@@ -440,4 +531,5 @@ async def handle_vanguard_tool(
             "rule_count": count
         }
 
+    _audit_management_action(name, context, outcome="ERROR", reason="unknown tool", plane_mode=plane_mode)
     return _result_text(f"Unknown Vanguard tool: {name}", is_error=True)

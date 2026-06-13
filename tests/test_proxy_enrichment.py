@@ -2,6 +2,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from core import management
 from core.models import AuthPrincipal
 from core.proxy import VanguardProxy, ProxyConfig
 from core.session import SessionState
@@ -40,6 +41,7 @@ async def test_enrich_tool_list_hides_management_tools_by_default():
 async def test_enrich_tool_list_includes_management_tools_when_enabled():
     config = ProxyConfig()
     config.management_tools_enabled = True
+    config.management_plane_mode = management.MANAGEMENT_PLANE_DEV
     proxy = VanguardProxy(server_command=["python", "-c", "pass"], config=config)
 
     enriched = proxy._enrich_tool_list([{"name": "read_file", "description": "Read a file"}])
@@ -50,6 +52,49 @@ async def test_enrich_tool_list_includes_management_tools_when_enabled():
     apply_rule = next(t for t in enriched if t["name"] == "vanguard_apply_rule")
     assert apply_rule["destructiveHint"] is True
     assert apply_rule["title"] == "Vanguard: Hot-Patch Rule"
+
+
+@pytest.mark.asyncio
+async def test_enrich_tool_list_hides_mutating_management_tools_without_operator_scope():
+    config = ProxyConfig()
+    config.management_tools_enabled = True
+    config.management_plane_mode = management.MANAGEMENT_PLANE_OPERATOR
+    proxy = VanguardProxy(
+        server_command=["python", "-c", "pass"],
+        config=config,
+        principal=AuthPrincipal(principal_id="dev", auth_type="jwt", roles=["developer"]),
+    )
+
+    enriched = proxy._enrich_tool_list([{"name": "read_file", "description": "Read a file"}])
+    names = {tool["name"] for tool in enriched}
+
+    assert "get_vanguard_status" in names
+    assert "vanguard_get_auth_stats" in names
+    assert "vanguard_apply_rule" not in names
+    assert "vanguard_flush_auth_cache" not in names
+
+
+@pytest.mark.asyncio
+async def test_enrich_tool_list_exposes_mutating_management_tools_to_operator_scope():
+    config = ProxyConfig()
+    config.management_tools_enabled = True
+    config.management_plane_mode = management.MANAGEMENT_PLANE_OPERATOR
+    proxy = VanguardProxy(
+        server_command=["python", "-c", "pass"],
+        config=config,
+        principal=AuthPrincipal(
+            principal_id="operator",
+            auth_type="jwt",
+            attributes={"token_scope": ["vanguard:admin"]},
+        ),
+    )
+
+    enriched = proxy._enrich_tool_list([{"name": "read_file", "description": "Read a file"}])
+    names = {tool["name"] for tool in enriched}
+
+    assert "get_vanguard_status" in names
+    assert "vanguard_apply_rule" in names
+    assert "vanguard_flush_auth_cache" in names
 
 @pytest.mark.asyncio
 async def test_proxy_intercepts_vanguard_tools():

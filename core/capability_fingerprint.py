@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from core import signing
+from core.tool_capabilities import capability_values, infer_tool_definition_capabilities
 
 MANIFEST_VERSION = 1
 CAPABILITY_MANIFEST_SIGNATURE = "capability-manifest.sig.json"
@@ -109,11 +110,13 @@ def fingerprint_tools_payload(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         annotations = tool.get("annotations")
         input_schema = tool.get("inputSchema")
+        inferred_capabilities = capability_values(infer_tool_definition_capabilities(tool))
         normalized_tools.append(
             {
                 "name": tool.get("name"),
                 "title": tool.get("title"),
                 "description_sha256": _sha256_json_string(tool.get("description")) if isinstance(tool.get("description"), str) else None,
+                "tool_capabilities": inferred_capabilities,
                 "annotations": _normalize_json(annotations if isinstance(annotations, dict) else {}),
                 "inputSchema": _normalize_json(input_schema if isinstance(input_schema, dict) else {}),
                 "inputSchema_sha256": _sha256_json(
@@ -164,6 +167,8 @@ def compare_capability_manifests(expected: dict[str, Any], actual: dict[str, Any
             # Check for input schema drift (Subtle context poisoning)
             if tool.get("inputSchema_sha256") != exp_tools[name].get("inputSchema_sha256"):
                 drifts.append(AttestationDrift("tools", "mismatch", feature=name, details=f"Tool '{name}' input schema drifted from pinned state."))
+            if tool.get("tool_capabilities") != exp_tools[name].get("tool_capabilities"):
+                drifts.append(AttestationDrift("tools", "mismatch", feature=name, details=f"Tool '{name}' inferred capability labels drifted from pinned state."))
 
     return drifts
 

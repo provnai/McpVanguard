@@ -83,3 +83,34 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
+
+  install-modes:
+    name: Verify Optional Install Modes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Minimal install without optional Redis/RE2 extras
+        run: |
+          python -m venv .minimal-venv
+          . .minimal-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -c "from core import safe_regex; from core.proxy import ProxyConfig; print('backend=', safe_regex.backend_name(), 'profile=', ProxyConfig().profile)"
+          vanguard --help
+
+      - name: Full install with optional deployment extras
+        run: |
+          python -m venv .full-venv
+          . .full-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install ".[full]"
+          python -c "import redis; from core import safe_regex; print('redis=', redis.__version__, 'backend=', safe_regex.backend_name())"
+          vanguard --help

@@ -89,8 +89,85 @@ def _get_sse_config():
     return cfg
 
 
+def _has_configured_transport_auth(cfg: dict[str, Any]) -> bool:
+    """Return True when hosted transports have a real auth gate configured."""
+    if cfg.get("API_KEY"):
+        return True
+
+    auth_mode = str(cfg.get("AUTH_MODE", "none")).strip().lower()
+    if auth_mode == "oauth":
+        return bool(
+            cfg.get("JWKS_FILE")
+            or cfg.get("JWKS_JSON")
+            or cfg.get("JWKS_URL")
+            or cfg.get("OAUTH_DISCOVERY_URL")
+        )
+
+    return False
+
+
+def _apply_hosted_profile_defaults(cfg: dict[str, Any], profile: str) -> list[str]:
+    """Apply strict hosted defaults that live outside ProxyConfig."""
+    notes: list[str] = []
+    profile_name = (profile or "balanced").strip().lower()
+    if profile_name != "strict":
+        return notes
+
+    if not os.getenv("VANGUARD_BEARER_CLAIM_POLICY"):
+        cfg["BEARER_CLAIM_POLICY"] = "block"
+        notes.append("bearer_claim_policy=block")
+
+    if cfg.get("ALLOWED_ORIGINS") and not os.getenv("VANGUARD_REQUIRE_ORIGIN"):
+        cfg["REQUIRE_ORIGIN"] = True
+        notes.append("require_origin=true")
+
+    return notes
+
+
+def _validate_hosted_startup(host: str, cfg: dict[str, Any], profile: str) -> tuple[bool, str]:
+    """Return whether the hosted gateway can start with the current posture."""
+    if _is_loopback_host(host):
+        return True, ""
+
+    profile_name = (profile or "balanced").strip().lower()
+    if profile_name == "strict" and not _has_configured_transport_auth(cfg):
+        return (
+            False,
+            "Strict hosted mode refuses non-loopback bind without transport auth. "
+            "Set VANGUARD_API_KEY or configure VANGUARD_AUTH_MODE=oauth with JWKS/OIDC settings.",
+        )
+
+    return True, ""
+
+
+def _hosted_security_summary(host: str, cfg: dict[str, Any], profile: str, redis_url: str | None = None) -> str:
+    """Human-readable hosted posture summary for startup logs."""
+    auth_mode = str(cfg.get("AUTH_MODE", "none")).strip().lower()
+    auth_state = "configured" if _has_configured_transport_auth(cfg) else "open"
+    bind_scope = "loopback" if _is_loopback_host(host) else "public"
+    origin_state = "required" if cfg.get("REQUIRE_ORIGIN") else "optional"
+    binding_state = "on" if cfg.get("BIND_STREAMABLE_SESSIONS") else "off"
+    claim_policy = str(cfg.get("BEARER_CLAIM_POLICY", "warn")).lower()
+    redis_state = "shared" if redis_url else "local"
+    return (
+        "[Vanguard] Hosted posture: "
+        f"profile={(profile or 'balanced').strip().lower()} "
+        f"bind={bind_scope} auth={auth_state}({auth_mode}) "
+        f"claim_policy={claim_policy} origin={origin_state} "
+        f"streamable_binding={binding_state} redis={redis_state}"
+    )
+
+
 def _scope_headers(scope) -> dict[bytes, bytes]:
     return dict(scope.get("headers", []))
+
+
+def _header_value(scope, name: str) -> str:
+    wanted = name.lower().encode("ascii")
+    for raw_name, raw_value in scope.get("headers", []):
+        if raw_name.lower() == wanted:
+            return raw_value.decode("utf-8", errors="replace").strip()
+    return ""
 
 
 def _normalize_origin(origin: str) -> str:
@@ -445,6 +522,109 @@ async def _send_error_with_headers(send, status: int, message: str, headers: lis
         response_headers.extend([[name, value] for name, value in headers])
     await send({"type": "http.response.start", "status": status, "headers": response_headers})
     await send({"type": "http.response.body", "body": json.dumps({"error": message}).encode("utf-8")})
+
+
+async def _buffer_receive_body(receive, max_body_bytes: int) -> tuple[bytes, list[dict[str, Any]], bool]:
+    """Read and preserve an ASGI request body so downstream handlers can replay it."""
+    body = bytearray()
+    messages: list[dict[str, Any]] = []
+    too_large = False
+
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message.get("type") != "http.request":
+            break
+        chunk = message.get("body", b"") or b""
+        body.extend(chunk)
+        if len(body) > max_body_bytes:
+            too_large = True
+        if not message.get("more_body", False):
+            break
+
+    return bytes(body), messages, too_large
+
+
+def _replay_receive(messages: list[dict[str, Any]]):
+    """Return an ASGI receive callable that replays buffered messages once."""
+    queue = list(messages)
+
+    async def _receive():
+        if queue:
+            return queue.pop(0)
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return _receive
+
+
+def _audit_routing_header_finding(
+    *,
+    scope,
+    reason: str,
+    principal: Optional[AuthPrincipal] = None,
+) -> None:
+    audit = setup_audit_logger(os.getenv("VANGUARD_LOG_FILE", "audit.log"))
+    audit.info(
+        AuditEvent(
+            session_id="transport-routing",
+            principal_id=principal.principal_id if principal else None,
+            auth_type=principal.auth_type if principal else None,
+            direction="system",
+            method="mcp/routing-header",
+            action="BLOCK",
+            rule_id="VANGUARD-MCP-ROUTING-HEADER",
+            blocked_reason=reason,
+        ).to_log_line(format=os.getenv("VANGUARD_AUDIT_FORMAT", "text").lower())
+    )
+
+
+async def _validate_mcp_routing_headers(scope, receive, cfg: dict[str, Any]):
+    """
+    Validate optional MCP 2026-07-28 routing headers when present.
+
+    This is additive compatibility hardening: legacy clients are unchanged, but
+    future/stateless clients cannot send headers that disagree with the JSON-RPC
+    body that McpVanguard will actually inspect and forward.
+    """
+    method_header = _header_value(scope, "mcp-method")
+    name_header = _header_value(scope, "mcp-name")
+    if scope.get("method", "").upper() != "POST" or (not method_header and not name_header):
+        return True, 200, "", receive
+
+    body, messages, too_large = await _buffer_receive_body(receive, int(cfg.get("MAX_BODY_BYTES", 2_000_000)))
+    replay_receive = _replay_receive(messages)
+
+    if too_large:
+        return False, 413, f"Request body exceeds maximum size of {cfg.get('MAX_BODY_BYTES', 2_000_000)} bytes.", replay_receive
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return False, 400, "Invalid JSON request body for MCP routing-header validation.", replay_receive
+
+    if not isinstance(payload, dict):
+        return False, 400, "MCP routing headers require a single JSON-RPC request object.", replay_receive
+
+    body_method = str(payload.get("method") or "")
+    if method_header and body_method != method_header:
+        return (
+            False,
+            400,
+            f"MCP routing header mismatch: Mcp-Method={method_header!r} does not match body method={body_method!r}.",
+            replay_receive,
+        )
+
+    if name_header and body_method == "tools/call":
+        body_name = str(payload.get("params", {}).get("name") or "")
+        if body_name != name_header:
+            return (
+                False,
+                400,
+                f"MCP routing header mismatch: Mcp-Name={name_header!r} does not match body params.name={body_name!r}.",
+                replay_receive,
+            )
+
+    return True, 200, "", replay_receive
 
 
 def _oauth_www_authenticate_value(
@@ -982,6 +1162,11 @@ async def handle_mcp(scope, receive, send, ctx: ServerContext):
     if scope.get("method", "").upper() == "POST" and not ok:
         await _send_error(send, status, message)
         return
+    ok, status, message, receive = await _validate_mcp_routing_headers(scope, receive, ctx.cfg)
+    if not ok:
+        _audit_routing_header_finding(scope=scope, reason=message, principal=principal)
+        await _send_error(send, status, message)
+        return
 
     if ctx.streamable_manager is None:
         await _send_error(send, 500, "Streamable HTTP transport is not initialized.")
@@ -1067,15 +1252,29 @@ async def run_sse_server(
     from starlette.routing import Route
 
     cfg = _get_sse_config()
-    if cfg["API_KEY"]:
-        print("[Vanguard] SSE authentication ENABLED (VANGUARD_API_KEY is set)")
+    profile = getattr(config, "profile", "balanced") if config is not None else "balanced"
+    hosted_notes = _apply_hosted_profile_defaults(cfg, profile)
+    ok, startup_error = _validate_hosted_startup(host, cfg, profile)
+    if not ok:
+        raise RuntimeError(startup_error)
+
+    redis_url = getattr(config, "redis_url", "") if config is not None else ""
+    print(_hosted_security_summary(host, cfg, profile, redis_url))
+    for note in hosted_notes:
+        print(f"[Vanguard] Strict hosted default applied: {note}")
+
+    if _has_configured_transport_auth(cfg):
+        if cfg["API_KEY"]:
+            print("[Vanguard] SSE authentication ENABLED (VANGUARD_API_KEY is set)")
+        else:
+            print("[Vanguard] SSE authentication ENABLED (OAuth/JWKS is configured)")
     else:
         print("[Vanguard] WARNING: VANGUARD_API_KEY not set. SSE endpoints are open.")
 
     if not _is_loopback_host(host):
         print(f"[Vanguard] WARNING: HTTP bridge is binding to non-loopback host {host}.")
-        if not cfg["API_KEY"]:
-            print("[Vanguard] WARNING: Public bind without VANGUARD_API_KEY increases exposure.")
+        if not _has_configured_transport_auth(cfg):
+            print("[Vanguard] WARNING: Public bind without transport auth increases exposure.")
     if not cfg["BIND_STREAMABLE_SESSIONS"]:
         print("[Vanguard] WARNING: Streamable HTTP session binding is DISABLED.")
     if cfg["TRUST_PROXY_HEADERS"]:

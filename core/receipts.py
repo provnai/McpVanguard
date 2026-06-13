@@ -37,6 +37,14 @@ def sha256_prefixed(value: Any) -> str:
     return f"sha256:{digest}"
 
 
+def receipt_event_hash(event: dict[str, Any]) -> str:
+    """Hash a receipt event without its self-referential receipt_hash field."""
+    payload = dict(event)
+    payload.pop("receipt_hash", None)
+    digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
 def file_sha256_prefixed(path: str | Path) -> str | None:
     """Return sha256:<64-hex> for a file if it exists."""
     target = Path(path)
@@ -105,6 +113,8 @@ def build_tool_call_receipt_event(
     risk_score: float | None,
     request_message: dict[str, Any],
     normalized_message: dict[str, Any] | None,
+    policy_explanation: dict[str, Any] | None = None,
+    tool_capabilities: list[str] | None = None,
     redaction_mode: str = "partial",
 ) -> dict[str, Any]:
     """Build one receipt_v1 event for a tool-call gate decision."""
@@ -137,6 +147,13 @@ def build_tool_call_receipt_event(
         "response_hash": None,
         "redaction_mode": redaction_mode,
     }
+    extensions: dict[str, Any] = {}
+    if policy_explanation:
+        extensions["policy_explanation_hash"] = sha256_prefixed(policy_explanation)
+    if tool_capabilities:
+        extensions["tool_capabilities"] = sorted(str(value) for value in tool_capabilities)
+    if extensions:
+        event["extensions"] = {"mcpvanguard": extensions}
     return event
 
 
@@ -146,3 +163,88 @@ def append_receipt_event(path: str | Path, event: dict[str, Any]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(canonical_json(event) + "\n")
+
+
+def _read_receipt_events(path: str | Path) -> list[dict[str, Any]]:
+    target = Path(path)
+    if not target.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in target.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        events.append(json.loads(line))
+    return events
+
+
+def append_chained_receipt_event(
+    path: str | Path,
+    event: dict[str, Any],
+    *,
+    stream_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Append an event with an opt-in hash chain.
+
+    The default `append_receipt_event` keeps the base receipt_v1 contract. This
+    helper adds optional chain fields for operators who want local deletion,
+    reordering, and mutation detection before export/signing.
+    """
+    target = Path(path)
+    prior_events = _read_receipt_events(target)
+    previous = prior_events[-1] if prior_events else None
+    previous_hash = previous.get("receipt_hash") if isinstance(previous, dict) else None
+
+    chained = dict(event)
+    chained["receipt_stream_id"] = stream_id or f"file:{hashlib.sha256(str(target).encode('utf-8')).hexdigest()[:16]}"
+    chained["receipt_sequence"] = len(prior_events)
+    chained["prev_receipt_hash"] = previous_hash
+    chained["receipt_hash_algorithm"] = HASH_ALGORITHM
+    if prior_events and not previous_hash:
+        chained["chain_restart"] = True
+    chained["receipt_hash"] = receipt_event_hash(chained)
+    append_receipt_event(target, chained)
+    return chained
+
+
+def verify_receipt_chain(path: str | Path) -> dict[str, Any]:
+    """
+    Verify an opt-in receipt hash chain.
+
+    Returns a structured result instead of raising so operators can use this in
+    CI/release gates and still inspect all detected issues.
+    """
+    issues: list[str] = []
+    events = _read_receipt_events(path)
+    previous_hash: str | None = None
+    stream_id: str | None = None
+
+    for index, event in enumerate(events):
+        if stream_id is None:
+            stream_id = event.get("receipt_stream_id")
+        elif event.get("receipt_stream_id") != stream_id:
+            issues.append(f"event {index}: receipt_stream_id changed")
+
+        if event.get("receipt_sequence") != index:
+            issues.append(f"event {index}: receipt_sequence mismatch")
+
+        if event.get("prev_receipt_hash") != previous_hash:
+            issues.append(f"event {index}: prev_receipt_hash mismatch")
+
+        stored_hash = event.get("receipt_hash")
+        if not stored_hash:
+            issues.append(f"event {index}: missing receipt_hash")
+            previous_hash = None
+            continue
+
+        computed_hash = receipt_event_hash(event)
+        if stored_hash != computed_hash:
+            issues.append(f"event {index}: receipt_hash mismatch")
+        previous_hash = stored_hash
+
+    return {
+        "valid": not issues,
+        "checked": len(events),
+        "issues": issues,
+        "last_receipt_hash": previous_hash,
+    }

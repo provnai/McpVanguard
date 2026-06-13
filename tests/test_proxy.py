@@ -472,6 +472,133 @@ def test_proxy_audit_includes_current_risk_context_in_json_logs(mock_config):
     assert payload["risk_enforcement"] == "AUDIT"
 
 
+def test_proxy_json_audit_includes_siem_decision_fields(mock_config):
+    mock_config.audit_format = "json"
+    proxy = VanguardProxy(server_command=["python", "-m", "server_a"], config=mock_config)
+
+    from core.session import SessionState
+
+    proxy._session = SessionState(session_id="siem-audit-session", server_id=proxy._server_id)
+    with patch.object(proxy.audit, "info") as mock_audit:
+        proxy._log_audit_event(
+            direction="agent-to-server",
+            method="tools/call",
+            tool_name="read_file",
+            action="BLOCK",
+            raw_policy_action="REVIEW",
+            effective_policy_action="BLOCK",
+            rule_id="TEST-RULE",
+        )
+
+    payload = json.loads(mock_audit.call_args.args[0])
+    assert payload["audit_schema_version"] == "mcpvanguard.audit.v1"
+    assert payload["event_category"] == "mcp.policy"
+    assert payload["event_type"] == "mcp.policy.decision"
+    assert payload["event_outcome"] == "blocked"
+    assert payload["event_severity"] == "critical"
+    assert payload["decision"] == "BLOCK"
+    assert payload["raw_policy_action"] == "REVIEW"
+    assert payload["effective_policy_action"] == "BLOCK"
+
+
+@pytest.mark.asyncio
+async def test_session_budgets_are_disabled_by_default(proxy):
+    proxy.config.semantic_enabled = False
+    proxy.config.behavioral_enabled = False
+    msg = {
+        "jsonrpc": "2.0",
+        "id": "budget-default",
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "README.md"}},
+    }
+
+    with patch.object(proxy.rules_engine, "check", return_value=InspectionResult.allow()):
+        for _ in range(3):
+            result = await proxy._inspect_message(msg)
+
+    assert result.allowed is True
+    assert result.action == "ALLOW"
+
+
+@pytest.mark.asyncio
+async def test_session_budget_blocks_after_tool_call_rate_limit(proxy):
+    proxy.config.semantic_enabled = False
+    proxy.config.behavioral_enabled = False
+    proxy.config.max_tool_calls_per_minute = 1
+    msg = {
+        "jsonrpc": "2.0",
+        "id": "budget-rate",
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "README.md"}},
+    }
+
+    with patch.object(proxy.rules_engine, "check", return_value=InspectionResult.allow()):
+        first = await proxy._inspect_message(msg)
+        second = await proxy._inspect_message(msg)
+
+    assert first.allowed is True
+    assert second.allowed is False
+    assert second.rule_matches[0].rule_id == "VANGUARD-BUDGET-001"
+    assert second.policy_explanation["budget"]["name"] == "max_tool_calls_per_minute"
+
+
+@pytest.mark.asyncio
+async def test_session_budget_blocks_after_risky_call_limit(proxy):
+    proxy.config.semantic_enabled = False
+    proxy.config.behavioral_enabled = False
+    proxy.config.max_risky_calls_per_session = 1
+    warn_result = InspectionResult.warn(
+        reason="warning for budget test",
+        layer=1,
+        rule_matches=[RuleMatch(rule_id="TEST-WARN", severity="MEDIUM", action="WARN")],
+    )
+    msg = {
+        "jsonrpc": "2.0",
+        "id": "budget-risky",
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "README.md"}},
+    }
+
+    with patch.object(proxy.rules_engine, "check", return_value=warn_result):
+        first = await proxy._inspect_message(msg)
+        second = await proxy._inspect_message(msg)
+
+    assert first.allowed is True
+    assert first.action == "WARN"
+    assert second.allowed is False
+    assert second.rule_matches[0].rule_id == "VANGUARD-BUDGET-002"
+    assert second.policy_explanation["budget"]["name"] == "max_risky_calls_per_session"
+
+
+@pytest.mark.asyncio
+async def test_blocked_attempt_budget_circuit_breaks_later_tool_calls(proxy):
+    proxy.config.semantic_enabled = False
+    proxy.config.behavioral_enabled = False
+    proxy.config.max_blocked_attempts_per_session = 1
+    block_result = InspectionResult.block(
+        reason="blocked for budget test",
+        layer=1,
+        rule_matches=[RuleMatch(rule_id="TEST-BLOCK", severity="HIGH", action="BLOCK")],
+    )
+    msg = {
+        "jsonrpc": "2.0",
+        "id": "budget-blocked",
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "README.md"}},
+    }
+
+    with patch.object(proxy.rules_engine, "check", return_value=block_result):
+        first = await proxy._inspect_message(msg)
+    with patch.object(proxy.rules_engine, "check", return_value=InspectionResult.allow()):
+        second = await proxy._inspect_message(msg)
+
+    assert first.allowed is False
+    assert first.rule_matches[0].rule_id == "TEST-BLOCK"
+    assert second.allowed is False
+    assert second.rule_matches[0].rule_id == "VANGUARD-BUDGET-003"
+    assert second.policy_explanation["budget"]["name"] == "max_blocked_attempts_per_session"
+
+
 def test_proxy_blocks_on_server_manifest_drift(tmp_path, mock_config):
     manifest_path = tmp_path / "server-manifest.json"
     manifest_path.write_text(

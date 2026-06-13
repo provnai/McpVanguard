@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-06-12 (Deployment-Safe Runtime Enforcement Patch)
+
+### Security and Deployment Safety
+
+- **Strict hosted startup guard** (`core/sse_server.py`): `vanguard sse --profile strict` now refuses non-loopback/public binds unless API-key auth or OAuth/JWKS auth is configured.
+- **Hosted posture summary** (`core/sse_server.py`): SSE startup now prints profile, bind scope, auth state, origin policy, bearer claim policy, Streamable HTTP session-binding state, and Redis/shared-state status.
+- **Strict hosted defaults** (`core/sse_server.py`): strict hosted gateway startup defaults bearer claim-policy mismatches to `block` and requires `Origin` when `VANGUARD_ALLOWED_ORIGINS` is configured, unless the operator explicitly overrides those settings.
+- **Structured policy explanations** (`core/policy.py`, `core/proxy.py`): inspected requests now carry a `policy_explanation` object in JSON audit logs with primary layer, rule family, profile effect, upstream-call status, supporting findings, and operator tuning hints.
+- **Safe-zone explanation context** (`core/rules_engine.py`): safe-zone blocks now include the requested path field/value and allowed-prefix summary for operator triage.
+- **Benchmark false-positive breakdowns** (`core/benchmarks.py`, `core/cli.py`): benchmark reports now include benign/malicious block breakdowns by layer and rule family.
+- **Public-safe benchmark IDs** (`core/benchmarks.py`, `core/cli.py`): benchmark cases and evaluations now expose deterministic `public_case_id` and `source_corpus` fields for reproducible public reports without private artifact paths.
+- **Benchmark confusion matrices** (`core/benchmarks.py`, `core/cli.py`): benchmark JSON and CLI reports now include expected-vs-actual action matrices plus per-action precision/recall-style counts scoped to the evaluated corpus/profile.
+- **Benchmark latency summaries** (`core/benchmarks.py`, `core/cli.py`): benchmark reports now include per-case harness timing and aggregate mean/p50/p95/max latency summaries for selected corpora and profile comparisons.
+- **Profile comparison benchmark command** (`core/cli.py`): added `vanguard benchmark-profiles` to compare the same corpus across `monitor`, `balanced`, and `strict`, including per-profile summaries and case-level action deltas.
+- **Baseline comparison benchmark command** (`core/cli.py`): added `vanguard benchmark-baselines` for corpus-scoped `no_gateway`, deterministic `l1_only`, synthetic `l2_threshold_only`, and configured-harness comparisons.
+- **Capability-aware L3 tracking** (`core/tool_capabilities.py`, `core/behavioral.py`): behavioral detectors now classify coarse tool capabilities so renamed file read/write tools still contribute to scraping and write-after-sensitive-read detection.
+- **Network capability risk signal** (`core/behavioral.py`): repeated network-capable calls now emit a Layer 3 WARN and risk-engine event instead of silently blending into generic tool-flood behavior.
+- **Per-session budget circuit breakers** (`core/risk.py`, `core/proxy.py`): added opt-in session/server budgets for tool-call rate, risky decisions, and repeated blocked attempts using `VANGUARD_MAX_TOOL_CALLS_PER_MINUTE`, `VANGUARD_MAX_RISKY_CALLS_PER_SESSION`, and `VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION`.
+- **SIEM-friendly audit fields** (`core/models.py`, `core/proxy.py`): JSON audit logs now include additive schema, category, type, outcome, severity, decision, raw policy action, and effective policy action fields for easier downstream parsing.
+- **MCP routing-header consistency checks** (`core/sse_server.py`): hosted Streamable HTTP requests that include future `Mcp-Method` or `Mcp-Name` headers now fail closed when those headers disagree with the JSON-RPC body.
+- **`_meta` inspection coverage** (`core/preflight.py`, `core/rules_engine.py`): request `_meta` is explicitly covered by L0 regression tests and L1 recursive matching so future stateless MCP metadata cannot become a bypass lane.
+- **Richer policy explanations** (`core/policy.py`): policy explanations now include active profile, final verdict, and semantic role in addition to raw/effective actions.
+- **Management-plane surface filtering** (`core/management.py`, `core/proxy.py`): native Vanguard tools are now filtered by management-plane mode and caller principal, so `operator_only` exposes mutating tools only to admin-scoped operators.
+- **Management action audit/risk trail** (`core/management.py`, `core/risk.py`): successful management actions are logged, denied attempts remain audited, and denied or mutating actions are recorded in the risk engine.
+- **Opt-in receipt chaining** (`core/receipts.py`, `core/proxy.py`): runtime receipt JSONL can now include local hash-chain fields for deletion, reordering, and mutation detection before export/signing.
+- **Receipt extensions** (`core/receipts.py`, `core/proxy.py`): optional McpVanguard receipt extensions can include policy-explanation hashes and tool-capability labels without embedding full operator explanations.
+- **Optional Redis/RE2 packaging** (`pyproject.toml`): Redis and Google RE2 are now optional install extras while `dev` and `full` installs keep the deployment/test stack available.
+
+### Documentation
+
+- Updated README, deployment, architecture, Railway deployment, benchmark, and block-decision documentation with safe hosted baseline, false-positive tuning guidance, capability override guidance, install modes, session-budget controls, SIEM audit fields, Redis shared-state limitations, Anthropic MCP tunnel guidance, MCP 2026-07-28 release-candidate compatibility notes, and management-plane boundaries.
+- Added [docs/ANTHROPIC_MCP_TUNNELS.md](docs/ANTHROPIC_MCP_TUNNELS.md) and [docs/MCP_2026_07_28_RC_COMPATIBILITY.md](docs/MCP_2026_07_28_RC_COMPATIBILITY.md).
+
+### Verification
+
+- Full local verification before release prep: `517 passed, 2 skipped`.
+- Targeted hosted-header, `_meta`, and receipt/version tests pass locally.
+- `git diff --check` passes locally, with only normal Windows CRLF warnings.
+- Built release artifacts locally:
+  - `dist/mcp_vanguard-2.1.2-py3-none-any.whl`
+  - `dist/mcp_vanguard-2.1.2.tar.gz`
+- Wheel install smoke passed from the local artifact with `core.__version__ == "2.1.2"`.
+- GitHub CI, CodeQL, dependency audit, SBOM, Railway deployment, and PyPI Trusted Publishing remain external release gates after push.
+
 ## [2.1.1] - 2026-06-08 (Runtime Hardening Patch)
 
 ### Security and Correctness

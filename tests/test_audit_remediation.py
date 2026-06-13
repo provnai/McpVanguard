@@ -47,6 +47,9 @@ def test_safe_zone_blocks_nonstandard_target_argument():
     result = engine.check(msg)
     assert result.action == "BLOCK"
     assert "SAFEZONE" in result.rule_matches[0].rule_id
+    assert result.rule_matches[0].matched_field == "target"
+    assert result.rule_matches[0].matched_value == "/etc/passwd"
+    assert "/safe/" in result.rule_matches[0].description
 
 
 @pytest.mark.parametrize("arg_name", ["file", "input", "output", "filepath", "target"])

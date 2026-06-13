@@ -265,6 +265,30 @@ def test_audit_event_default_risk_fields_remain_present_in_json_log():
     assert data["risk_enforcement"] is None
 
 
+def test_audit_event_policy_explanation_in_json_log():
+    """Structured audit output should preserve explainable policy decisions."""
+    import json
+
+    event = AuditEvent(
+        session_id="aabbccdd-1234-5678-90ab-cdef01234567",
+        direction="agentâ†’server",
+        action="BLOCK",
+        policy_explanation={
+            "schema_version": "policy_explanation_v1",
+            "primary_layer": "L1",
+            "primary_rule_id": "VANGUARD-SAFEZONE-001",
+            "raw_policy_action": "BLOCK",
+            "effective_policy_action": "BLOCK",
+            "upstream_called": False,
+        },
+    )
+
+    data = json.loads(event.to_log_line(format="json"))
+    assert data["policy_explanation"]["schema_version"] == "policy_explanation_v1"
+    assert data["policy_explanation"]["primary_rule_id"] == "VANGUARD-SAFEZONE-001"
+    assert data["policy_explanation"]["upstream_called"] is False
+
+
 # ---------------------------------------------------------------------------
 # Test 7: check_server_boundary helper
 # ---------------------------------------------------------------------------

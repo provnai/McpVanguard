@@ -6,6 +6,8 @@ Shared MCP-38 benchmark loading and execution helpers.
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -30,10 +32,14 @@ KNOWN_HARNESSES = {
     "semantic_threshold",
 }
 
+ACTION_ORDER = ("ALLOW", "WARN", "BLOCK")
+
 
 @dataclass(frozen=True)
 class BenchmarkCase:
     case_id: str
+    public_case_id: str
+    source_corpus: str
     mcp38_id: str
     title: str
     harness: str
@@ -52,7 +58,32 @@ class BenchmarkEvaluation:
     passed: bool
     expected_rule_id: str | None = None
     actual_rule_id: str | None = None
+    actual_layer: int | None = None
+    actual_rule_family: str | None = None
+    actual_capabilities: list[str] | None = None
+    latency_ms: float | None = None
     details: str | None = None
+    public_case_id: str | None = None
+    source_corpus: str | None = None
+
+
+def _rule_family(rule_id: str | None) -> str | None:
+    """Coarse rule family used for benchmark breakdowns and false-positive triage."""
+    if not rule_id:
+        return None
+    if rule_id.startswith("VANGUARD-SAFEZONE"):
+        return "safe_zone"
+    if rule_id.startswith("SEM"):
+        return "semantic"
+    if rule_id.startswith("BEH"):
+        return "behavioral"
+    if rule_id.startswith("CAMO"):
+        return "camouflage"
+    if rule_id.startswith("AUTH"):
+        return "auth"
+    if rule_id.startswith("VANGUARD-"):
+        return "preflight"
+    return rule_id.split("-", 1)[0].lower()
 
 
 def _read_case_corpus(path: str | Path) -> str:
@@ -65,6 +96,17 @@ def _read_case_corpus(path: str | Path) -> str:
         return resources.files("core.benchmark_cases").joinpath(resource_name).read_text(encoding="utf-8")
 
     raise FileNotFoundError(f"Benchmark corpus not found: {path}")
+
+
+def _public_corpus_name(path: str | Path) -> str:
+    """Return a stable, non-sensitive corpus identifier for public reports."""
+    return Path(path).stem.replace(" ", "_").lower()
+
+
+def _public_case_id(path: str | Path, case_id: str) -> str:
+    """Return a deterministic public-safe case ID scoped to its corpus."""
+    safe_case_id = case_id.strip().replace(" ", "_")
+    return f"mcpv:{_public_corpus_name(path)}:{safe_case_id}"
 
 
 def load_cases(path: str | Path = "tests/benchmarks/mcp38_cases.yaml") -> list[BenchmarkCase]:
@@ -100,6 +142,8 @@ def load_cases(path: str | Path = "tests/benchmarks/mcp38_cases.yaml") -> list[B
         cases.append(
             BenchmarkCase(
                 case_id=case_id,
+                public_case_id=_public_case_id(path, case_id),
+                source_corpus=_public_corpus_name(path),
                 mcp38_id=str(item.get("mcp38_id", "")).strip().upper(),
                 title=str(item.get("title", "")).strip(),
                 harness=harness,
@@ -143,11 +187,16 @@ def summarize_cases(cases: list[BenchmarkCase]) -> dict[str, int]:
 
 
 def evaluate_case(case: BenchmarkCase) -> BenchmarkEvaluation:
+    t_start = time.perf_counter()
     result = run_case(case)
+    latency_ms = (time.perf_counter() - t_start) * 1000
     actual_action = "ALLOW" if result is None else result.action
     actual_rule_id = None
+    actual_layer = None
     if result is not None and result.rule_matches:
         actual_rule_id = result.rule_matches[0].rule_id
+    if result is not None:
+        actual_layer = result.layer_triggered
 
     passed = actual_action == case.expected_action
     details = None
@@ -160,6 +209,8 @@ def evaluate_case(case: BenchmarkCase) -> BenchmarkEvaluation:
 
     return BenchmarkEvaluation(
         case_id=case.case_id,
+        public_case_id=case.public_case_id,
+        source_corpus=case.source_corpus,
         mcp38_id=case.mcp38_id,
         title=case.title,
         expected_action=case.expected_action,
@@ -167,12 +218,177 @@ def evaluate_case(case: BenchmarkCase) -> BenchmarkEvaluation:
         passed=passed,
         expected_rule_id=case.expected_rule_id,
         actual_rule_id=actual_rule_id,
+        actual_layer=actual_layer,
+        actual_rule_family=_rule_family(actual_rule_id),
+        actual_capabilities=result.tool_capabilities if result is not None else None,
+        latency_ms=round(latency_ms, 3),
         details=details,
     )
 
 
 def evaluate_cases(cases: list[BenchmarkCase]) -> list[BenchmarkEvaluation]:
     return [evaluate_case(case) for case in cases]
+
+
+def _evaluation_from_action(
+    case: BenchmarkCase,
+    *,
+    actual_action: str,
+    actual_rule_id: str | None = None,
+    actual_layer: int | None = None,
+    actual_rule_family: str | None = None,
+    latency_ms: float | None = None,
+    details_prefix: str | None = None,
+) -> BenchmarkEvaluation:
+    passed = actual_action == case.expected_action
+    details = None
+    if not passed:
+        prefix = f"{details_prefix}: " if details_prefix else ""
+        details = f"{prefix}expected action {case.expected_action}, got {actual_action}"
+    elif case.expected_rule_id:
+        passed = actual_rule_id == case.expected_rule_id
+        if not passed:
+            prefix = f"{details_prefix}: " if details_prefix else ""
+            details = f"{prefix}expected rule {case.expected_rule_id}, got {actual_rule_id or 'none'}"
+
+    return BenchmarkEvaluation(
+        case_id=case.case_id,
+        public_case_id=case.public_case_id,
+        source_corpus=case.source_corpus,
+        mcp38_id=case.mcp38_id,
+        title=case.title,
+        expected_action=case.expected_action,
+        actual_action=actual_action,
+        passed=passed,
+        expected_rule_id=case.expected_rule_id,
+        actual_rule_id=actual_rule_id,
+        actual_layer=actual_layer,
+        actual_rule_family=actual_rule_family,
+        latency_ms=latency_ms,
+        details=details,
+    )
+
+
+def _evaluate_no_gateway_baseline(cases: list[BenchmarkCase]) -> list[BenchmarkEvaluation]:
+    """Synthetic baseline: no gateway means every proposed request reaches upstream."""
+    return [
+        _evaluation_from_action(
+            case,
+            actual_action="ALLOW",
+            latency_ms=0.0,
+            details_prefix="no_gateway",
+        )
+        for case in cases
+    ]
+
+
+def _evaluate_l1_only_baseline(cases: list[BenchmarkCase]) -> list[BenchmarkEvaluation]:
+    """Run only deterministic RulesEngine checks against each case input."""
+    evaluations: list[BenchmarkEvaluation] = []
+    engine = RulesEngine(rules_dir="rules")
+    engine.safe_zones = []
+    for case in cases:
+        t_start = time.perf_counter()
+        result = engine.check(case.input)
+        latency_ms = (time.perf_counter() - t_start) * 1000
+        actual_action = "ALLOW" if result is None else result.action
+        actual_rule_id = result.rule_matches[0].rule_id if result is not None and result.rule_matches else None
+        evaluations.append(
+            _evaluation_from_action(
+                case,
+                actual_action=actual_action,
+                actual_rule_id=actual_rule_id,
+                actual_layer=result.layer_triggered if result is not None else None,
+                actual_rule_family=_rule_family(actual_rule_id),
+                latency_ms=round(latency_ms, 3),
+                details_prefix="l1_only",
+            )
+        )
+    return evaluations
+
+
+def _evaluate_l2_threshold_only_baseline(cases: list[BenchmarkCase]) -> list[BenchmarkEvaluation]:
+    """
+    Synthetic L2-only baseline for public corpora.
+
+    Only `semantic_threshold` harness cases carry a synthetic semantic score.
+    Other cases are treated as ALLOW because no standalone L2 signal is present.
+    """
+    evaluations: list[BenchmarkEvaluation] = []
+    for case in cases:
+        t_start = time.perf_counter()
+        if case.harness == "semantic_threshold":
+            result = _run_semantic_threshold(case)
+            actual_action = result.action
+            actual_rule_id = result.rule_matches[0].rule_id if result.rule_matches else None
+            actual_layer = result.layer_triggered
+            actual_rule_family = _rule_family(actual_rule_id) or "semantic"
+        else:
+            actual_action = "ALLOW"
+            actual_rule_id = None
+            actual_layer = None
+            actual_rule_family = None
+        latency_ms = (time.perf_counter() - t_start) * 1000
+        evaluations.append(
+            _evaluation_from_action(
+                case,
+                actual_action=actual_action,
+                actual_rule_id=actual_rule_id,
+                actual_layer=actual_layer,
+                actual_rule_family=actual_rule_family,
+                latency_ms=round(latency_ms, 3),
+                details_prefix="l2_threshold_only",
+            )
+        )
+    return evaluations
+
+
+def _summarize_baseline(name: str, evaluations: list[BenchmarkEvaluation]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "summary": summarize_evaluations(evaluations),
+        "quality": summarize_benchmark_quality(evaluations),
+        "breakdowns": summarize_benchmark_breakdowns(evaluations),
+        "confusion": summarize_confusion_matrix(evaluations),
+        "latency": summarize_latency(evaluations),
+        "evaluations": evaluations,
+    }
+
+
+def baseline_comparison_report(
+    corpus_paths: list[str | Path] | None = None,
+) -> dict[str, Any]:
+    """
+    Compare public benchmark behavior against simple reproducible baselines.
+
+    These baselines are diagnostic, not full product substitutes:
+    - `no_gateway`: every request is allowed.
+    - `l1_only`: deterministic rules engine only.
+    - `l2_threshold_only`: synthetic semantic-threshold cases only; other cases allow.
+    - `configured_harness`: current benchmark harness behavior for the corpus.
+    """
+    if corpus_paths is None:
+        corpus_paths = ["tests/benchmarks/mcp38_cases.yaml"]
+
+    cases: list[BenchmarkCase] = []
+    for path in corpus_paths:
+        cases.extend(load_cases(path))
+
+    baselines = {
+        "no_gateway": _evaluate_no_gateway_baseline(cases),
+        "l1_only": _evaluate_l1_only_baseline(cases),
+        "l2_threshold_only": _evaluate_l2_threshold_only_baseline(cases),
+        "configured_harness": evaluate_cases(cases),
+    }
+
+    return {
+        "corpus_paths": [str(path) for path in corpus_paths],
+        "cases": cases,
+        "baselines": {
+            name: _summarize_baseline(name, evaluations)
+            for name, evaluations in baselines.items()
+        },
+    }
 
 
 def summarize_evaluations(evaluations: list[BenchmarkEvaluation]) -> dict[str, int]:
@@ -223,6 +439,131 @@ def summarize_benchmark_quality(evaluations: list[BenchmarkEvaluation]) -> dict[
     }
 
 
+def summarize_benchmark_breakdowns(evaluations: list[BenchmarkEvaluation]) -> dict[str, dict[str, int]]:
+    """Group false-positive/negative and block behavior by layer and rule family."""
+    breakdowns: dict[str, dict[str, int]] = {
+        "benign_blocks_by_layer": {},
+        "benign_blocks_by_rule_family": {},
+        "malicious_blocks_by_layer": {},
+        "malicious_blocks_by_rule_family": {},
+        "false_negatives_by_expected_rule": {},
+    }
+
+    def _bump(bucket: str, key: object) -> None:
+        value = str(key if key is not None else "none")
+        breakdowns[bucket][value] = breakdowns[bucket].get(value, 0) + 1
+
+    for evaluation in evaluations:
+        if evaluation.expected_action == "ALLOW" and evaluation.actual_action != "ALLOW":
+            _bump("benign_blocks_by_layer", evaluation.actual_layer)
+            _bump("benign_blocks_by_rule_family", evaluation.actual_rule_family)
+        if evaluation.expected_action == "BLOCK" and evaluation.actual_action == "BLOCK":
+            _bump("malicious_blocks_by_layer", evaluation.actual_layer)
+            _bump("malicious_blocks_by_rule_family", evaluation.actual_rule_family)
+        if evaluation.expected_action == "BLOCK" and evaluation.actual_action != "BLOCK":
+            _bump("false_negatives_by_expected_rule", evaluation.expected_rule_id)
+
+    return breakdowns
+
+
+def summarize_latency(evaluations: list[BenchmarkEvaluation]) -> dict[str, float]:
+    """Summarize benchmark harness latency in milliseconds."""
+    values = sorted(
+        evaluation.latency_ms
+        for evaluation in evaluations
+        if evaluation.latency_ms is not None
+    )
+    if not values:
+        return {
+            "count": 0.0,
+            "mean_ms": 0.0,
+            "p50_ms": 0.0,
+            "p95_ms": 0.0,
+            "max_ms": 0.0,
+            "total_ms": 0.0,
+        }
+
+    def percentile(p: float) -> float:
+        index = min(len(values) - 1, max(0, int(round((len(values) - 1) * p))))
+        return values[index]
+
+    total = sum(values)
+    return {
+        "count": float(len(values)),
+        "mean_ms": round(total / len(values), 3),
+        "p50_ms": round(percentile(0.50), 3),
+        "p95_ms": round(percentile(0.95), 3),
+        "max_ms": round(max(values), 3),
+        "total_ms": round(total, 3),
+    }
+
+
+def summarize_confusion_matrix(evaluations: list[BenchmarkEvaluation]) -> dict[str, Any]:
+    """
+    Summarize expected-vs-actual actions for public benchmark reporting.
+
+    Rows represent the expected action from the corpus; columns represent the
+    action McpVanguard actually returned. The matrix is intentionally scoped to
+    the evaluated corpus/profile and should not be presented as universal
+    detection coverage.
+    """
+    matrix: dict[str, dict[str, int]] = {
+        expected: {actual: 0 for actual in ACTION_ORDER}
+        for expected in ACTION_ORDER
+    }
+    unexpected_actuals: set[str] = set()
+
+    for evaluation in evaluations:
+        expected = evaluation.expected_action
+        actual = evaluation.actual_action
+        if expected not in matrix:
+            matrix[expected] = {action: 0 for action in ACTION_ORDER}
+        if actual not in matrix[expected]:
+            matrix[expected][actual] = 0
+            unexpected_actuals.add(actual)
+        matrix[expected][actual] += 1
+
+    actual_actions = tuple(dict.fromkeys((*ACTION_ORDER, *sorted(unexpected_actuals))))
+    per_action: dict[str, dict[str, float | int]] = {}
+    for action in actual_actions:
+        expected_total = sum(matrix.get(action, {}).values())
+        actual_total = sum(row.get(action, 0) for row in matrix.values())
+        matched = matrix.get(action, {}).get(action, 0)
+        per_action[action] = {
+            "expected": expected_total,
+            "actual": actual_total,
+            "matched": matched,
+            "recall": (matched / expected_total) if expected_total else 0.0,
+            "precision": (matched / actual_total) if actual_total else 0.0,
+        }
+
+    mismatches = [
+        {
+            "case_id": evaluation.case_id,
+            "public_case_id": evaluation.public_case_id,
+            "source_corpus": evaluation.source_corpus,
+            "mcp38_id": evaluation.mcp38_id,
+            "expected_action": evaluation.expected_action,
+            "actual_action": evaluation.actual_action,
+            "expected_rule_id": evaluation.expected_rule_id,
+            "actual_rule_id": evaluation.actual_rule_id,
+            "actual_layer": evaluation.actual_layer,
+            "actual_rule_family": evaluation.actual_rule_family,
+            "latency_ms": evaluation.latency_ms,
+            "details": evaluation.details,
+        }
+        for evaluation in evaluations
+        if evaluation.expected_action != evaluation.actual_action
+    ]
+
+    return {
+        "actions": list(actual_actions),
+        "matrix": matrix,
+        "per_action": per_action,
+        "mismatches": mismatches,
+    }
+
+
 def benchmark_report(
     corpus_paths: list[str | Path] | None = None,
 ) -> dict[str, Any]:
@@ -242,6 +583,9 @@ def benchmark_report(
                 "evaluations": corpus_evaluations,
                 "summary": summarize_evaluations(corpus_evaluations),
                 "quality": summarize_benchmark_quality(corpus_evaluations),
+                "breakdowns": summarize_benchmark_breakdowns(corpus_evaluations),
+                "confusion": summarize_confusion_matrix(corpus_evaluations),
+                "latency": summarize_latency(corpus_evaluations),
             }
         )
         cases.extend(corpus_cases)
@@ -252,7 +596,96 @@ def benchmark_report(
         "evaluations": evaluations,
         "summary": summarize_evaluations(evaluations),
         "quality": summarize_benchmark_quality(evaluations),
+        "breakdowns": summarize_benchmark_breakdowns(evaluations),
+        "confusion": summarize_confusion_matrix(evaluations),
+        "latency": summarize_latency(evaluations),
         "corpora": corpora,
+    }
+
+
+def profile_matrix_report(
+    corpus_paths: list[str | Path] | None = None,
+    profiles: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Evaluate the same corpora under multiple named profiles.
+
+    This report is intended for release/research comparison. It shows how
+    `monitor`, `balanced`, and `strict` shift enforcement on the same cases
+    without requiring operators to run several commands and merge JSON by hand.
+    """
+    if corpus_paths is None:
+        corpus_paths = ["tests/benchmarks/layered_profile_matrix.yaml"]
+    if profiles is None:
+        profiles = ["monitor", "balanced", "strict"]
+
+    original_profile = os.environ.get("VANGUARD_PROFILE")
+    profile_reports: dict[str, dict[str, Any]] = {}
+    try:
+        for profile in profiles:
+            normalized = profile.strip().lower()
+            if normalized not in {"monitor", "balanced", "strict"}:
+                raise ValueError(f"Unsupported benchmark profile: {profile}")
+            os.environ["VANGUARD_PROFILE"] = normalized
+            profile_reports[normalized] = benchmark_report(corpus_paths)
+    finally:
+        if original_profile is None:
+            os.environ.pop("VANGUARD_PROFILE", None)
+        else:
+            os.environ["VANGUARD_PROFILE"] = original_profile
+
+    case_index: dict[str, dict[str, Any]] = {}
+    for profile, report in profile_reports.items():
+        for evaluation in report["evaluations"]:
+            entry = case_index.setdefault(
+                evaluation.case_id,
+                {
+                    "case_id": evaluation.case_id,
+                    "public_case_id": evaluation.public_case_id,
+                    "source_corpus": evaluation.source_corpus,
+                    "mcp38_id": evaluation.mcp38_id,
+                    "title": evaluation.title,
+                    "expected_action": evaluation.expected_action,
+                    "expected_rule_id": evaluation.expected_rule_id,
+                    "profiles": {},
+                },
+            )
+            entry["profiles"][profile] = {
+                "actual_action": evaluation.actual_action,
+                "passed": evaluation.passed,
+                "actual_rule_id": evaluation.actual_rule_id,
+                "actual_layer": evaluation.actual_layer,
+                "actual_rule_family": evaluation.actual_rule_family,
+                "actual_capabilities": evaluation.actual_capabilities,
+                "details": evaluation.details,
+            }
+
+    case_rows = list(case_index.values())
+    profile_order = [profile.strip().lower() for profile in profiles]
+    for row in case_rows:
+        actions = {
+            profile: row["profiles"].get(profile, {}).get("actual_action")
+            for profile in profile_order
+        }
+        observed = {action for action in actions.values() if action is not None}
+        row["action_by_profile"] = actions
+        row["action_delta"] = len(observed) > 1
+
+    return {
+        "profiles": profile_order,
+        "corpus_paths": [str(path) for path in corpus_paths],
+        "profile_reports": {
+            profile: {
+                "summary": report["summary"],
+                "quality": report["quality"],
+                "breakdowns": report["breakdowns"],
+                "confusion": report["confusion"],
+                "latency": report["latency"],
+            }
+            for profile, report in profile_reports.items()
+        },
+        "cases": case_rows,
+        "deltas": [row for row in case_rows if row["action_delta"]],
     }
 
 
@@ -417,6 +850,8 @@ def _evaluate_semantic_threshold_case(
         details = f"expected action {expected_action}, got {actual_action}"
     return BenchmarkEvaluation(
         case_id=f"{case.case_id}@warn={warn_threshold:.2f}/block={block_threshold:.2f}",
+        public_case_id=f"{case.public_case_id}@warn={warn_threshold:.2f}/block={block_threshold:.2f}",
+        source_corpus=case.source_corpus,
         mcp38_id=case.mcp38_id,
         title=case.title,
         expected_action=expected_action,

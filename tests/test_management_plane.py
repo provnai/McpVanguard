@@ -25,6 +25,7 @@ from core.management import (
     MANAGEMENT_PLANE_DEV,
     MANAGEMENT_PLANE_OPERATOR,
     _principal_has_admin,
+    get_vanguard_tools,
     is_management_tool,
     MUTATING_MANAGEMENT_TOOLS,
     READ_ONLY_MANAGEMENT_TOOLS,
@@ -187,3 +188,71 @@ def test_management_tool_helper_includes_read_only_names():
 
 def test_no_overlap_between_read_and_mutating():
     assert not (READ_ONLY_MANAGEMENT_TOOLS & MUTATING_MANAGEMENT_TOOLS)
+
+
+def test_disabled_mode_exposes_no_management_tools():
+    assert get_vanguard_tools(plane_mode=MANAGEMENT_PLANE_DISABLED) == []
+
+
+def test_operator_only_exposes_read_only_tools_without_admin():
+    tools = get_vanguard_tools(
+        plane_mode=MANAGEMENT_PLANE_OPERATOR,
+        principal=FakePrincipal(roles=["developer"]),
+    )
+    names = {tool["name"] for tool in tools}
+
+    assert READ_ONLY_MANAGEMENT_TOOLS <= names
+    assert not (MUTATING_MANAGEMENT_TOOLS & names)
+
+
+def test_operator_only_exposes_mutating_tools_with_admin_scope():
+    tools = get_vanguard_tools(
+        plane_mode=MANAGEMENT_PLANE_OPERATOR,
+        principal=FakePrincipal(attributes={"token_scope": ["vanguard:admin"]}),
+    )
+    names = {tool["name"] for tool in tools}
+
+    assert READ_ONLY_MANAGEMENT_TOOLS <= names
+    assert MUTATING_MANAGEMENT_TOOLS <= names
+
+
+@pytest.mark.asyncio
+async def test_context_plane_mode_overrides_environment_disabled():
+    with patch.dict(os.environ, {"VANGUARD_MANAGEMENT_PLANE_MODE": "disabled"}):
+        ctx = ManagementContext(session_id="sess-context", plane_mode=MANAGEMENT_PLANE_DEV)
+        result = await handle_vanguard_tool("get_vanguard_status", {}, ctx)
+
+    assert result.get("isError") is not True
+
+
+@pytest.mark.asyncio
+async def test_successful_management_action_is_audited(caplog):
+    caplog.set_level("INFO", logger="vanguard.management")
+    with patch.dict(os.environ, {"VANGUARD_MANAGEMENT_PLANE_MODE": "same_session_dev"}):
+        ctx = ManagementContext(session_id="sess-audit")
+        result = await handle_vanguard_tool("get_vanguard_status", {}, ctx)
+
+    assert result.get("isError") is not True
+    assert "Management op SUCCESS" in caplog.text
+    assert "get_vanguard_status" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_mutating_management_success_records_risk_event(monkeypatch):
+    recorded: list[tuple[str, str, str, dict]] = []
+
+    class FakeRiskEngine:
+        def record_event(self, session_id, server_id, event_type, metadata=None):
+            recorded.append((session_id, server_id, event_type, metadata or {}))
+
+    monkeypatch.setattr("core.risk.RiskEngine.get_instance", lambda: FakeRiskEngine())
+    with patch.dict(os.environ, {"VANGUARD_MANAGEMENT_PLANE_MODE": "same_session_dev"}):
+        ctx = ManagementContext(session_id="sess-mutate")
+        result = await handle_vanguard_tool("vanguard_reset_session", {}, ctx)
+
+    assert result.get("isError") is not True
+    assert recorded
+    assert recorded[-1][0] == "sess-mutate"
+    assert recorded[-1][1] == "management"
+    assert recorded[-1][2] == "MANAGEMENT_MUTATION"
+    assert recorded[-1][3]["tool"] == "vanguard_reset_session"

@@ -56,6 +56,7 @@ from core import sigstore_bundle
 from core import receipts
 from core.risk import RiskEngine, EnforcementLevel
 from core.policy import compose_verdict, maybe_deliver_review, PolicyAction
+from core.tool_capabilities import capability_values, infer_tool_capabilities
 
 from core.auth import TOOL_SCOPE_MAPPING
 
@@ -103,6 +104,8 @@ class ProxyConfig:
         self.receipt_log_file: str = os.getenv("VANGUARD_RECEIPT_LOG_FILE", "receipts.jsonl")
         self.receipt_transport: str = os.getenv("VANGUARD_RECEIPT_TRANSPORT", "stdio").lower()
         self.receipt_redaction_mode: str = os.getenv("VANGUARD_RECEIPT_REDACTION_MODE", "partial").lower()
+        self.receipt_chain_enabled: bool = os.getenv("VANGUARD_RECEIPT_CHAIN_ENABLED", "false").lower() == "true"
+        self.receipt_extensions_enabled: bool = os.getenv("VANGUARD_RECEIPT_EXTENSIONS_ENABLED", "false").lower() == "true"
         self.metadata_inspection_enabled: bool = os.getenv("VANGUARD_METADATA_INSPECTION_ENABLED", "true").lower() == "true"
         self.metadata_policy: str = os.getenv("VANGUARD_METADATA_POLICY", "block").lower()
         self.server_manifest_file: str = os.getenv("VANGUARD_SERVER_MANIFEST_FILE", "")
@@ -210,6 +213,9 @@ class ProxyConfig:
         self.required_destructive_scopes: list[str] = [
             value.strip() for value in os.getenv("VANGUARD_REQUIRED_DESTRUCTIVE_SCOPES", "").split(",") if value.strip()
         ]
+        self.max_tool_calls_per_minute: int = int(os.getenv("VANGUARD_MAX_TOOL_CALLS_PER_MINUTE", "0"))
+        self.max_risky_calls_per_session: int = int(os.getenv("VANGUARD_MAX_RISKY_CALLS_PER_SESSION", "0"))
+        self.max_blocked_attempts_per_session: int = int(os.getenv("VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION", "0"))
 
         # ---- Profile-aware fields (defaults here; profile may override) ----
         # Fail-closed for L2 semantic scoring (strict: always true).
@@ -363,12 +369,20 @@ class VanguardProxy:
 
     def _build_audit_event(self, **kwargs) -> AuditEvent:
         """Build a normalized audit event with principal/server/risk/profile context."""
+        action = str(kwargs.get("action") or "ALLOW").upper()
+        raw_policy_action = kwargs.get("raw_policy_action")
+        effective_policy_action = kwargs.get("effective_policy_action") or action
         event_kwargs: dict[str, Any] = {
             "session_id": self._session.session_id if self._session else "N/A",
             "principal_id": self.principal.principal_id if self.principal else None,
             "auth_type": self.principal.auth_type if self.principal else None,
             "server_id": self._server_id,
             "profile": self.config.profile,
+            "decision": effective_policy_action,
+            "raw_policy_action": raw_policy_action,
+            "effective_policy_action": effective_policy_action,
+            "event_outcome": self._audit_outcome(effective_policy_action),
+            "event_severity": self._audit_severity(effective_policy_action),
         }
         event_kwargs.update(self._current_risk_context())
         event_kwargs.update(kwargs)
@@ -377,6 +391,118 @@ class VanguardProxy:
     def _log_audit_event(self, **kwargs) -> None:
         event = self._build_audit_event(**kwargs)
         self.audit.info(event.to_log_line(format=self.config.audit_format))
+
+    @staticmethod
+    def _audit_outcome(action: str | None) -> str:
+        normalized = (action or "ALLOW").upper()
+        if normalized == "ALLOW":
+            return "success"
+        if normalized == "WARN":
+            return "warning"
+        if normalized == "REVIEW":
+            return "review"
+        if normalized == "SHADOW-BLOCK":
+            return "would_block"
+        if normalized == "BLOCK":
+            return "blocked"
+        return "unknown"
+
+    @staticmethod
+    def _audit_severity(action: str | None) -> str:
+        normalized = (action or "ALLOW").upper()
+        if normalized == "ALLOW":
+            return "info"
+        if normalized == "WARN":
+            return "low"
+        if normalized == "REVIEW":
+            return "medium"
+        if normalized == "SHADOW-BLOCK":
+            return "high"
+        if normalized == "BLOCK":
+            return "critical"
+        return "info"
+
+    def _apply_session_budgets(self, message: dict[str, Any], result: InspectionResult) -> InspectionResult:
+        """Apply opt-in per-session tool-call budgets after final policy composition."""
+        if not self._session or message.get("method") != "tools/call":
+            return result
+
+        violation = self.risk_engine.record_policy_budget(
+            self._session.session_id,
+            self._server_id,
+            effective_action=result.effective_policy_action or result.action,
+            max_calls_per_minute=self.config.max_tool_calls_per_minute,
+            max_risky_calls_per_session=self.config.max_risky_calls_per_session,
+            max_blocked_attempts_per_session=self.config.max_blocked_attempts_per_session,
+        )
+        if violation is None:
+            return result
+
+        self.risk_engine.record_event(
+            self._session.session_id,
+            self._server_id,
+            "BEHAVIORAL_BLOCK",
+            {
+                "rule_id": violation["rule_id"],
+                "budget": violation["budget"],
+                "limit": violation["limit"],
+                "observed": violation["observed"],
+            },
+        )
+        return InspectionResult(
+            allowed=False,
+            action="BLOCK",
+            raw_policy_action=result.raw_policy_action or result.action,
+            effective_policy_action="BLOCK",
+            layer_triggered=3,
+            rule_matches=[
+                RuleMatch(
+                    rule_id=violation["rule_id"],
+                    rule_name="Session budget exceeded",
+                    severity="HIGH",
+                    action="BLOCK",
+                    message=violation["reason"],
+                )
+            ],
+            semantic_score=result.semantic_score,
+            block_reason=violation["reason"],
+            policy_explanation={
+                "schema_version": "policy_explanation_v1",
+                "active_profile": self.config.profile,
+                "final_verdict": "BLOCK",
+                "primary_layer": "L3",
+                "primary_rule_id": violation["rule_id"],
+                "primary_rule_family": "session_budget",
+                "primary_finding": violation["reason"],
+                "supporting_findings": [
+                    {
+                        "layer": "L3",
+                        "rule_id": violation["rule_id"],
+                        "rule_family": "session_budget",
+                        "severity": "HIGH",
+                        "action": "BLOCK",
+                        "message": violation["reason"],
+                    }
+                ],
+                "profile_effect": "session_budget_enforced",
+                "raw_policy_action": result.raw_policy_action or result.action,
+                "effective_policy_action": "BLOCK",
+                "semantic_role": result.policy_explanation.get("semantic_role", "skipped")
+                if result.policy_explanation
+                else "skipped",
+                "operator_hint": (
+                    "A configured per-session budget was exceeded. Review recent calls, "
+                    "then increase the limit only if this workflow is expected."
+                ),
+                "upstream_called": False,
+                "budget": {
+                    "name": violation["budget"],
+                    "limit": violation["limit"],
+                    "observed": violation["observed"],
+                },
+            },
+            tool_capabilities=result.tool_capabilities,
+        )
 
     def _emit_tool_call_receipt(
         self,
@@ -411,9 +537,18 @@ class VanguardProxy:
                 risk_score=risk_context.get("risk_score"),
                 request_message=raw_message,
                 normalized_message=normalized_message,
+                policy_explanation=result.policy_explanation if self.config.receipt_extensions_enabled else None,
+                tool_capabilities=result.tool_capabilities if self.config.receipt_extensions_enabled else None,
                 redaction_mode=self.config.receipt_redaction_mode,
             )
-            receipts.append_receipt_event(self.config.receipt_log_file, event)
+            if self.config.receipt_chain_enabled:
+                receipts.append_chained_receipt_event(
+                    self.config.receipt_log_file,
+                    event,
+                    stream_id=f"{self._server_id}:{self._session.session_id if self._session else 'no-session'}",
+                )
+            else:
+                receipts.append_receipt_event(self.config.receipt_log_file, event)
         except Exception as exc:
             logger.debug("[Vanguard] Failed to emit receipt_v1 event: %s", exc)
 
@@ -1306,11 +1441,15 @@ class VanguardProxy:
                 method=method,
                 tool_name=tool_name,
                 action=effective_action,
+                raw_policy_action=result.raw_policy_action or result.action,
+                effective_policy_action=result.effective_policy_action or effective_action,
                 layer_triggered=result.layer_triggered,
                 rule_id=result.rule_matches[0].rule_id if result.rule_matches else None,
                 semantic_score=result.semantic_score,
                 latency_ms=round(latency_ms, 2),
                 blocked_reason=result.block_reason,
+                policy_explanation=result.policy_explanation,
+                tool_capabilities=result.tool_capabilities,
             )
             self._emit_tool_call_receipt(
                 method=method,
@@ -1528,7 +1667,12 @@ class VanguardProxy:
         """Inject Vanguard management tools and apply safety hints/titles."""
         all_tools = list(tools)
         if self.config.management_tools_enabled:
-            all_tools.extend(management.get_vanguard_tools())
+            all_tools.extend(
+                management.get_vanguard_tools(
+                    plane_mode=self.config.management_plane_mode,
+                    principal=self.principal,
+                )
+            )
         
         # Keywords for inference
         READ_PREFIXES = ("get_", "list_", "read_", "check_", "fetch_", "search_", "inspect_", "query_", "audit_")
@@ -1752,6 +1896,7 @@ class VanguardProxy:
         )
 
         # 7. Map final PolicyVerdict back to a standard InspectionResult
+        tool_capabilities = capability_values(infer_tool_capabilities(message))
         allowed = final_verdict.effective_action in (
             PolicyAction.ALLOW,
             PolicyAction.WARN,
@@ -1767,7 +1912,7 @@ class VanguardProxy:
         layer_map = {"AUTH": 0, "L0": 0, "L1": 1, "L1.5": 1, "L3": 3, "L2": 2}
         layer_triggered = layer_map.get(final_verdict.primary_layer, 1)
 
-        return InspectionResult(
+        result = InspectionResult(
             allowed=allowed,
             action=final_verdict.effective_action.value,
             raw_policy_action=final_verdict.action.value,
@@ -1776,7 +1921,10 @@ class VanguardProxy:
             rule_matches=all_matches,
             semantic_score=final_verdict.semantic_score,
             block_reason=final_verdict.reason,
+            policy_explanation=final_verdict.explanation,
+            tool_capabilities=tool_capabilities,
         )
+        return self._apply_session_budgets(message, result)
 
     def _map_preflight_findings(self, findings: list) -> Optional[InspectionResult]:
         if not findings:

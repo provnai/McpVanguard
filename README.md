@@ -64,6 +64,19 @@ Install the package:
 pip install mcp-vanguard
 ```
 
+Optional deployment extras:
+
+```bash
+# Multi-instance L3 behavioral state
+pip install "mcp-vanguard[redis]"
+
+# RE2-backed deterministic regex matching where the wheel is available
+pip install "mcp-vanguard[re2]"
+
+# Hosted/full deployment extras
+pip install "mcp-vanguard[full]"
+```
+
 Wrap a local stdio MCP server:
 
 ```bash
@@ -81,11 +94,19 @@ export VANGUARD_API_KEY="your-secret-key"
 vanguard sse --profile balanced --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
+For public/non-loopback hosted deployments, `strict` profile refuses to start unless transport auth is configured with `VANGUARD_API_KEY` or OAuth/JWKS settings. `balanced` remains suitable for demos and staged rollouts, but will warn loudly when exposed without auth.
+
+Hosted deployments can also enable opt-in per-session budgets for tool-call rate, risky decisions, and repeated blocked attempts. These act as circuit breakers around the layered policy path without changing defaults for local OSS use.
+
+For private-network MCP servers reached through Anthropic MCP tunnels, the recommended placement is tunnel -> McpVanguard -> private MCP server. Tunnels reduce network exposure. McpVanguard enforces the execution boundary.
+
+McpVanguard is also tracking the MCP 2026-07-28 release candidate. The `2.1.x` line includes additive `Mcp-Method` / `Mcp-Name` consistency checks when those headers are present, plus explicit `_meta` inspection coverage. See [docs/MCP_2026_07_28_RC_COMPATIBILITY.md](docs/MCP_2026_07_28_RC_COMPATIBILITY.md).
+
 Deploy on Railway:
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/mcpvanguard?referralCode=4AXmAG&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
-Need a complete deployment walkthrough? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/railway-deployment-guide.md](docs/railway-deployment-guide.md).
+Need a complete deployment walkthrough? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/railway-deployment-guide.md](docs/railway-deployment-guide.md), and [docs/ANTHROPIC_MCP_TUNNELS.md](docs/ANTHROPIC_MCP_TUNNELS.md).
 
 ## Getting Started
 
@@ -125,6 +146,8 @@ If a request is blocked, the agent receives a standard JSON-RPC error and the up
 
 Safe zones are deterministic path-boundary checks, not a substitute for OS sandboxing or container isolation. They inspect standard and common custom path-like argument names recursively, but production deployments should still tune `rules/safe_zones.yaml` for the actual schemas and directories your MCP tools are allowed to touch. See [docs/SAFE_ZONES.md](docs/SAFE_ZONES.md).
 
+For operator triage, JSON audit logs include SIEM-friendly decision fields and structured `policy_explanation` data with the primary layer, rule family, profile effect, upstream-call status, and tuning hint. See [docs/BLOCK_DECISIONS.md](docs/BLOCK_DECISIONS.md).
+
 ## Deployment Model
 
 McpVanguard is best understood as a security gateway for MCP workflows.
@@ -157,6 +180,8 @@ McpVanguard includes packaged benchmark corpora for adversarial and benign MCP t
 vanguard benchmark-run --profile monitor
 vanguard benchmark-run --profile balanced
 vanguard benchmark-run --profile strict
+vanguard benchmark-profiles
+vanguard benchmark-baselines
 ```
 
 The benchmark results are a release and tuning signal, not a promise of universal detection or zero false positives. See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for interpretation guidance and the recommended release gate.
@@ -170,6 +195,17 @@ McpVanguard is local-first and supports stronger hosted-gateway controls when ne
 - **stdio mode**: no network auth required
 - **SSE / Streamable HTTP mode**: supports `VANGUARD_API_KEY`
 - **Bearer / JWT mode**: supports verified JWT/JWKS validation, issuer/audience/claim/scope checks, and auth-aware policy on the hosted gateway path
+- **Strict hosted mode**: refuses public binds without transport auth, sets bearer-claim mismatch handling to `block`, and requires `Origin` when an allowlist is configured
+
+## Management Plane
+
+Native `vanguard_*` management tools are disabled by default. If you enable them, also choose an explicit management-plane mode:
+
+- `disabled`: no native management tools are exposed
+- `same_session_dev`: local/dev only; read and mutating tools share the governed MCP session and startup prints a warning
+- `operator_only`: read-only tools may be visible, but mutating tools require an admin role or `vanguard:admin` / `scope:admin` scope
+
+For production, keep mutating management out of normal governed agent sessions unless the caller is an authenticated operator. Management actions are audited and denied/mutating attempts are risk-visible.
 
 ## Semantic Backend Options
 
@@ -197,7 +233,7 @@ This should be described as server integrity, baseline verification, and trust v
 
 ## Project Status
 
-- `2.1.1` is the current runtime hardening patch for the layered enforcement release line
+- `2.1.x` is the current runtime hardening patch line for layered enforcement
 - layered enforcement path (`L0 -> L1 -> L1.5 -> L2 -> L3 -> Policy Composer`) is implemented and covered by local and CI verification
 - product profiles (`monitor` / `balanced` / `strict`) are the supported deployment modes for this release line
 - broader research-only features (GPU attestation, hardware-rooted provenance, zero-FP claims) are intentionally outside the core OSS release scope

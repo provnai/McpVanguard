@@ -11,7 +11,33 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509.oid import NameOID
 
 from core import auth
-from core.sse_server import ServerContext, _check_auth, _check_origin, _validate_message_request, handle_messages, handle_mcp, handle_sse
+from core.proxy import ProxyConfig
+from core.sse_server import (
+    ServerContext,
+    _apply_hosted_profile_defaults,
+    _check_auth,
+    _check_origin,
+    _has_configured_transport_auth,
+    _hosted_security_summary,
+    _validate_hosted_startup,
+    _validate_message_request,
+    handle_messages,
+    handle_mcp,
+    handle_sse,
+    run_sse_server,
+)
+
+
+def _receive_json(payload: dict):
+    body = json.dumps(payload).encode("utf-8")
+    messages = [{"type": "http.request", "body": body, "more_body": False}]
+
+    async def receive():
+        if messages:
+            return messages.pop(0)
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return receive
 
 
 def test_validate_message_request_rejects_bad_content_type():
@@ -41,6 +67,114 @@ def test_check_origin_allows_missing_origin_when_not_required():
     assert ok is True
     assert status == 200
     assert message == ""
+
+
+def test_strict_public_bind_without_auth_is_refused():
+    cfg = {"API_KEY": "", "AUTH_MODE": "none"}
+
+    ok, message = _validate_hosted_startup("0.0.0.0", cfg, "strict")
+
+    assert ok is False
+    assert "refuses non-loopback bind" in message
+
+
+def test_balanced_public_bind_without_auth_remains_warning_only():
+    cfg = {"API_KEY": "", "AUTH_MODE": "none"}
+
+    ok, message = _validate_hosted_startup("0.0.0.0", cfg, "balanced")
+
+    assert ok is True
+    assert message == ""
+
+
+def test_strict_public_bind_allows_api_key_auth():
+    cfg = {"API_KEY": "top-secret", "AUTH_MODE": "api_key"}
+
+    ok, message = _validate_hosted_startup("0.0.0.0", cfg, "strict")
+
+    assert ok is True
+    assert message == ""
+    assert _has_configured_transport_auth(cfg) is True
+
+
+def test_strict_public_bind_allows_configured_oauth():
+    cfg = {
+        "API_KEY": "",
+        "AUTH_MODE": "oauth",
+        "JWKS_FILE": "",
+        "JWKS_JSON": '{"keys":[]}',
+        "JWKS_URL": "",
+        "OAUTH_DISCOVERY_URL": "",
+    }
+
+    ok, message = _validate_hosted_startup("0.0.0.0", cfg, "strict")
+
+    assert ok is True
+    assert message == ""
+    assert _has_configured_transport_auth(cfg) is True
+
+
+def test_strict_hosted_defaults_block_claim_policy_and_require_origin(monkeypatch):
+    monkeypatch.delenv("VANGUARD_BEARER_CLAIM_POLICY", raising=False)
+    monkeypatch.delenv("VANGUARD_REQUIRE_ORIGIN", raising=False)
+    cfg = {
+        "BEARER_CLAIM_POLICY": "warn",
+        "REQUIRE_ORIGIN": False,
+        "ALLOWED_ORIGINS": ["https://app.example"],
+    }
+
+    notes = _apply_hosted_profile_defaults(cfg, "strict")
+
+    assert cfg["BEARER_CLAIM_POLICY"] == "block"
+    assert cfg["REQUIRE_ORIGIN"] is True
+    assert "bearer_claim_policy=block" in notes
+    assert "require_origin=true" in notes
+
+
+def test_strict_hosted_defaults_respect_explicit_operator_overrides(monkeypatch):
+    monkeypatch.setenv("VANGUARD_BEARER_CLAIM_POLICY", "warn")
+    monkeypatch.setenv("VANGUARD_REQUIRE_ORIGIN", "false")
+    cfg = {
+        "BEARER_CLAIM_POLICY": "warn",
+        "REQUIRE_ORIGIN": False,
+        "ALLOWED_ORIGINS": ["https://app.example"],
+    }
+
+    notes = _apply_hosted_profile_defaults(cfg, "strict")
+
+    assert cfg["BEARER_CLAIM_POLICY"] == "warn"
+    assert cfg["REQUIRE_ORIGIN"] is False
+    assert notes == []
+
+
+def test_hosted_security_summary_surfaces_deployment_posture():
+    cfg = {
+        "API_KEY": "top-secret",
+        "AUTH_MODE": "api_key",
+        "BEARER_CLAIM_POLICY": "block",
+        "REQUIRE_ORIGIN": True,
+        "BIND_STREAMABLE_SESSIONS": True,
+    }
+
+    summary = _hosted_security_summary("0.0.0.0", cfg, "strict", "redis://localhost:6379/0")
+
+    assert "profile=strict" in summary
+    assert "bind=public" in summary
+    assert "auth=configured(api_key)" in summary
+    assert "claim_policy=block" in summary
+    assert "origin=required" in summary
+    assert "redis=shared" in summary
+
+
+@pytest.mark.asyncio
+async def test_run_sse_server_refuses_strict_public_bind_without_auth(monkeypatch):
+    monkeypatch.delenv("VANGUARD_API_KEY", raising=False)
+    monkeypatch.delenv("VANGUARD_AUTH_MODE", raising=False)
+    config = ProxyConfig()
+    config.profile = "strict"
+
+    with pytest.raises(RuntimeError, match="Strict hosted mode refuses non-loopback bind"):
+        await run_sse_server(["python", "-c", "print('hello')"], host="0.0.0.0", port=0, config=config)
 
 
 def test_check_origin_rejects_missing_origin_when_required():
@@ -1241,6 +1375,147 @@ async def test_handle_mcp_oauth_missing_bearer_returns_www_authenticate(monkeypa
     challenge = headers[b"www-authenticate"].decode("utf-8")
     assert 'Bearer realm="mcpvanguard"' in challenge
     assert 'error="' not in challenge
+
+
+@pytest.mark.asyncio
+async def test_handle_mcp_rejects_mcp_method_header_body_mismatch(monkeypatch):
+    manager = MagicMock()
+    manager.handle_request = AsyncMock()
+    ctx = ServerContext(
+        server_command=["python", "-c", "print('hello')"],
+        config=None,
+        sse_transport=MagicMock(),
+        streamable_manager=manager,
+        cfg={
+            "AUTH_MODE": "none",
+            "API_KEY": "",
+            "ALLOWED_IPS": [],
+            "ALLOWED_ORIGINS": [],
+            "REQUIRE_ORIGIN": False,
+            "MAX_CONCURRENCY": 5,
+            "MAX_GLOBAL_CONNECTIONS": 10,
+            "RATE_LIMIT_PER_SEC": 100.0,
+            "MAX_BODY_BYTES": 1024,
+        },
+    )
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "client": ["127.0.0.1", 1234],
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"mcp-method", b"tools/list"),
+        ],
+    }
+    send = _SendCollector()
+
+    await handle_mcp(
+        scope,
+        _receive_json({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file"}}),
+        send,
+        ctx,
+    )
+
+    manager.handle_request.assert_not_called()
+    start = send.messages[0]
+    assert start["type"] == "http.response.start"
+    assert start["status"] == 400
+    body = json.loads(send.messages[1]["body"].decode("utf-8"))
+    assert "Mcp-Method" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_handle_mcp_rejects_mcp_name_header_body_mismatch(monkeypatch):
+    manager = MagicMock()
+    manager.handle_request = AsyncMock()
+    ctx = ServerContext(
+        server_command=["python", "-c", "print('hello')"],
+        config=None,
+        sse_transport=MagicMock(),
+        streamable_manager=manager,
+        cfg={
+            "AUTH_MODE": "none",
+            "API_KEY": "",
+            "ALLOWED_IPS": [],
+            "ALLOWED_ORIGINS": [],
+            "REQUIRE_ORIGIN": False,
+            "MAX_CONCURRENCY": 5,
+            "MAX_GLOBAL_CONNECTIONS": 10,
+            "RATE_LIMIT_PER_SEC": 100.0,
+            "MAX_BODY_BYTES": 1024,
+        },
+    )
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "client": ["127.0.0.1", 1234],
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"mcp-method", b"tools/call"),
+            (b"mcp-name", b"delete_file"),
+        ],
+    }
+    send = _SendCollector()
+
+    await handle_mcp(
+        scope,
+        _receive_json({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file"}}),
+        send,
+        ctx,
+    )
+
+    manager.handle_request.assert_not_called()
+    assert send.messages[0]["status"] == 400
+    body = json.loads(send.messages[1]["body"].decode("utf-8"))
+    assert "Mcp-Name" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_handle_mcp_allows_matching_future_routing_headers(monkeypatch):
+    captured = {}
+
+    async def capture_request(scope, receive, send):
+        captured["body"] = await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    manager = MagicMock()
+    manager.handle_request = AsyncMock(side_effect=capture_request)
+    ctx = ServerContext(
+        server_command=["python", "-c", "print('hello')"],
+        config=None,
+        sse_transport=MagicMock(),
+        streamable_manager=manager,
+        cfg={
+            "AUTH_MODE": "none",
+            "API_KEY": "",
+            "ALLOWED_IPS": [],
+            "ALLOWED_ORIGINS": [],
+            "REQUIRE_ORIGIN": False,
+            "MAX_CONCURRENCY": 5,
+            "MAX_GLOBAL_CONNECTIONS": 10,
+            "RATE_LIMIT_PER_SEC": 100.0,
+            "MAX_BODY_BYTES": 1024,
+        },
+    )
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file"}}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "client": ["127.0.0.1", 1234],
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"mcp-method", b"tools/call"),
+            (b"mcp-name", b"read_file"),
+        ],
+    }
+    send = _SendCollector()
+
+    await handle_mcp(scope, _receive_json(payload), send, ctx)
+
+    manager.handle_request.assert_awaited_once()
+    assert json.loads(captured["body"]["body"].decode("utf-8")) == payload
+    assert send.messages[0]["status"] == 200
 
 
 @pytest.mark.asyncio

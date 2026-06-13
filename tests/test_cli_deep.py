@@ -215,6 +215,17 @@ def test_vanguard_start_management_tools_flag_enables_surface():
     assert config.management_tools_enabled is True
 
 
+def test_vanguard_start_warns_for_same_session_dev_management_plane(monkeypatch):
+    monkeypatch.setenv("VANGUARD_MANAGEMENT_PLANE_MODE", "same_session_dev")
+
+    with patch("core.cli.run_proxy") as mock_run_proxy:
+        result = runner.invoke(app, ["start", "--server", "echo hello", "--management-tools"])
+
+    assert result.exit_code == 0
+    mock_run_proxy.assert_called_once()
+    assert "same_session_dev mode" in result.output
+
+
 def test_vanguard_sse_management_tools_flag_enables_surface():
     async def fake_run_sse_server(*, config, **kwargs):
         return config
@@ -307,7 +318,87 @@ def test_vanguard_benchmark_run_json_output_is_machine_readable():
     payload = json.loads(result.stdout)
     assert payload["summary"]["failed"] == 0
     assert payload["summary"]["passed"] == payload["summary"]["total"]
+    assert payload["confusion"]["matrix"]["BLOCK"]["BLOCK"] >= 1
+    assert payload["latency"]["count"] == payload["summary"]["total"]
+    assert "precision" in payload["confusion"]["per_action"]["BLOCK"]
+    assert all(evaluation["public_case_id"].startswith("mcpv:") for evaluation in payload["evaluations"])
+    assert all(evaluation["latency_ms"] is not None for evaluation in payload["evaluations"])
     assert any(evaluation["case_id"] == "bench-mcp24-large-response" for evaluation in payload["evaluations"])
+
+
+def test_vanguard_benchmark_profiles_reports_profile_matrix():
+    result = runner.invoke(app, ["benchmark-profiles"])
+
+    assert result.exit_code == 0
+    assert "McpVanguard Profile Comparison" in result.stdout
+    assert "Profile Summary" in result.stdout
+    assert "Action By Profile" in result.stdout
+    assert "MATRIX-001" in result.stdout
+
+
+def test_vanguard_benchmark_profiles_json_output_is_machine_readable():
+    result = runner.invoke(app, ["benchmark-profiles", "--json-output"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["profiles"] == ["monitor", "balanced", "strict"]
+    assert payload["profile_reports"]["strict"]["summary"]["failed"] == 0
+    assert payload["profile_reports"]["strict"]["confusion"]["matrix"]["BLOCK"]["BLOCK"] >= 1
+    assert payload["profile_reports"]["strict"]["latency"]["count"] == payload["profile_reports"]["strict"]["summary"]["total"]
+    assert all(row["public_case_id"].startswith("mcpv:layered_profile_matrix:") for row in payload["cases"])
+    assert any(row["action_delta"] for row in payload["cases"])
+
+
+def test_vanguard_benchmark_baselines_reports_summary():
+    result = runner.invoke(app, ["benchmark-baselines"])
+
+    assert result.exit_code == 0
+    assert "McpVanguard Baseline Comparison" in result.stdout
+    assert "Baseline Summary" in result.stdout
+    assert "no_gateway" in result.stdout
+    assert "configured_harness" in result.stdout
+
+
+def test_vanguard_benchmark_baselines_json_output_is_machine_readable():
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-baselines",
+            "--benchmark-file",
+            "tests/benchmarks/gpu_semantic_threshold_cases.yaml",
+            "--json-output",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert set(payload["baselines"]) == {
+        "no_gateway",
+        "l1_only",
+        "l2_threshold_only",
+        "configured_harness",
+    }
+    assert payload["baselines"]["l2_threshold_only"]["summary"]["failed"] == 0
+    assert payload["baselines"]["configured_harness"]["latency"]["count"] == 5
+    assert all(
+        evaluation["public_case_id"].startswith("mcpv:gpu_semantic_threshold_cases:")
+        for evaluation in payload["baselines"]["configured_harness"]["evaluations"]
+    )
+
+
+def test_vanguard_gpu_harden_json_output_includes_confusion_matrix():
+    result = runner.invoke(app, ["gpu-harden", "--json-output"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["failed"] == 0
+    assert payload["confusion"]["matrix"]["BLOCK"]["BLOCK"] >= 1
+    assert payload["latency"]["count"] == payload["summary"]["total"]
+    assert payload["corpora"][0]["confusion"]["matrix"]["BLOCK"]["BLOCK"] >= 1
+    assert payload["corpora"][0]["latency"]["count"] == payload["corpora"][0]["summary"]["total"]
+    assert all(case["public_case_id"].startswith("mcpv:") for case in payload["cases"])
+    assert all(evaluation["source_corpus"] for evaluation in payload["evaluations"])
+    assert all(evaluation["latency_ms"] is not None for evaluation in payload["evaluations"])
 
 
 def test_vanguard_server_manifest_writes_output(tmp_path):

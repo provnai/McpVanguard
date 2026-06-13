@@ -25,9 +25,20 @@ You **must** set the following variables for McpVanguard to start successfully:
 | Variable | Description |
 |----------|-------------|
 | `MCP_SERVER_COMMAND` | The MCP server command Vanguard will wrap and protect. e.g. `npx @modelcontextprotocol/server-filesystem /app/data` |
-| `VANGUARD_API_KEY` | A secret key to protect your SSE endpoint. Clients must send this in the `X-Api-Key` header. Generate a strong random string. |
+| `VANGUARD_API_KEY` | A secret key to protect your SSE endpoint. Clients must send this in the `X-Api-Key` header. Generate a strong random string. Required for public `strict` deployments. |
 | `VANGUARD_PROFILE` | `balanced` | Set to `monitor` for audit-only discovery or `strict` for production-sensitive systems. |
 | `VANGUARD_MODE` | `enforce` | Optional lower-level mode. Set to `audit` for shadow-mode evaluation if you are not using the `monitor` profile. |
+
+### Safe Railway Baseline
+
+Railway services receive a public URL, so treat the gateway as hosted by default:
+
+- use `balanced` while validating traffic and safe-zone tuning
+- set `VANGUARD_API_KEY` before exposing the service to real clients
+- switch to `strict` for production-sensitive systems only after auth, safe zones, and expected benign workflows have been validated
+- add `VANGUARD_ALLOWED_ORIGINS` when browser clients are expected; in `strict`, configured origins are required on incoming browser requests
+
+In `strict`, McpVanguard refuses to start on Railway's public bind path unless API-key auth or OAuth/JWKS auth is configured. Startup logs also include a hosted posture summary showing profile, bind scope, auth state, origin policy, claim policy, session binding, and Redis/shared-state status.
 
 ### 2. Security & AI Intelligence (Optional)
 
@@ -102,7 +113,7 @@ Verify the service is running:
 curl https://your-project.up.railway.app/health
 # Expected: {
 #   "status": "ok",
-#   "version": "2.1.1",
+#   "version": "2.1.x",
 #   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
 #   "timestamp": 1711022400.0
 # }
@@ -161,7 +172,7 @@ The instance is pre-configured with a `/health` endpoint:
 GET /health
 -> {
   "status": "ok",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
   "timestamp": 1711022400.0
 }

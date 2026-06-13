@@ -79,6 +79,7 @@ class PolicyVerdict:
     ``findings``         — all contributing InspectionResult objects.
     ``semantic_score``   — propagated from L2 if available.
     ``risk_score``       — propagated from L3 if available.
+    ``explanation``      — stable operator-facing decision explanation.
     """
     action: PolicyAction
     effective_action: PolicyAction
@@ -88,6 +89,176 @@ class PolicyVerdict:
     findings: list[InspectionResult] = field(default_factory=list)
     semantic_score: Optional[float] = None
     risk_score: Optional[float] = None
+    explanation: dict[str, Any] = field(default_factory=dict)
+
+
+def _rule_family(rule_id: Optional[str]) -> Optional[str]:
+    """Return a coarse rule family for reports without coupling to exact rule IDs."""
+    if not rule_id:
+        return None
+    if rule_id.startswith("VANGUARD-SAFEZONE"):
+        return "safe_zone"
+    if rule_id.startswith("SEM"):
+        return "semantic"
+    if rule_id.startswith("BEH"):
+        return "behavioral"
+    if rule_id.startswith("CAMO"):
+        return "camouflage"
+    if rule_id.startswith("AUTH"):
+        return "auth"
+    if rule_id.startswith("VANGUARD-"):
+        return "preflight"
+    return rule_id.split("-", 1)[0].lower()
+
+
+def _match_message(match: RuleMatch) -> str:
+    return match.message or match.description or match.rule_name or match.rule_id
+
+
+def _safe_zone_details(match: Optional[RuleMatch]) -> Optional[dict[str, Any]]:
+    if match is None or not match.rule_id.startswith("VANGUARD-SAFEZONE"):
+        return None
+
+    return {
+        "requested_field": match.matched_field,
+        "requested_path": match.matched_value,
+        "allowed_prefixes_summary": match.description,
+        "note": (
+            "Outside configured safe-zone policy does not necessarily mean malicious; "
+            "tune safe zones for legitimate workspaces before strict enforcement."
+        ),
+    }
+
+
+def _profile_effect(profile: str, mode: str, raw: PolicyAction, effective: PolicyAction) -> str:
+    if raw == effective:
+        return "no_profile_change"
+    if effective == PolicyAction.SHADOW_BLOCK:
+        return "monitor_or_audit_mode_forwarded_would_block"
+    if raw == PolicyAction.REVIEW and effective == PolicyAction.BLOCK and profile == "strict":
+        return "strict_profile_escalated_review_to_block"
+    return f"{profile or 'balanced'}_{mode or 'enforce'}_adjusted_{raw.value}_to_{effective.value}"
+
+
+def _operator_hint(
+    layer: str,
+    rule_id: Optional[str],
+    effective: PolicyAction,
+    safe_zone: Optional[dict[str, Any]],
+) -> str:
+    if safe_zone:
+        return (
+            "Review rules/safe_zones.yaml for the tool and add only the intended workspace prefixes. "
+            "Do not disable safe-zone enforcement globally to resolve a benign block."
+        )
+    if layer == "L2":
+        return (
+            "Semantic scoring escalated the decision; review threshold, prompt context, "
+            "and benchmark false-positive cases before lowering deterministic controls."
+        )
+    if layer == "L3":
+        return (
+            "Behavioral/session context drove the decision; inspect recent calls for enumeration, "
+            "flooding, or high-entropy extraction patterns."
+        )
+    if layer == "L0":
+        return (
+            "Preflight normalization or input-shape validation triggered; inspect decoded/canonicalized "
+            "input before allowing this traffic."
+        )
+    if layer in {"L1", "L1.5"}:
+        return (
+            "Deterministic policy triggered; prefer a narrow rule or safe-zone tuning change "
+            "over weakening the profile."
+        )
+    if layer == "AUTH":
+        return (
+            "Transport or principal policy blocked the request; validate issuer, audience, scopes, "
+            "claims, and destructive-tool policy."
+        )
+    if effective == PolicyAction.ALLOW:
+        return "No policy action required."
+    return f"Review rule {rule_id or 'unknown'} and the active profile before changing enforcement."
+
+
+def _build_policy_explanation(
+    *,
+    profile: str,
+    mode: str,
+    verdict_action: PolicyAction,
+    effective_action: PolicyAction,
+    primary_layer: str,
+    primary_rule_id: Optional[str],
+    reason: str,
+    candidates: list[tuple[PolicyAction, str, Optional[str], Optional[InspectionResult]]],
+) -> dict[str, Any]:
+    primary_match = None
+    for _, layer, rule_id, result in candidates:
+        if layer == primary_layer and rule_id == primary_rule_id and result and result.rule_matches:
+            primary_match = result.rule_matches[0]
+            break
+
+    safe_zone = _safe_zone_details(primary_match)
+    has_l2 = any(layer == "L2" for _, layer, _, _ in candidates)
+    semantic_role = "skipped"
+    if has_l2 and primary_layer == "L2":
+        semantic_role = "escalated"
+    elif has_l2:
+        semantic_role = "advisory"
+    upstream_called = effective_action in {
+        PolicyAction.ALLOW,
+        PolicyAction.WARN,
+        PolicyAction.REVIEW,
+        PolicyAction.SHADOW_BLOCK,
+    }
+
+    supporting_findings: list[dict[str, Any]] = []
+    for action, layer, rule_id, result in candidates:
+        if result is None:
+            continue
+        if result.rule_matches:
+            for match in result.rule_matches:
+                supporting_findings.append(
+                    {
+                        "layer": layer,
+                        "rule_id": match.rule_id,
+                        "rule_family": _rule_family(match.rule_id),
+                        "severity": match.severity,
+                        "action": match.action or action.value,
+                        "message": _match_message(match),
+                    }
+                )
+        else:
+            supporting_findings.append(
+                {
+                    "layer": layer,
+                    "rule_id": rule_id,
+                    "rule_family": _rule_family(rule_id),
+                    "severity": None,
+                    "action": action.value,
+                    "message": result.block_reason,
+                }
+            )
+
+    explanation = {
+        "schema_version": "policy_explanation_v1",
+        "active_profile": profile or "balanced",
+        "final_verdict": effective_action.value,
+        "primary_layer": primary_layer,
+        "primary_rule_id": primary_rule_id,
+        "primary_rule_family": _rule_family(primary_rule_id),
+        "primary_finding": reason,
+        "supporting_findings": supporting_findings,
+        "profile_effect": _profile_effect(profile, mode, verdict_action, effective_action),
+        "raw_policy_action": verdict_action.value,
+        "effective_policy_action": effective_action.value,
+        "semantic_role": semantic_role,
+        "operator_hint": _operator_hint(primary_layer, primary_rule_id, effective_action, safe_zone),
+        "upstream_called": upstream_called,
+    }
+    if safe_zone:
+        explanation["safe_zone"] = safe_zone
+    return explanation
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +388,23 @@ def compose_verdict(
     _ingest(metadata_result, "META")
 
     if not candidates:
+        explanation = _build_policy_explanation(
+            profile=profile,
+            mode=mode,
+            verdict_action=PolicyAction.ALLOW,
+            effective_action=PolicyAction.ALLOW,
+            primary_layer="NONE",
+            primary_rule_id=None,
+            reason="All layers passed.",
+            candidates=[],
+        )
         return PolicyVerdict(
             action=PolicyAction.ALLOW,
             effective_action=PolicyAction.ALLOW,
             reason="All layers passed.",
             primary_layer="NONE",
             rule_id=None,
+            explanation=explanation,
         )
 
     # Highest severity candidate wins
@@ -246,6 +428,17 @@ def compose_verdict(
     elif best_action == PolicyAction.REVIEW and profile == "strict":
         effective = PolicyAction.BLOCK  # strict: no human-in-loop delay
 
+    explanation = _build_policy_explanation(
+        profile=profile,
+        mode=mode,
+        verdict_action=best_action,
+        effective_action=effective,
+        primary_layer=best_layer,
+        primary_rule_id=best_rule_id,
+        reason=reason,
+        candidates=candidates,
+    )
+
     return PolicyVerdict(
         action=best_action,
         effective_action=effective,
@@ -255,6 +448,7 @@ def compose_verdict(
         findings=all_findings,
         semantic_score=sem_score,
         risk_score=risk_score,
+        explanation=explanation,
     )
 
 

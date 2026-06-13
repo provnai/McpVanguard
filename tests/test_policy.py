@@ -92,6 +92,63 @@ def test_camo_block_higher_priority_than_l2():
 
 # ── Profile / mode adjustments ──────────────────────────────────────────────
 
+def test_l0_preflight_block_explanation_identifies_normalization_boundary():
+    preflight = InspectionResult(
+        allowed=False,
+        action="BLOCK",
+        layer_triggered=0,
+        rule_matches=[
+            RuleMatch(
+                rule_id="VANGUARD-PREFLIGHT-001",
+                description="preflight rejected invalid numeric value",
+                severity="HIGH",
+                action="BLOCK",
+            )
+        ],
+        block_reason="Preflight normalization rejected invalid input.",
+    )
+
+    v = compose_verdict(profile="balanced", mode="enforce", preflight_result=preflight)
+
+    assert v.action == PolicyAction.BLOCK
+    assert v.effective_action == PolicyAction.BLOCK
+    assert v.primary_layer == "L0"
+    assert v.explanation["primary_layer"] == "L0"
+    assert v.explanation["primary_rule_family"] == "preflight"
+    assert v.explanation["primary_finding"] == "Preflight normalization rejected invalid input."
+    assert v.explanation["upstream_called"] is False
+    assert "Preflight normalization" in v.explanation["operator_hint"]
+
+
+def test_l15_warning_explanation_identifies_camouflage_signal():
+    camo = InspectionResult(
+        allowed=True,
+        action="WARN",
+        layer_triggered=15,
+        rule_matches=[
+            RuleMatch(
+                rule_id="CAMO-TRUST-001",
+                description="Trust-signal camouflage detected.",
+                severity="MEDIUM",
+                action="WARN",
+            )
+        ],
+        block_reason="Trust-signal camouflage detected.",
+    )
+
+    v = compose_verdict(profile="balanced", mode="enforce", camo_result=camo)
+
+    assert v.action == PolicyAction.WARN
+    assert v.effective_action == PolicyAction.WARN
+    assert v.primary_layer == "L1.5"
+    assert v.explanation["final_verdict"] == "WARN"
+    assert v.explanation["primary_layer"] == "L1.5"
+    assert v.explanation["primary_rule_family"] == "camouflage"
+    assert v.explanation["primary_finding"] == "Trust-signal camouflage detected."
+    assert v.explanation["upstream_called"] is True
+    assert "Deterministic policy" in v.explanation["operator_hint"]
+
+
 def test_monitor_mode_converts_block_to_shadow_block():
     v = compose_verdict(mode="monitor", l1_result=_block())
     assert v.action == PolicyAction.BLOCK          # raw still BLOCK
@@ -160,6 +217,49 @@ def test_findings_list_includes_all_contributing():
         l2_result=_block("L2-BLOCK"),
     )
     assert len(v.findings) == 2
+
+
+def test_block_explanation_includes_operator_context():
+    v = compose_verdict(profile="strict", mode="enforce", l1_result=_block("FS-001", reason="filesystem block"))
+
+    assert v.explanation["schema_version"] == "policy_explanation_v1"
+    assert v.explanation["active_profile"] == "strict"
+    assert v.explanation["final_verdict"] == "BLOCK"
+    assert v.explanation["primary_layer"] == "L1"
+    assert v.explanation["primary_rule_id"] == "FS-001"
+    assert v.explanation["raw_policy_action"] == "BLOCK"
+    assert v.explanation["effective_policy_action"] == "BLOCK"
+    assert v.explanation["upstream_called"] is False
+    assert v.explanation["semantic_role"] == "skipped"
+    assert "Deterministic policy" in v.explanation["operator_hint"]
+
+
+def test_audit_mode_explanation_marks_shadow_block_upstream_called():
+    v = compose_verdict(profile="monitor", mode="audit", l1_result=_block("FS-001"))
+
+    assert v.action == PolicyAction.BLOCK
+    assert v.effective_action == PolicyAction.SHADOW_BLOCK
+    assert v.explanation["profile_effect"] == "monitor_or_audit_mode_forwarded_would_block"
+    assert v.explanation["final_verdict"] == "SHADOW-BLOCK"
+    assert v.explanation["upstream_called"] is True
+
+
+def test_l2_explanation_identifies_semantic_advisor():
+    sem = InspectionResult(
+        allowed=False,
+        action="BLOCK",
+        layer_triggered=2,
+        rule_matches=[RuleMatch(rule_id="SEM-001", description="semantic", severity="HIGH")],
+        semantic_score=0.91,
+        block_reason="semantic block",
+    )
+
+    v = compose_verdict(profile="balanced", mode="enforce", l2_result=sem)
+
+    assert v.primary_layer == "L2"
+    assert v.explanation["primary_rule_family"] == "semantic"
+    assert v.explanation["semantic_role"] == "escalated"
+    assert "Semantic scoring escalated" in v.explanation["operator_hint"]
 
 
 def test_semantic_score_propagated():
