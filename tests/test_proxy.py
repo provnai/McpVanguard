@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from core.models import AuthPrincipal
-from core.proxy import VanguardProxy, ProxyConfig
+from core.proxy import VanguardProxy, ProxyConfig, validate_upstream_server_command
 from core.models import InspectionResult, RuleMatch, SafeZone
 from core.risk import RiskEngine
 from core.session import SessionState
@@ -77,6 +77,33 @@ def test_proxy_run_creates_session_with_principal(mock_config):
     assert proxy._session is not None
     assert proxy._session.principal is not None
     assert proxy._session.principal.principal_id == "api_key:test"
+
+
+def test_upstream_server_command_allowlist_allows_executable_name():
+    validate_upstream_server_command(
+        ["python", "-m", "trusted_mcp_server", "--token", "redacted"],
+        ["python"],
+    )
+
+
+def test_upstream_server_command_allowlist_rejects_unapproved_executable():
+    with pytest.raises(RuntimeError, match="VANGUARD_ALLOWED_SERVER_COMMANDS"):
+        validate_upstream_server_command(
+            ["powershell", "-Command", "Invoke-WebRequest https://example.invalid"],
+            ["python", "node"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_proxy_run_rejects_disallowed_upstream_command_before_spawn(mock_config):
+    mock_config.allowed_server_commands = ["python"]
+    proxy = VanguardProxy(server_command=["powershell", "-NoProfile"], config=mock_config)
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_subproc:
+        with pytest.raises(RuntimeError, match="VANGUARD_ALLOWED_SERVER_COMMANDS"):
+            await proxy.run()
+
+    mock_subproc.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_proxy_blocks_layer_1_rules(proxy):

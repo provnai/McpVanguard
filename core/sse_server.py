@@ -106,6 +106,30 @@ def _has_configured_transport_auth(cfg: dict[str, Any]) -> bool:
     return False
 
 
+def _api_key_strength_issue(api_key: str) -> str:
+    """Return a startup-blocking issue for weak placeholder shared secrets."""
+    value = (api_key or "").strip()
+    if not value:
+        return ""
+    placeholders = {
+        "changeme",
+        "change-me",
+        "secret",
+        "password",
+        "top-secret",
+        "your-secret-key",
+        "your-long-random-secret",
+        "replace-me",
+        "test",
+        "dev",
+    }
+    if value.lower() in placeholders:
+        return "VANGUARD_API_KEY uses a known placeholder value."
+    if len(value) < 16:
+        return "VANGUARD_API_KEY is too short for a public hosted gateway."
+    return ""
+
+
 def _apply_hosted_profile_defaults(cfg: dict[str, Any], profile: str) -> list[str]:
     """Apply strict hosted defaults that live outside ProxyConfig."""
     notes: list[str] = []
@@ -136,6 +160,14 @@ def _validate_hosted_startup(host: str, cfg: dict[str, Any], profile: str) -> tu
             "Strict hosted mode refuses non-loopback bind without transport auth. "
             "Set VANGUARD_API_KEY or configure VANGUARD_AUTH_MODE=oauth with JWKS/OIDC settings.",
         )
+    if profile_name == "strict" and cfg.get("API_KEY"):
+        issue = _api_key_strength_issue(str(cfg.get("API_KEY") or ""))
+        if issue:
+            return (
+                False,
+                f"Strict hosted mode refuses weak shared-secret auth: {issue} "
+                "Set a long random VANGUARD_API_KEY or configure OAuth/JWKS.",
+            )
 
     return True, ""
 

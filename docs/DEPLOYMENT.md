@@ -91,13 +91,14 @@ vanguard sse --profile balanced --server "npx -y @modelcontextprotocol/server-fi
 For public or non-loopback bindings such as `0.0.0.0`, treat transport authentication as mandatory.
 
 ```bash
-export VANGUARD_API_KEY="your-long-random-secret"
+export VANGUARD_API_KEY="replace-with-a-long-random-secret"
 vanguard sse --profile strict --host 0.0.0.0 --port 8080 --server "npx -y @modelcontextprotocol/server-filesystem /var/data"
 ```
 
 `strict` profile is deployment-safe by default on hosted transports:
 
-- non-loopback startup fails closed unless `VANGUARD_API_KEY` or OAuth/JWKS auth is configured
+- non-loopback startup fails closed unless a long random `VANGUARD_API_KEY` or OAuth/JWKS auth is configured
+- known placeholder or very short API keys are refused on strict public binds
 - bearer claim-policy mismatches default to `block`
 - `Origin` is required when `VANGUARD_ALLOWED_ORIGINS` is configured
 - Streamable HTTP session binding, request rate limits, concurrency caps, and session caps remain enabled by default
@@ -156,6 +157,18 @@ export VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION=3
 ```
 
 Tune these limits in `monitor` or `balanced` before enforcing in `strict`. High-volume automation, crawling, migrations, and incident-response workflows may need higher limits or narrower safe-zone/profile tuning.
+
+### Upstream Server Command Boundary
+
+`MCP_SERVER_COMMAND` / `--server` is operator-owned configuration. Remote MCP clients should never be allowed to choose or mutate the upstream process that McpVanguard spawns.
+
+McpVanguard starts upstream stdio servers with `asyncio.create_subprocess_exec`, not a shell, so request payloads are not shell-expanded into the gateway process. For hosted deployments, you can also add an executable allowlist:
+
+```bash
+export VANGUARD_ALLOWED_SERVER_COMMANDS="node,npx,python"
+```
+
+When this allowlist is set, McpVanguard fails closed before spawning if the configured upstream executable is not approved. The allowlist checks only the executable identity, not full arguments, so secrets passed to the upstream server are not compared or logged.
 
 ### Redis And Shared State
 
@@ -350,7 +363,7 @@ Before promoting a profile change, run the packaged benchmark corpora and interp
 When running `vanguard sse` in a public-facing deployment, protect your endpoint with an API key:
 
 ```bash
-export VANGUARD_API_KEY="your-long-random-secret"
+export VANGUARD_API_KEY="replace-with-a-long-random-secret"
 ```
 
 Clients must send the key in every request:
@@ -363,6 +376,8 @@ Authorization: Bearer your-long-random-secret
 The `/health` endpoint is exempt and always accessible for Railway/cloud health-checks.
 
 In `strict` profile, public/non-loopback binds refuse to start unless API-key auth or OAuth/JWKS auth is configured. For OAuth/JWKS deployments, set `VANGUARD_AUTH_MODE=oauth` and provide one of `VANGUARD_JWKS_FILE`, `VANGUARD_JWKS_JSON`, `VANGUARD_JWKS_URL`, or `VANGUARD_OAUTH_DISCOVERY_URL`.
+
+McpVanguard validates bearer tokens at the gateway boundary when OAuth/JWKS is configured: signature, registered claims, issuer, audience, required claims, and scopes. It does not replace upstream identity-provider controls such as dynamic client registration review, user account-linking policy, or consent-screen governance. Treat those as IdP/application responsibilities and keep issuer, audience, and scope checks explicit in McpVanguard.
 
 > **Deep Health Probes**: The `/health` endpoint performs live connectivity checks against Redis and the configured Semantic LLM backend, returning a `200 OK` only if all critical layers are accessible. It falls back to `503 Service Unavailable` if dependencies fail, enabling Railway to safely kill unresponsive containers during a rolling deploy.
 
@@ -378,6 +393,7 @@ In `strict` profile, public/non-loopback binds refuse to start unless API-key au
 | `VANGUARD_MAX_TOOL_CALLS_PER_MINUTE` | `0` | Optional per-session/server rolling tool-call rate budget. |
 | `VANGUARD_MAX_RISKY_CALLS_PER_SESSION` | `0` | Optional per-session/server budget for WARN/REVIEW/SHADOW-BLOCK/BLOCK decisions. |
 | `VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION` | `0` | Optional per-session/server blocked-attempt circuit breaker. |
+| `VANGUARD_ALLOWED_SERVER_COMMANDS` | unset | Optional comma-separated allowlist of upstream executable names/paths McpVanguard may spawn. |
 
 ---
 

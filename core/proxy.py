@@ -216,6 +216,11 @@ class ProxyConfig:
         self.max_tool_calls_per_minute: int = int(os.getenv("VANGUARD_MAX_TOOL_CALLS_PER_MINUTE", "0"))
         self.max_risky_calls_per_session: int = int(os.getenv("VANGUARD_MAX_RISKY_CALLS_PER_SESSION", "0"))
         self.max_blocked_attempts_per_session: int = int(os.getenv("VANGUARD_MAX_BLOCKED_ATTEMPTS_PER_SESSION", "0"))
+        self.allowed_server_commands: list[str] = [
+            value.strip()
+            for value in os.getenv("VANGUARD_ALLOWED_SERVER_COMMANDS", "").split(",")
+            if value.strip()
+        ]
 
         # ---- Profile-aware fields (defaults here; profile may override) ----
         # Fail-closed for L2 semantic scoring (strict: always true).
@@ -301,6 +306,37 @@ def setup_audit_logger(log_file: str) -> logging.Logger:
     return audit
 
 
+def _command_identity(server_command: list[str]) -> str:
+    """Return a non-secret upstream command identity for logs and allowlists."""
+    executable = server_command[0] if server_command else ""
+    name = os.path.basename(executable) or executable
+    return name.strip()
+
+
+def validate_upstream_server_command(server_command: list[str], allowed_commands: list[str] | None) -> None:
+    """Fail closed when an operator-configured upstream executable allowlist is violated.
+
+    The allowlist is intentionally executable-focused rather than argument-focused:
+    operators can restrict which MCP server launcher may run without logging or
+    comparing potentially secret-bearing argv values.
+    """
+    if not server_command or not server_command[0]:
+        raise RuntimeError("MCP Server command is empty.")
+
+    allowed = [item.strip().lower() for item in (allowed_commands or []) if item.strip()]
+    if not allowed:
+        return
+
+    executable = server_command[0].strip()
+    executable_name = _command_identity(server_command)
+    candidates = {executable.lower(), executable_name.lower()}
+    if not candidates.intersection(allowed):
+        raise RuntimeError(
+            "MCP Server command is not in VANGUARD_ALLOWED_SERVER_COMMANDS "
+            f"(executable={executable_name!r})."
+        )
+
+
 # ---------------------------------------------------------------------------
 # The Proxy
 # ---------------------------------------------------------------------------
@@ -319,7 +355,7 @@ class VanguardProxy:
         principal: Optional[AuthPrincipal] = None,
         server_id: Optional[str] = None,
     ):
-        self.server_command = server_command
+        self.server_command = list(server_command)
         self.config = config or ProxyConfig()
         self.principal = principal
         # Phase 6: derive a stable identity for the upstream server
@@ -574,6 +610,22 @@ class VanguardProxy:
         self._load_capability_manifest_baseline()
 
         try:
+            validate_upstream_server_command(self.server_command, self.config.allowed_server_commands)
+            logger.info(
+                "[Vanguard] Upstream command identity: executable=%s argv_count=%d server=%s",
+                _command_identity(self.server_command),
+                len(self.server_command),
+                self._server_id,
+            )
+            self._log_audit_event(
+                direction="system",
+                method="server/start",
+                action="ALLOW",
+                blocked_reason=(
+                    f"upstream_executable={_command_identity(self.server_command)} "
+                    f"argv_count={len(self.server_command)}"
+                ),
+            )
             self._server_process = await asyncio.create_subprocess_exec(
                 *self.server_command,
                 stdin=asyncio.subprocess.PIPE,

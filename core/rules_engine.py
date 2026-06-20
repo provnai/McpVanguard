@@ -5,10 +5,12 @@ Loads YAML rule files from rules/ and matches against every MCP tool call.
 """
 
 from __future__ import annotations
+import ipaddress
 import re as stdlib_re
 import time
 import logging
 import threading
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Optional, Any
@@ -212,8 +214,150 @@ class Rule:
                 for field_path, value in self._iter_recursive_values(params, "params"):
                     if self._allow_recursive_candidate(field_path):
                         add(field_path, value)
+                        for canonical_label, canonical_value in self._canonical_match_variants(field_path, value):
+                            add(f"{field_path}.{canonical_label}", canonical_value)
 
         return candidates
+
+    @classmethod
+    def _canonical_match_variants(cls, field_path: str, value: Any) -> list[tuple[str, str]]:
+        """Return bounded canonical values that make evasive URL/path forms visible.
+
+        Rules still define the actual policy. This helper only adds normalized
+        representations of fields already selected as security-relevant
+        candidates, avoiding broad regex expansion across benign text.
+        """
+        if isinstance(value, (dict, list)):
+            return []
+
+        raw = str(value)
+        if not raw or len(raw) > 8192:
+            return []
+
+        key = cls._last_field_key(field_path)
+        variants: list[tuple[str, str]] = []
+
+        decoded = cls._bounded_unquote(raw)
+        if decoded != raw:
+            variants.append(("canonical_decoded", decoded))
+
+        is_url_like = key in _URL_LIKE_KEYS or decoded.lower().startswith(("http://", "https://"))
+        if is_url_like:
+            variants.extend(cls._canonical_url_variants(decoded))
+
+        if key in _PATH_LIKE_KEYS:
+            path_variant = cls._canonical_path_variant(decoded)
+            if path_variant and path_variant != decoded:
+                variants.append(("canonical_path", path_variant))
+
+        deduped: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for label, variant in variants:
+            if not variant or variant in seen:
+                continue
+            seen.add(variant)
+            deduped.append((label, variant))
+        return deduped[:8]
+
+    @staticmethod
+    def _bounded_unquote(value: str, max_passes: int = 5) -> str:
+        current = value
+        for _ in range(max_passes):
+            decoded = urllib.parse.unquote(current)
+            decoded = decoded.replace("%5c", "\\").replace("%5C", "\\")
+            if decoded == current:
+                break
+            current = decoded
+        return current
+
+    @classmethod
+    def _canonical_url_variants(cls, value: str) -> list[tuple[str, str]]:
+        variants: list[tuple[str, str]] = []
+        parsed_value = value if "://" in value else f"http://{value}"
+
+        try:
+            parsed = urllib.parse.urlsplit(parsed_value)
+        except ValueError:
+            return variants
+
+        host = parsed.hostname
+        if not host:
+            return variants
+
+        host = host.rstrip(".").lower()
+        host = cls._bounded_unquote(host)
+        variants.append(("canonical_host", host))
+
+        canonical_ip = cls._canonical_ip_host(host)
+        if canonical_ip:
+            variants.append(("canonical_ip", canonical_ip))
+            variants.append(("canonical_url", f"{parsed.scheme or 'http'}://{canonical_ip}{parsed.path or '/'}"))
+
+        if host in {"metadata", "metadata.google.internal", "metadata.azure.com", "instance-data"}:
+            variants.append(("canonical_metadata_host", host))
+
+        return variants
+
+    @classmethod
+    def _canonical_ip_host(cls, host: str) -> str | None:
+        candidate = host.strip("[]")
+        candidate = candidate.rstrip(".").lower()
+
+        dashed = candidate.replace("-", ".")
+        if dashed != candidate and cls._is_ipv4_component_list(dashed.split(".")):
+            candidate = dashed
+
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            pass
+
+        if candidate.startswith("0x"):
+            try:
+                return str(ipaddress.ip_address(int(candidate, 16)))
+            except ValueError:
+                return None
+
+        if candidate.isdigit() and len(candidate) >= 8:
+            try:
+                return str(ipaddress.ip_address(int(candidate, 10)))
+            except ValueError:
+                return None
+
+        parts = candidate.split(".")
+        if cls._is_ipv4_component_list(parts):
+            normalized_parts: list[str] = []
+            for part in parts:
+                try:
+                    if part.lower().startswith("0x"):
+                        number = int(part, 16)
+                    elif len(part) > 1 and part.startswith("0"):
+                        number = int(part, 8)
+                    else:
+                        number = int(part, 10)
+                except ValueError:
+                    return None
+                if number > 255:
+                    return None
+                normalized_parts.append(str(number))
+            return ".".join(normalized_parts)
+
+        return None
+
+    @staticmethod
+    def _is_ipv4_component_list(parts: list[str]) -> bool:
+        if len(parts) != 4:
+            return False
+        return all(part and all(ch in "0123456789abcdefABCDEFxX" for ch in part) for part in parts)
+
+    @staticmethod
+    def _canonical_path_variant(value: str) -> str | None:
+        if len(value) > 8192:
+            return None
+        normalized = value.replace("\\", "/")
+        while "//" in normalized:
+            normalized = normalized.replace("//", "/")
+        return normalized
 
     def _allow_recursive_candidate(self, field_path: str) -> bool:
         # MCP 2026-07-28 moves more protocol/client context into request

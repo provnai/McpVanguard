@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-06-19 (Replay-Informed Boundary Hardening Patch)
+
+### Security and Runtime Hardening
+
+- **Canonical URL/path inspection** (`core/rules_engine.py`): L1 recursive matching now evaluates bounded canonical variants for URL-like and path-like fields, including decoded URLs, canonical hosts, canonical IP forms, canonical URLs, and collapsed paths.
+- **SSRF edge-case coverage** (`core/rules_engine.py`, `tests/benchmarks/v213_encoded_boundary_cases.yaml`): Added public-safe regressions for encoded metadata-service hosts, dashed metadata hosts, encoded loopback, IPv6 loopback, userinfo-host confusion, nested custom-schema endpoints, and array-form command arguments.
+- **Encoded sensitive path coverage** (`core/rules_engine.py`, `tests/benchmarks/v213_encoded_boundary_cases.yaml`): Added regressions for encoded and redundant-slash Unix sensitive paths while avoiding broad case-insensitive Unix path claims.
+- **Hosted command boundary allowlist** (`core/proxy.py`): Added optional `VANGUARD_ALLOWED_SERVER_COMMANDS` so hosted operators can fail closed unless the configured upstream MCP executable is approved.
+- **Upstream command audit identity** (`core/proxy.py`): Startup now records a sanitized upstream command identity using executable name, argv count, and server ID without logging full arguments or secrets.
+- **Strict hosted weak-secret guard** (`core/sse_server.py`): Strict public/non-loopback startup now refuses known placeholder or very short `VANGUARD_API_KEY` values.
+- **Metadata lookalike hardening** (`core/metadata_inspection.py`): Metadata inspection now checks bounded separator-normalized variants so instruction-like tool names such as underscore-delimited poison strings cannot silently bypass whitespace-oriented patterns.
+- **Response-side drip exfil regression** (`core/behavioral.py`, `tests/test_behavioral.py`): Added coverage proving repeated smaller responses accumulate toward the L3 large-payload block path.
+
+### Documentation
+
+- Updated README, deployment, and Railway deployment docs with hosted command allowlist guidance, stronger API-key language, and OAuth/JWKS responsibility boundaries.
+- Kept internal replay artifacts out of public release materials; public docs describe implemented hardening, not private corpus guarantees.
+
+### Verification
+
+- Targeted boundary hardening suites pass locally:
+  - SSE and Streamable HTTP transport hardening: `66 passed`
+  - Behavioral, entropy, metadata, proxy response-path, command-boundary, v2.1.3 encoded-boundary, and strict-rule tests: `53 passed`
+  - GPU false-positive, hardening, tool-capability, and semantic suites: `28 passed`
+- Release-gate checks were rerun locally; only sanitized public-safe regressions are included in the repository.
+
 ## [2.1.2] - 2026-06-12 (Deployment-Safe Runtime Enforcement Patch)
 
 ### Security and Deployment Safety

@@ -1,0 +1,152 @@
+- case_id: v213-url-01-encoded-metadata-service
+  mcp38_id: V213-URL-01
+  title: Block percent-encoded cloud metadata service URL
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-url-1
+    method: tools/call
+    params:
+      name: fetch_url
+      arguments:
+        url: "http://169%2e254%2e169%2e254/latest/meta-data/"
+  expected_action: BLOCK
+  expected_rule_id: NET-006
+
+- case_id: v213-url-02-dashed-metadata-service
+  mcp38_id: V213-URL-02
+  title: Block dashed cloud metadata service host variant
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-url-2
+    method: tools/call
+    params:
+      name: fetch_url
+      arguments:
+        url: "http://169-254-169-254/latest/meta-data/"
+  expected_action: BLOCK
+  expected_rule_id: NET-006
+
+- case_id: v213-path-01-encoded-sensitive-unix-path
+  mcp38_id: V213-PATH-01
+  title: Block percent-encoded sensitive Unix path
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-path-1
+    method: tools/call
+    params:
+      name: read_file
+      arguments:
+        path: "%2fetc%2fshadow"
+  expected_action: BLOCK
+  expected_rule_id: FS-001
+
+- case_id: v213-path-02-redundant-slash-sensitive-unix-path
+  mcp38_id: V213-PATH-02
+  title: Block redundant-slash sensitive Unix path
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-path-2
+    method: tools/call
+    params:
+      name: read_file
+      arguments:
+        path: "/etc//shadow"
+  expected_action: BLOCK
+  expected_rule_id: FS-001
+
+- case_id: v213-url-03-nested-metadata-service
+  mcp38_id: V213-URL-03
+  title: Block nested metadata service URL in custom tool schema
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-url-3
+    method: tools/call
+    params:
+      name: custom_connector
+      arguments:
+        request:
+          destination:
+            endpoint: "http://169%2e254%2e169%2e254/latest/meta-data/"
+  expected_action: BLOCK
+  expected_rule_id: NET-006
+
+- case_id: v213-url-04-encoded-loopback-warn
+  mcp38_id: V213-URL-04
+  title: Warn on percent-encoded loopback URL under balanced profile
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-url-4
+    method: tools/call
+    params:
+      name: fetch_url
+      arguments:
+        url: "http://127%2e0%2e0%2e1/admin"
+  expected_action: WARN
+  expected_rule_id: NET-004
+
+- case_id: v213-url-05-userinfo-loopback-warn
+  mcp38_id: V213-URL-05
+  title: Warn on userinfo host-confusion loopback URL under balanced profile
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-url-5
+    method: tools/call
+    params:
+      name: fetch_url
+      arguments:
+        url: "http://safe.example@127.0.0.1/admin"
+  expected_action: WARN
+  expected_rule_id: NET-004
+
+- case_id: v213-url-06-ipv6-loopback
+  mcp38_id: V213-URL-06
+  title: Block IPv6 loopback URL
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-url-6
+    method: tools/call
+    params:
+      name: fetch_url
+      arguments:
+        url: "http://[::1]/admin"
+  expected_action: BLOCK
+  expected_rule_id: NET-008
+
+- case_id: v213-cmd-01-array-command-metadata-service
+  mcp38_id: V213-CMD-01
+  title: Block array-form command that targets metadata service
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-cmd-1
+    method: tools/call
+    params:
+      name: run_process
+      arguments:
+        argv:
+          - curl
+          - "http://169%2e254%2e169%2e254/latest/meta-data/"
+  expected_action: BLOCK
+  expected_rule_id: NET-006
+
+- case_id: v213-fp-01-benign-security-doc-encoded-url
+  mcp38_id: V213-FP-01
+  title: Allow benign security documentation quoting encoded metadata URL
+  harness: rules_engine
+  input:
+    jsonrpc: "2.0"
+    id: v213-fp-1
+    method: tools/call
+    params:
+      name: summarize_text
+      arguments:
+        content: "Incident note: the report discusses why http://169%2e254%2e169%2e254/latest/meta-data/ must be blocked by SSRF defenses."
+  expected_action: ALLOW

@@ -97,6 +97,21 @@ async def test_large_response_detection():
     assert res.layer_triggered == 3
     assert "BEH-004" in res.rule_matches[0].rule_id
 
+
+@pytest.mark.asyncio
+async def test_repeated_small_responses_accumulate_to_large_payload_block():
+    session_id = "test-session-response-drip"
+    chunk = "A" * (behavioral.MAX_RESPONSE_BYTES // 4)
+
+    res = None
+    for _ in range(5):
+        res = await behavioral.inspect_response(session_id, chunk)
+
+    assert res is not None
+    assert res.action == "BLOCK"
+    assert res.layer_triggered == 3
+    assert "BEH-004" in res.rule_matches[0].rule_id
+
 @pytest.mark.asyncio
 async def test_tool_flood_detection():
     session_id = "test-session-5"

@@ -9,6 +9,7 @@ tool call is made, especially initialize instructions and tool descriptions.
 from __future__ import annotations
 
 import concurrent.futures
+import re
 from typing import Any, Iterable
 
 from core.models import InspectionResult, RuleMatch
@@ -18,6 +19,8 @@ from core import safe_regex
 # Fail-closed: timeout → BLOCK (consistent with rules_engine.py).
 _META_MATCH_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="vg-meta")
 _META_REGEX_TIMEOUT = 0.1  # 100 ms
+_METADATA_VARIANT_MAX_LEN = 2048
+_SEPARATOR_PATTERN = re.compile(r"[_\-.]+")
 
 
 _PATTERN_SPECS: list[tuple[str, str, str]] = [
@@ -153,10 +156,25 @@ def filter_poisoned_tools(tools: list[dict[str, Any]]) -> tuple[list[dict[str, A
     return safe_tools, dropped_tools
 
 
+def _metadata_match_variants(field: str, value: str) -> list[tuple[str, str]]:
+    """Return bounded variants that catch separator-encoded tool-lookalike text."""
+    variants = [(field, value)]
+    if len(value) > _METADATA_VARIANT_MAX_LEN:
+        return variants
+
+    normalized = _SEPARATOR_PATTERN.sub(" ", value)
+    if normalized != value:
+        variants.append((f"{field}.separator_normalized", normalized))
+    return variants
+
+
 def _inspect_strings(strings: list[tuple[str, str]]) -> InspectionResult | None:
     matches: list[RuleMatch] = []
-
+    expanded_strings: list[tuple[str, str]] = []
     for field, value in strings:
+        expanded_strings.extend(_metadata_match_variants(field, value))
+
+    for field, value in expanded_strings:
         for rule_id, pattern, message in _COMPILED_PATTERNS:
             if safe_regex.is_re2_pattern(pattern):
                 try:

@@ -88,13 +88,31 @@ def test_balanced_public_bind_without_auth_remains_warning_only():
 
 
 def test_strict_public_bind_allows_api_key_auth():
-    cfg = {"API_KEY": "top-secret", "AUTH_MODE": "api_key"}
+    cfg = {"API_KEY": "this-is-a-long-random-test-secret", "AUTH_MODE": "api_key"}
 
     ok, message = _validate_hosted_startup("0.0.0.0", cfg, "strict")
 
     assert ok is True
     assert message == ""
     assert _has_configured_transport_auth(cfg) is True
+
+
+def test_strict_public_bind_rejects_weak_api_key_auth():
+    cfg = {"API_KEY": "changeme", "AUTH_MODE": "api_key"}
+
+    ok, message = _validate_hosted_startup("0.0.0.0", cfg, "strict")
+
+    assert ok is False
+    assert "weak shared-secret auth" in message
+
+
+def test_balanced_public_bind_warns_but_does_not_reject_weak_api_key_auth():
+    cfg = {"API_KEY": "changeme", "AUTH_MODE": "api_key"}
+
+    ok, message = _validate_hosted_startup("0.0.0.0", cfg, "balanced")
+
+    assert ok is True
+    assert message == ""
 
 
 def test_strict_public_bind_allows_configured_oauth():
@@ -1514,6 +1532,67 @@ async def test_handle_mcp_allows_matching_future_routing_headers(monkeypatch):
     await handle_mcp(scope, _receive_json(payload), send, ctx)
 
     manager.handle_request.assert_awaited_once()
+    assert json.loads(captured["body"]["body"].decode("utf-8")) == payload
+    assert send.messages[0]["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_handle_mcp_payload_cannot_mutate_upstream_server_command(monkeypatch):
+    captured = {}
+
+    async def capture_request(scope, receive, send):
+        captured["body"] = await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    operator_command = ["python", "-m", "trusted_mcp_server"]
+    manager = MagicMock()
+    manager.handle_request = AsyncMock(side_effect=capture_request)
+    ctx = ServerContext(
+        server_command=operator_command,
+        config=None,
+        sse_transport=MagicMock(),
+        streamable_manager=manager,
+        cfg={
+            "AUTH_MODE": "none",
+            "API_KEY": "",
+            "ALLOWED_IPS": [],
+            "ALLOWED_ORIGINS": [],
+            "REQUIRE_ORIGIN": False,
+            "MAX_CONCURRENCY": 5,
+            "MAX_GLOBAL_CONNECTIONS": 10,
+            "RATE_LIMIT_PER_SEC": 100.0,
+            "MAX_BODY_BYTES": 4096,
+        },
+    )
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "read_file",
+            "arguments": {
+                "server": "attacker-mcp-server",
+                "server_command": ["powershell", "-Command", "Invoke-WebRequest https://example.invalid"],
+                "command": "powershell",
+                "args": ["-Command", "Write-Host owned"],
+                "env": {"SECRET": "should-not-be-forwarded-to-process-env"},
+                "cwd": "C:\\Windows\\System32",
+            },
+        },
+    }
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "client": ["127.0.0.1", 1234],
+        "headers": [(b"content-type", b"application/json")],
+    }
+    send = _SendCollector()
+
+    await handle_mcp(scope, _receive_json(payload), send, ctx)
+
+    manager.handle_request.assert_awaited_once()
+    assert ctx.server_command == operator_command
     assert json.loads(captured["body"]["body"].decode("utf-8")) == payload
     assert send.messages[0]["status"] == 200
 

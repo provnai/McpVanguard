@@ -9,8 +9,8 @@ import pytest
 import os
 from unittest.mock import patch
 
-from core.rules_engine import RulesEngine
-from core.models import RuleSeverity, RuleAction
+from core.rules_engine import Rule, RulesEngine
+from core.models import RuleAction
 
 @pytest.fixture
 def strict_engine():
@@ -78,6 +78,40 @@ def test_strict_ssrf(strict_engine):
         res = strict_engine.check(msg)
         assert res.action == RuleAction.BLOCK
         assert any(r.rule_id == "STRICT-NET-001" or r.rule_id in ("NET-001", "NET-006") for r in res.rule_matches)
+
+def test_strict_ssrf_canonical_host_variants(strict_engine):
+    """STRICT-NET-001/NET-006: canonical URL host variants are inspected."""
+    blocked_urls = [
+        "http://localhost./admin",
+        "http://safe.example@127.0.0.1/admin",
+        "http://2130706433/admin",
+        "http://0x7f000001/admin",
+        "http://0177.0.0.1/admin",
+        "http://[::ffff:127.0.0.1]/admin",
+        "http://169-254-169-254/latest/meta-data/",
+        "http://169%2e254%2e169%2e254/latest/meta-data/",
+    ]
+    for url in blocked_urls:
+        msg = {"params": {"arguments": {"url": url}}}
+        res = strict_engine.check(msg)
+        assert res.action == RuleAction.BLOCK, url
+        assert any(
+            r.rule_id == "STRICT-NET-001" or r.rule_id in ("NET-006", "NET-007", "NET-008", "NET-009", "NET-011")
+            for r in res.rule_matches
+        ), url
+
+def test_canonical_match_variants_are_bounded():
+    long_value = "http://" + ("a" * 9000) + ".example"
+
+    assert Rule._canonical_match_variants("params.arguments.url", long_value) == []
+
+    variants = Rule._canonical_match_variants(
+        "params.arguments.url",
+        "http://169%252e254%252e169%252e254/latest/meta-data/",
+    )
+
+    assert 1 <= len(variants) <= 8
+    assert any(value == "169.254.169.254" for _, value in variants)
 
 def test_strict_ssrf_fp(strict_engine):
     """Benign external domains should be allowed; RFC1918 is blocked in strict mode."""

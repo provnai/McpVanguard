@@ -25,9 +25,10 @@ You **must** set the following variables for McpVanguard to start successfully:
 | Variable | Description |
 |----------|-------------|
 | `MCP_SERVER_COMMAND` | The MCP server command Vanguard will wrap and protect. e.g. `npx @modelcontextprotocol/server-filesystem /app/data` |
-| `VANGUARD_API_KEY` | A secret key to protect your SSE endpoint. Clients must send this in the `X-Api-Key` header. Generate a strong random string. Required for public `strict` deployments. |
+| `VANGUARD_API_KEY` | A long random secret key to protect your SSE endpoint. Clients must send this in the `X-Api-Key` header. Required for public `strict` deployments; placeholder or very short values are refused. |
 | `VANGUARD_PROFILE` | `balanced` | Set to `monitor` for audit-only discovery or `strict` for production-sensitive systems. |
 | `VANGUARD_MODE` | `enforce` | Optional lower-level mode. Set to `audit` for shadow-mode evaluation if you are not using the `monitor` profile. |
+| `VANGUARD_ALLOWED_SERVER_COMMANDS` | Optional comma-separated executable allowlist such as `npx,node,python`. When set, McpVanguard refuses to spawn any upstream command outside the allowlist. |
 
 ### Safe Railway Baseline
 
@@ -35,6 +36,7 @@ Railway services receive a public URL, so treat the gateway as hosted by default
 
 - use `balanced` while validating traffic and safe-zone tuning
 - set `VANGUARD_API_KEY` before exposing the service to real clients
+- set `VANGUARD_ALLOWED_SERVER_COMMANDS` when the Railway template should only ever launch approved upstream executables
 - switch to `strict` for production-sensitive systems only after auth, safe zones, and expected benign workflows have been validated
 - add `VANGUARD_ALLOWED_ORIGINS` when browser clients are expected; in `strict`, configured origins are required on incoming browser requests
 
@@ -172,7 +174,7 @@ The instance is pre-configured with a `/health` endpoint:
 GET /health
 -> {
   "status": "ok",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "layers": {"l1_rules": "ok", "l2_semantic": "ok", "l3_behavioral": "ok"},
   "timestamp": 1711022400.0
 }

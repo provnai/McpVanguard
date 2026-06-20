@@ -90,13 +90,15 @@ vanguard start --profile strict --server "npx @modelcontextprotocol/server-files
 Run as a hosted gateway:
 
 ```bash
-export VANGUARD_API_KEY="your-secret-key"
+export VANGUARD_API_KEY="replace-with-a-long-random-secret"
 vanguard sse --profile balanced --server "npx @modelcontextprotocol/server-filesystem ."
 ```
 
-For public/non-loopback hosted deployments, `strict` profile refuses to start unless transport auth is configured with `VANGUARD_API_KEY` or OAuth/JWKS settings. `balanced` remains suitable for demos and staged rollouts, but will warn loudly when exposed without auth.
+For public/non-loopback hosted deployments, `strict` profile refuses to start unless transport auth is configured with a long random `VANGUARD_API_KEY` or OAuth/JWKS settings. `balanced` remains suitable for demos and staged rollouts, but will warn loudly when exposed without auth.
 
 Hosted deployments can also enable opt-in per-session budgets for tool-call rate, risky decisions, and repeated blocked attempts. These act as circuit breakers around the layered policy path without changing defaults for local OSS use.
+
+If you operate a hosted template or shared gateway, set `VANGUARD_ALLOWED_SERVER_COMMANDS` to restrict which upstream MCP server executables McpVanguard may spawn.
 
 For private-network MCP servers reached through Anthropic MCP tunnels, the recommended placement is tunnel -> McpVanguard -> private MCP server. Tunnels reduce network exposure. McpVanguard enforces the execution boundary.
 
