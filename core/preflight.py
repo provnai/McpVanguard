@@ -102,8 +102,6 @@ def run_preflight(
         elif isinstance(value, list):
             return [_normalize(v, f"{path}[{i}]", depth + 1) for i, v in enumerate(value)]
         elif isinstance(value, str):
-            original_value = value
-
             # Length safeguard (PRE-SIZE-001)
             if len(value) > max_string_len:
                 raise ValueError(f"String length {len(value)} exceeds limit {max_string_len}")

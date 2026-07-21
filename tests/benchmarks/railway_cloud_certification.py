@@ -293,6 +293,14 @@ async def phase5_failsafe(client: VanguardCloudClient) -> dict:
 # ─── Report Generator ───────────────────────────────────────────────────────────
 def generate_report(p1, p2, p3, p4, p5) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    coverage_rows = "".join(
+        "| {name} | {status} |\n".format(
+            name=name,
+            status="BLOCK" if action == "BLOCK" else "MISSED",
+        )
+        for name, action in p2["per_category"].items()
+    )
+    legitimate_status = "ALLOW (No False Positive)" if not p2["false_positive"] else "FALSE POSITIVE"
     p1_status = "💎 CERTIFIED"
     p5_status = "🛡️ FAILSAFE" if p5["failsafe"] else f"⚠️ {p5['l1_block_rate_pct']:.1f}%"
 
@@ -339,7 +347,7 @@ Testing the proxy over the internet against all major attack categories.
 
 | Attack Class | Result |
 |-------------|--------|
-{''.join(f'| {name} | {"✅ BLOCK" if action == "BLOCK" else "❌ MISSED"} |\n' for name, action in p2['per_category'].items())}| Legitimate Call | {"✅ ALLOW (No False Positive)" if not p2['false_positive'] else "❌ FALSE POSITIVE"} |
+{coverage_rows}| Legitimate Call | {legitimate_status} |
 
 ---
 
@@ -378,7 +386,7 @@ async def main():
             f.write(report)
 
         print(f"\n{'=' * 60}")
-        print(f"✅ ALL 5 PHASES COMPLETE (CLOUD TOPOLOGY)")
+        print("✅ ALL 5 PHASES COMPLETE (CLOUD TOPOLOGY)")
         print(f"📄 Report written to: {REPORT_FILE}")
         print(f"{'=' * 60}")
 

@@ -13,12 +13,9 @@ import asyncio
 import json
 import logging
 import logging.handlers
-import math
 import os
 import sys
 import time
-import unicodedata
-import urllib.parse
 from typing import Optional, Any
 
 if sys.platform != "win32":

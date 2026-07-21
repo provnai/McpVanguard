@@ -287,7 +287,6 @@ def start(
     # Load and display rules summary
     engine = RulesEngine(rules_dir=resolved_rules_dir)
 
-    from core.profiles import PROFILES
     active_profile = config.profile
     profile_color = {"monitor": "yellow", "balanced": "green", "strict": "red"}.get(active_profile, "green")
 

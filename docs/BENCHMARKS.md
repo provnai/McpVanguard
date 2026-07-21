@@ -67,6 +67,10 @@ Use these breakdowns to decide whether a false-positive issue is caused by safe-
 
 The confusion matrix is especially useful when comparing `monitor`, `balanced`, and `strict` runs. Rows are expected corpus actions; columns are actions returned by the current profile. Treat the matrix as profile- and corpus-scoped evidence, not a universal detection rate.
 
+### Profile-Specific Actions
+
+Some public corpora define their `expected_action` values as a baseline for one profile so that the same cases can be compared consistently. The v2.1.3 encoded-boundary corpus uses `balanced` as that baseline. A strict-only overlay may intentionally escalate a baseline `WARN` to `BLOCK`, while monitor may represent enforcement as `SHADOW-BLOCK`. Those outcomes should be reported as profile behavior, not treated as runtime regressions. Use the profile matrix and case-level action deltas when exact actions differ across profiles.
+
 For a one-command comparison across supported profiles, run:
 
 ```bash

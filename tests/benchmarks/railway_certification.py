@@ -10,9 +10,7 @@ Usage:
     $env:PYTHONPATH="."; python tests/benchmarks/railway_certification.py
 """
 import asyncio
-import json
 import time
-import os
 import re
 import statistics
 import logging
@@ -21,8 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.rules_engine import RulesEngine
-from core.vex_client import submit_blocked_call
+from core.rules_engine import RulesEngine  # noqa: E402 - dotenv must load first
+from core.vex_client import submit_blocked_call  # noqa: E402 - dotenv must load first
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 REPORT_FILE = "RAILWAY_TEST_REPORT.md"
@@ -113,7 +111,7 @@ async def wait_for_receipts(target: int, timeout: float = 90.0):
 def verify_capsule(receipt: dict) -> bool:
     d = receipt.get("data", {})
     # VEX v0.3.0 signals finality with status 'completed' or 'success'
-    return d.get("status") in ("completed", "success") or d.get("success") == True
+    return d.get("status") in ("completed", "success") or d.get("success") is True
 
 # ─── PHASE 1: Postgres Finality Proof ──────────────────────────────────────────
 async def phase1_postgres_finality(engine: RulesEngine) -> dict:
@@ -284,8 +282,17 @@ async def phase5_failsafe(engine: RulesEngine) -> dict:
 # ─── Report Generator ───────────────────────────────────────────────────────────
 def generate_report(p1, p2, p3, p4, p5) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    coverage_rows = "".join(
+        "| {name} | {status} |\n".format(
+            name=name,
+            status="BLOCK" if action == "BLOCK" else "MISSED",
+        )
+        for name, action in p2["per_category"].items()
+    )
+    legitimate_status = "ALLOW (No False Positive)" if not p2["false_positive"] else "FALSE POSITIVE"
     p1_status = "💎 CERTIFIED" if p1["finality_pct"] >= 95 else f"⚠️ {p1['finality_pct']:.1f}%"
     p5_status = "🛡️ FAILSAFE" if p5["failsafe"] else f"⚠️ {p5['l1_block_rate_pct']:.1f}%"
+    failsafe_status = "YES ✅" if p5["failsafe"] else "NO ❌"
 
     return f"""# 🚀 McpVanguard — Railway Partnership Certification Report
 
@@ -332,7 +339,7 @@ Testing the Layer 1 rules engine against all major attack categories.
 
 | Attack Class | Result |
 |-------------|--------|
-{''.join(f'| {name} | {"✅ BLOCK" if action == "BLOCK" else "❌ MISSED"} |\n' for name, action in p2['per_category'].items())}| Legitimate Call | {"✅ ALLOW (No False Positive)" if not p2['false_positive'] else "❌ FALSE POSITIVE"} |
+{coverage_rows}| Legitimate Call | {legitimate_status} |
 
 **Block Rate**: {p2['blocked']}/{p2['vectors_tested']} attack classes blocked ({p2['block_rate_pct']:.0f}%)
 
@@ -376,7 +383,7 @@ Intentional VEX overload test: proving local L1 security is **independent of aud
 | Concurrency | {p5['concurrency']} (2x normal load) |
 | L1 Latency (Avg) | **{p5['l1_avg_ms']:.4f}ms** |
 | **L1 Block Rate Under Overload** | **{p5['l1_block_rate_pct']:.0f}%** |
-| **Failsafe Certified** | **{"YES ✅" if p5['failsafe'] else "NO ❌"}** |
+| **Failsafe Certified** | **{failsafe_status}** |
 
 > Even when the VEX audit server is overwhelmed, McpVanguard's local Layer 1 engine **never stops blocking attacks**. Security does not depend on network availability.
 
@@ -414,7 +421,7 @@ async def main():
         f.write(report)
 
     print(f"\n{'=' * 60}")
-    print(f"✅ ALL 5 PHASES COMPLETE")
+    print("✅ ALL 5 PHASES COMPLETE")
     print(f"📄 Report written to: {REPORT_FILE}")
     print(f"  Phase 1 Finality:  {p1['finality_pct']:.1f}%")
     print(f"  Phase 2 Coverage:  {p2['block_rate_pct']:.0f}%")

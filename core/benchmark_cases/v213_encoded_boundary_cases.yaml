@@ -1,3 +1,6 @@
+# `expected_action` values are the balanced-profile baseline. Strict mode is
+# tested separately because strict-only overlays may intentionally escalate a
+# balanced WARN to BLOCK.
 - case_id: v213-url-01-encoded-metadata-service
   mcp38_id: V213-URL-01
   title: Block percent-encoded cloud metadata service URL
