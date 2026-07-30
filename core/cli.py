@@ -192,6 +192,11 @@ def start(
         "--profile",
         help="Named security profile: monitor | balanced | strict. Overrides VANGUARD_PROFILE.",
     ),
+    protocol_profile: Optional[str] = typer.Option(
+        None,
+        "--protocol-profile",
+        help="MCP compatibility profile: legacy_stateful | mcp_2026_07_28_stateless.",
+    ),
     rules_dir: str = typer.Option(
         "rules",
         "--rules-dir", "-r",
@@ -248,6 +253,8 @@ def start(
     # Apply --profile before building ProxyConfig so env resolution works correctly.
     if profile is not None:
         os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
+    if protocol_profile is not None:
+        os.environ["VANGUARD_MCP_PROTOCOL_PROFILE"] = protocol_profile.strip().lower()
 
     # Load config from options + environment
     resolved_rules_dir = _resolve_option_or_env(rules_dir, "rules", "VANGUARD_RULES_DIR")
@@ -362,6 +369,11 @@ def sse(
         "--profile",
         help="Named security profile: monitor | balanced | strict. Overrides VANGUARD_PROFILE.",
     ),
+    protocol_profile: Optional[str] = typer.Option(
+        None,
+        "--protocol-profile",
+        help="MCP compatibility profile: legacy_stateful | mcp_2026_07_28_stateless.",
+    ),
     rules_dir: str = typer.Option("rules", "--rules-dir", "-r"),
     log_file: str = typer.Option("audit.log", "--log-file", "-l"),
     semantic: Optional[bool] = typer.Option(None, "--semantic/--no-semantic"),
@@ -384,6 +396,8 @@ def sse(
     # Apply --profile before building ProxyConfig.
     if profile is not None:
         os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
+    if protocol_profile is not None:
+        os.environ["VANGUARD_MCP_PROTOCOL_PROFILE"] = protocol_profile.strip().lower()
 
     # Load config
     resolved_rules_dir = _resolve_option_or_env(rules_dir, "rules", "VANGUARD_RULES_DIR")

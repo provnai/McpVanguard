@@ -34,6 +34,12 @@ from core import auth
 from core.rules_engine import RulesEngine
 from core import fleet
 from mcp.types import INVALID_REQUEST, ErrorData, JSONRPCError
+from core.protocol_compat import (
+    ProtocolProfile,
+    resolve_protocol_profile,
+    routing_header_issues,
+    unsupported_protocol_reason,
+)
 
 logger = logging.getLogger("vanguard.sse")
 
@@ -200,6 +206,16 @@ def _header_value(scope, name: str) -> str:
         if raw_name.lower() == wanted:
             return raw_value.decode("utf-8", errors="replace").strip()
     return ""
+
+
+def _header_values(scope, name: str) -> list[str]:
+    """Return all values for a header so conflicting duplicates are visible."""
+    wanted = name.lower().encode("ascii")
+    return [
+        raw_value.decode("utf-8", errors="replace").strip()
+        for raw_name, raw_value in scope.get("headers", [])
+        if raw_name.lower() == wanted
+    ]
 
 
 def _normalize_origin(origin: str) -> str:
@@ -577,14 +593,14 @@ async def _buffer_receive_body(receive, max_body_bytes: int) -> tuple[bytes, lis
     return bytes(body), messages, too_large
 
 
-def _replay_receive(messages: list[dict[str, Any]]):
-    """Return an ASGI receive callable that replays buffered messages once."""
+def _replay_receive(messages: list[dict[str, Any]], receive):
+    """Replay buffered messages, then delegate to the original ASGI receiver."""
     queue = list(messages)
 
     async def _receive():
         if queue:
             return queue.pop(0)
-        return {"type": "http.request", "body": b"", "more_body": False}
+        return await receive()
 
     return _receive
 
@@ -610,21 +626,44 @@ def _audit_routing_header_finding(
     )
 
 
-async def _validate_mcp_routing_headers(scope, receive, cfg: dict[str, Any]):
-    """
-    Validate optional MCP 2026-07-28 routing headers when present.
+def _audit_protocol_compat_finding(
+    *,
+    reason: str,
+    principal: Optional[AuthPrincipal] = None,
+) -> None:
+    audit = setup_audit_logger(os.getenv("VANGUARD_LOG_FILE", "audit.log"))
+    audit.info(
+        AuditEvent(
+            session_id="transport-protocol",
+            principal_id=principal.principal_id if principal else None,
+            auth_type=principal.auth_type if principal else None,
+            direction="system",
+            method="mcp/protocol",
+            action="BLOCK",
+            rule_id="VANGUARD-MCP-PROTOCOL-UNSUPPORTED",
+            blocked_reason=reason,
+        ).to_log_line(format=os.getenv("VANGUARD_AUDIT_FORMAT", "text").lower())
+    )
 
-    This is additive compatibility hardening: legacy clients are unchanged, but
-    future/stateless clients cannot send headers that disagree with the JSON-RPC
-    body that McpVanguard will actually inspect and forward.
+
+async def _validate_mcp_routing_headers(
+    scope,
+    receive,
+    cfg: dict[str, Any],
+    protocol_profile: str = ProtocolProfile.LEGACY_STATEFUL.value,
+):
     """
-    method_header = _header_value(scope, "mcp-method")
-    name_header = _header_value(scope, "mcp-name")
-    if scope.get("method", "").upper() != "POST" or (not method_header and not name_header):
+    Validate the MCP 2026-07-28 Phase 0 boundary before transport handling.
+
+    This buffers and parses POST bodies so unsupported protocol methods cannot be
+    forwarded. Legacy clients may omit future routing headers, while clients
+    using the reserved stateless profile are rejected until that runtime exists.
+    """
+    if scope.get("method", "").upper() != "POST":
         return True, 200, "", receive
 
     body, messages, too_large = await _buffer_receive_body(receive, int(cfg.get("MAX_BODY_BYTES", 2_000_000)))
-    replay_receive = _replay_receive(messages)
+    replay_receive = _replay_receive(messages, receive)
 
     if too_large:
         return False, 413, f"Request body exceeds maximum size of {cfg.get('MAX_BODY_BYTES', 2_000_000)} bytes.", replay_receive
@@ -638,23 +677,23 @@ async def _validate_mcp_routing_headers(scope, receive, cfg: dict[str, Any]):
         return False, 400, "MCP routing headers require a single JSON-RPC request object.", replay_receive
 
     body_method = str(payload.get("method") or "")
-    if method_header and body_method != method_header:
-        return (
-            False,
-            400,
-            f"MCP routing header mismatch: Mcp-Method={method_header!r} does not match body method={body_method!r}.",
-            replay_receive,
-        )
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    body_name = str(params.get("name") or "")
+    profile = resolve_protocol_profile(protocol_profile)
 
-    if name_header and body_method == "tools/call":
-        body_name = str(payload.get("params", {}).get("name") or "")
-        if body_name != name_header:
-            return (
-                False,
-                400,
-                f"MCP routing header mismatch: Mcp-Name={name_header!r} does not match body params.name={body_name!r}.",
-                replay_receive,
-            )
+    unsupported_reason = unsupported_protocol_reason(profile, body_method)
+    if unsupported_reason:
+        return False, 501, unsupported_reason, replay_receive
+
+    issues = routing_header_issues(
+        profile=profile,
+        body_method=body_method,
+        body_tool_name=body_name,
+        method_headers=_header_values(scope, "mcp-method"),
+        name_headers=_header_values(scope, "mcp-name"),
+    )
+    if issues:
+        return False, 400, "MCP routing header validation failed: " + " ".join(issues), replay_receive
 
     return True, 200, "", replay_receive
 
@@ -1194,9 +1233,18 @@ async def handle_mcp(scope, receive, send, ctx: ServerContext):
     if scope.get("method", "").upper() == "POST" and not ok:
         await _send_error(send, status, message)
         return
-    ok, status, message, receive = await _validate_mcp_routing_headers(scope, receive, ctx.cfg)
+    protocol_profile = getattr(ctx.config, "protocol_profile", ProtocolProfile.LEGACY_STATEFUL.value)
+    ok, status, message, receive = await _validate_mcp_routing_headers(
+        scope,
+        receive,
+        ctx.cfg,
+        protocol_profile=protocol_profile,
+    )
     if not ok:
-        _audit_routing_header_finding(scope=scope, reason=message, principal=principal)
+        if status == 501:
+            _audit_protocol_compat_finding(reason=message, principal=principal)
+        else:
+            _audit_routing_header_finding(scope=scope, reason=message, principal=principal)
         await _send_error(send, status, message)
         return
 

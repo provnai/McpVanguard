@@ -1,0 +1,77 @@
+schema_version: mcp_2026_07_28_phase0_v1
+
+routing_headers:
+  - id: legacy_matching_tool_call
+    profile: legacy_stateful
+    body_method: tools/call
+    body_tool_name: read_file
+    method_headers: [tools/call]
+    name_headers: [read_file]
+    expected_issues: []
+  - id: legacy_conflicting_method_duplicates
+    profile: legacy_stateful
+    body_method: tools/list
+    body_tool_name: ''
+    method_headers: [tools/list, tools/call]
+    name_headers: []
+    expected_issues:
+      - Mcp-Method contains conflicting duplicate values.
+  - id: stateless_missing_required_headers
+    profile: mcp_2026_07_28_stateless
+    body_method: tools/call
+    body_tool_name: read_file
+    method_headers: []
+    name_headers: []
+    expected_issues:
+      - Mcp-Method is required in the stateless MCP profile.
+      - Mcp-Name is required for tools/call in the stateless MCP profile.
+  - id: legacy_body_header_mismatch
+    profile: legacy_stateful
+    body_method: tools/call
+    body_tool_name: read_file
+    method_headers: [tools/list]
+    name_headers: []
+    expected_issues:
+      - "Mcp-Method='tools/list' does not match body method='tools/call'."
+
+meta_invariants:
+  - id: meta_cannot_override_request_identity
+    message:
+      jsonrpc: '2.0'
+      id: phase0-meta-1
+      method: tools/call
+      params:
+        name: read_file
+        arguments:
+          path: project/README.md
+        _meta:
+          io.modelcontextprotocol/protocolVersion: '2026-07-28'
+          io.modelcontextprotocol/clientInfo:
+            name: phase0-fixture-client
+            version: '1.0.0'
+          method: tools/list
+          name: delete_file
+    expected_method: tools/call
+    expected_tool_name: read_file
+  - id: meta_sensitive_value_is_inspected
+    message:
+      jsonrpc: '2.0'
+      id: phase0-meta-2
+      method: tools/call
+      params:
+        name: read_file
+        arguments:
+          path: project/README.md
+        _meta:
+          io.modelcontextprotocol/clientInfo:
+            notes: /home/user/.ssh/id_rsa
+    expected_method: tools/call
+    expected_tool_name: read_file
+
+unsupported_methods:
+  - server/discover
+  - subscriptions/listen
+  - tasks/get
+  - tasks/update
+  - resources/subscribe
+  - resources/unsubscribe

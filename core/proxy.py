@@ -72,7 +72,8 @@ class ProxyConfig:
       2. Profile default (from VANGUARD_PROFILE).
       3. Built-in default coded in this __init__.
 
-    Named profiles: monitor | balanced | strict
+    Named security profiles: monitor | balanced | strict
+    Protocol profiles: legacy_stateful | mcp_2026_07_28_stateless
     Set via VANGUARD_PROFILE or --profile CLI flag.
     """
 
@@ -230,6 +231,10 @@ class ProxyConfig:
         self.redis_url: str = os.getenv("VANGUARD_REDIS_URL", "")
         # Management plane mode: disabled | same_session_dev | operator_only.
         self.management_plane_mode: str = os.getenv("VANGUARD_MANAGEMENT_PLANE_MODE", "disabled").lower()
+        from core.protocol_compat import resolve_protocol_profile
+        self.protocol_profile: str = resolve_protocol_profile(
+            os.getenv("VANGUARD_MCP_PROTOCOL_PROFILE", "legacy_stateful")
+        )
 
         # ---- Profile resolution (lowest priority; explicit env wins) ----
         # Read the profile name from VANGUARD_PROFILE (may be overridden by --profile CLI flag later).
@@ -1256,10 +1261,33 @@ class VanguardProxy:
                 continue
 
             method = raw_message.get("method", "")
+            if not isinstance(method, str):
+                method = ""
             request_id = raw_message.get("id")
             tool_name = None
             if method == "tools/call":
-                tool_name = raw_message.get("params", {}).get("name")
+                params = raw_message.get("params")
+                if isinstance(params, dict):
+                    tool_name = params.get("name")
+
+            from core.protocol_compat import unsupported_method_response, unsupported_protocol_reason
+            unsupported_reason = unsupported_protocol_reason(self.config.protocol_profile, method)
+            if unsupported_reason:
+                self._stats["total"] += 1
+                self._stats["blocked"] += 1
+                telemetry.metrics.record_status("blocked")
+                self._log_audit_event(
+                    direction="agent->server",
+                    method=method,
+                    tool_name=tool_name,
+                    action="BLOCK",
+                    rule_id="VANGUARD-MCP-PROTOCOL-UNSUPPORTED",
+                    blocked_reason=unsupported_reason,
+                )
+                await self._write_to_agent(
+                    json.dumps(unsupported_method_response(request_id, unsupported_reason))
+                )
+                continue
 
             # 0. OAuth 2.1 Scope Enforcement (RFC 6750)
             if method == "tools/call" and tool_name:
