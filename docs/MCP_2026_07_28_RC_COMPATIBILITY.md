@@ -7,10 +7,10 @@ current OSS compatibility baseline for the `2.1.x` line and separates shipped
 legacy behavior, Phase 0 safeguards, and deliberately unsupported future
 behavior.
 
-The current release line deliberately pins the MCP Python SDK to `<2` for the
-default legacy stateful gateway path. An opt-in stateless transport seam is now
-tested against SDK v2, but the dependency pin remains until the legacy path and
-the full extension surface have completed migration.
+The current release line uses the MCP Python SDK v2 for both the default legacy
+stateful gateway path and the opt-in stateless transport path. The legacy
+profile remains available for existing clients; the SDK upgrade does not by
+itself enable the stateless profile.
 
 ## Status Matrix
 
@@ -62,7 +62,6 @@ This prevents `_meta` from becoming a bypass lane for encoded paths, scorer-targ
 
 Full support for the 2026-07-28 specification belongs in a later compatibility release. Planned areas:
 
-- complete SDK-v2 migration of the legacy stateful path and dependency line
 - derived identity/session keys for stateless requests
 - `server/discover` inspection and capability caching
 - cache-aware capability and metadata drift logic for `ttlMs` and `cacheScope`

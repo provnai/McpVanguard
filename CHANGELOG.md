@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an opt-in stateless Streamable HTTP transport profile with a fresh proxy lifecycle per request, no `Mcp-Session-Id`, and required 2026 protocol/routing metadata.
 - Added a local `server/discover` response with `resultType=complete` and the standard server identity metadata envelope.
 - Made the raw stream bridge compatible with both SDK v1's Pydantic `JSONRPCMessage` model and SDK v2's union representation.
-- Kept the default `legacy_stateful` profile and SDK `<2` dependency pin unchanged; Tasks, subscriptions, MRTR, cache/trace semantics, and full SDK-v2 migration remain release-gated.
+- Moved the OSS dependency line to MCP SDK v2 and removed the unused FastMCP dependency that constrained resolution to MCP SDK v1.
+- Kept the default `legacy_stateful` profile unchanged; Tasks, subscriptions, MRTR, cache/trace semantics, and full 2026 conformance remain release-gated.
 
 ### Verification
 

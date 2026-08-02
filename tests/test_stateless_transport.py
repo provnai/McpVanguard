@@ -215,8 +215,15 @@ async def test_stateless_profile_serves_server_discover_without_upstream(monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _modern_sdk_available(), reason="requires MCP SDK v2")
-async def test_stateless_profile_works_through_http_with_sdk_v2():
+async def test_stateless_profile_works_through_http_with_sdk_v2(monkeypatch):
     import socket
+
+    monkeypatch.setenv("VANGUARD_SSE_RATE_LIMIT", "100.0")
+    from core import sse_server
+
+    sse_server._rate_limiters.clear()
+    sse_server._active_connections.clear()
+    sse_server._total_active_connections = 0
 
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
