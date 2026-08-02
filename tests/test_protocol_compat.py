@@ -115,10 +115,12 @@ def test_server_discover_result_is_complete_and_versioned():
     result = build_server_discover_result(
         capabilities={"tools": {"listChanged": True}},
         server_info={"name": "McpVanguard", "version": "2.2.0"},
+        instructions="Use this gateway for governed MCP access.",
     )
     assert result["resultType"] == "complete"
-    assert result["protocolVersions"] == [MCP_2026_PROTOCOL_VERSION]
-    assert result["serverInfo"]["name"] == "McpVanguard"
+    assert result["supportedVersions"] == [MCP_2026_PROTOCOL_VERSION]
+    assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "McpVanguard"
+    assert result["instructions"].startswith("Use this gateway")
 
 
 def test_server_discover_result_rejects_incomplete_identity():

@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 PROTOCOL_PROFILE_ENV = "VANGUARD_MCP_PROTOCOL_PROFILE"
 MCP_2026_PROTOCOL_VERSION = "2026-07-28"
 MCP_2026_SERVER_DISCOVER_METHOD = "server/discover"
+MCP_2026_SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo"
 MCP_2026_REQUIRED_REQUEST_META = (
     "io.modelcontextprotocol/protocolVersion",
     "io.modelcontextprotocol/clientCapabilities",
@@ -177,13 +178,14 @@ def stateless_request_issues(
 
 def build_server_discover_result(
     *,
-    protocol_versions: Sequence[str] = (MCP_2026_PROTOCOL_VERSION,),
+    supported_versions: Sequence[str] = (MCP_2026_PROTOCOL_VERSION,),
     capabilities: Mapping[str, Any] | None = None,
     server_info: Mapping[str, Any] | None = None,
+    instructions: str | None = None,
 ) -> dict[str, Any]:
     """Build the canonical successful ``server/discover`` result envelope."""
 
-    versions = list(dict.fromkeys(protocol_versions))
+    versions = list(dict.fromkeys(supported_versions))
     if not versions:
         raise ValueError("server/discover requires at least one protocol version.")
     if not isinstance(capabilities, Mapping):
@@ -192,9 +194,10 @@ def build_server_discover_result(
         raise ValueError("server/discover requires server_info.name and server_info.version.")
     return {
         "resultType": "complete",
-        "protocolVersions": versions,
+        "supportedVersions": versions,
         "capabilities": dict(capabilities),
-        "serverInfo": dict(server_info),
+        "_meta": {MCP_2026_SERVER_INFO_META_KEY: dict(server_info)},
+        **({"instructions": instructions} if instructions is not None else {}),
     }
 
 
