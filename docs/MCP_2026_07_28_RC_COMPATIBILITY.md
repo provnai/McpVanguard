@@ -26,7 +26,7 @@ itself enable the stateless profile.
 | 2026-only methods | Fail closed | Unsupported methods are rejected before upstream forwarding |
 | `server/discover` | Opt-in local response | Gateway identity and safe zero-TTL/private cache hints are returned; upstream capability inspection remains deferred |
 | Tasks, MRTR, `subscriptions/listen` | Unsupported | No silent forwarding or compatibility claim |
-| `resultType`, `ttlMs`, `cacheScope` | Opt-in envelope normalization | Stateless responses receive `resultType=complete`; list/read responses default to `ttlMs=0`, `cacheScope=private` when upstream hints are absent; trace propagation remains deferred |
+| `resultType`, `ttlMs`, `cacheScope` | Opt-in envelope normalization | Stateless responses receive `resultType=complete`; list/read responses default to `ttlMs=0`, `cacheScope=private` when upstream hints are absent; W3C trace context is carried only into redacted audit fields |
 | JSON Schema 2020-12 | Bounded tool-schema inspection | Draft 2020-12 syntax is checked; external references are never resolved; size, node, and depth bounds are enforced; full call-time validation remains deferred |
 
 The protocol profile is selected with `VANGUARD_MCP_PROTOCOL_PROFILE` or the
