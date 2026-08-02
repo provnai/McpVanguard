@@ -157,6 +157,29 @@ async def test_capability_drift_warns_on_tools_list_response(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_legacy_profile_does_not_add_2026_result_envelope_fields():
+    proxy = VanguardProxy(server_command=["dummy"], config=ProxyConfig())
+    proxy._pending_tool_lists.add("legacy-tools-1")
+    proxy._write_to_agent = AsyncMock()
+
+    stdout = MagicMock()
+    stdout.readline = AsyncMock(side_effect=[
+        b'{"jsonrpc":"2.0","id":"legacy-tools-1","result":{"tools":[]}}\n',
+        b"",
+    ])
+    proxy._server_process = MagicMock()
+    proxy._server_process.stdout = stdout
+
+    with patch("core.behavioral.inspect_response", new=AsyncMock(return_value=None)):
+        await proxy._pump_server_to_agent()
+
+    forwarded = json.loads(proxy._write_to_agent.await_args.args[0])
+    assert "resultType" not in forwarded["result"]
+    assert "ttlMs" not in forwarded["result"]
+    assert "cacheScope" not in forwarded["result"]
+
+
+@pytest.mark.asyncio
 async def test_capability_drift_blocks_initialize_response(tmp_path):
     config = ProxyConfig()
     config.capability_manifest_policy = "block"

@@ -263,7 +263,11 @@ async def test_stateless_profile_works_through_http_with_sdk_v2(monkeypatch):
                 },
             )
         assert response.status_code == 200
-        assert response.json()["id"] == "sdk-v2-stateless"
+        payload = response.json()
+        assert payload["id"] == "sdk-v2-stateless"
+        assert payload["result"]["resultType"] == "complete"
+        assert payload["result"]["ttlMs"] == 0
+        assert payload["result"]["cacheScope"] == "private"
     finally:
         server_task.cancel()
         await asyncio.gather(server_task, return_exceptions=True)

@@ -20,6 +20,15 @@ MCP_2026_REQUIRED_REQUEST_META = (
     "io.modelcontextprotocol/protocolVersion",
     "io.modelcontextprotocol/clientCapabilities",
 )
+MCP_2026_CACHEABLE_METHODS = frozenset(
+    {
+        "tools/list",
+        "prompts/list",
+        "resources/list",
+        "resources/read",
+        "resources/templates/list",
+    }
+)
 
 
 class ProtocolProfile(str, Enum):
@@ -210,6 +219,52 @@ def build_server_discover_result(
         "_meta": {MCP_2026_SERVER_INFO_META_KEY: dict(server_info)},
         **({"instructions": instructions} if instructions is not None else {}),
     }
+
+
+def normalize_stateless_result_response(
+    response: Mapping[str, Any],
+    *,
+    request_method: str | None,
+    default_ttl_ms: int = 0,
+    default_cache_scope: str = "private",
+) -> tuple[dict[str, Any], bool]:
+    """Add the required 2026 result envelope fields without changing payloads.
+
+    The 2026 profile requires ``resultType`` on successful results and cache
+    hints on list/read responses. McpVanguard uses a zero-TTL private default
+    when an upstream server omits those hints, preserving safety without
+    pretending that a response is cacheable. Existing valid upstream values
+    are preserved. The returned boolean indicates whether the envelope changed.
+    """
+
+    normalized = dict(response)
+    result = normalized.get("result")
+    if not isinstance(result, Mapping):
+        return normalized, False
+
+    result_copy = dict(result)
+    changed = False
+    if "resultType" not in result_copy:
+        result_copy["resultType"] = "complete"
+        changed = True
+
+    if request_method in MCP_2026_CACHEABLE_METHODS and result_copy.get("resultType") == "complete":
+        ttl_ms = result_copy.get("ttlMs", default_ttl_ms)
+        if not isinstance(ttl_ms, int) or isinstance(ttl_ms, bool) or ttl_ms < 0:
+            ttl_ms = default_ttl_ms
+        cache_scope = result_copy.get("cacheScope", default_cache_scope)
+        if cache_scope not in {"private", "public"}:
+            cache_scope = default_cache_scope
+        if "ttlMs" not in result_copy or result_copy["ttlMs"] != ttl_ms:
+            result_copy["ttlMs"] = ttl_ms
+            changed = True
+        if "cacheScope" not in result_copy or result_copy["cacheScope"] != cache_scope:
+            result_copy["cacheScope"] = cache_scope
+            changed = True
+
+    if changed:
+        normalized["result"] = result_copy
+    return normalized, changed
 
 
 def unsupported_method_response(request_id: object, reason: str) -> dict:

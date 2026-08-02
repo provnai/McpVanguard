@@ -54,6 +54,7 @@ from core import receipts
 from core.risk import RiskEngine, EnforcementLevel
 from core.policy import compose_verdict, maybe_deliver_review, PolicyAction
 from core.tool_capabilities import capability_values, infer_tool_capabilities
+from core.protocol_compat import normalize_stateless_result_response
 
 from core.auth import TOOL_SCOPE_MAPPING
 
@@ -374,6 +375,7 @@ class VanguardProxy:
         self._stats = {"allowed": 0, "blocked": 0, "warned": 0, "total": 0}
         self._pending_tool_lists: set[Any] = set()
         self._pending_initializations: set[Any] = set()
+        self._pending_methods: dict[str, str] = {}
         self._expected_capability_manifest: Optional[dict[str, Any]] = None
         self._observed_capability_manifest: dict[str, Any] = {"version": 1, "initialize": None, "tools": None}
         self._semantic_forced: bool = False
@@ -1551,6 +1553,11 @@ class VanguardProxy:
                 # Forward the normalized message to ensure inspection/execution symmetry
                 # This prevents truncation-based bypasses (P2 Audit Finding)
                 forward_data = json.dumps(normalized_message)
+                if (
+                    self.config.protocol_profile == "mcp_2026_07_28_stateless"
+                    and request_id is not None
+                ):
+                    self._pending_methods[str(request_id)] = method
                 await self._write_to_server(forward_data)
             else:
                 self._stats["blocked"] += 1
@@ -1643,14 +1650,17 @@ class VanguardProxy:
                 response_method = None
                 response_changed = False
 
-                if resp_id in self._pending_initializations:
+                if self.config.protocol_profile == "mcp_2026_07_28_stateless" and resp_id is not None:
+                    response_method = self._pending_methods.pop(str(resp_id), None)
+
+                if response_method is None and resp_id in self._pending_initializations:
                     response_method = "initialize"
                     self._pending_initializations.remove(resp_id)
                     self._observe_capability_section("initialize", resp_json)
                     if self.config.metadata_inspection_enabled:
                         metadata_result = metadata_inspection.inspect_initialize_payload(resp_json)
 
-                if resp_id in self._pending_tool_lists:
+                if response_method is None and resp_id in self._pending_tool_lists:
                     response_method = "tools/list"
                     self._pending_tool_lists.remove(resp_id)
                     if "result" in resp_json and "tools" in resp_json["result"]:
@@ -1679,6 +1689,13 @@ class VanguardProxy:
                             if self.config.metadata_inspection_enabled:
                                 metadata_result = metadata_inspection.inspect_tool_list_payload(resp_json)
                         self._observe_capability_section("tools", resp_json)
+
+                if self.config.protocol_profile == "mcp_2026_07_28_stateless":
+                    resp_json, envelope_changed = normalize_stateless_result_response(
+                        resp_json,
+                        request_method=response_method,
+                    )
+                    response_changed = response_changed or envelope_changed
 
                 metadata_action = self._metadata_policy_action(metadata_result)
                 capability_action, capability_reason = self._capability_policy_action(response_method)

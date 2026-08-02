@@ -26,7 +26,7 @@ itself enable the stateless profile.
 | 2026-only methods | Fail closed | Unsupported methods are rejected before upstream forwarding |
 | `server/discover` | Opt-in local response | Gateway identity is returned; upstream capability inspection/caching is deferred |
 | Tasks, MRTR, `subscriptions/listen` | Unsupported | No silent forwarding or compatibility claim |
-| `ttlMs`, `cacheScope`, trace context | Unsupported | No cache or trace propagation contract is shipped |
+| `resultType`, `ttlMs`, `cacheScope` | Opt-in envelope normalization | Stateless responses receive `resultType=complete`; list/read responses default to `ttlMs=0`, `cacheScope=private` when upstream hints are absent; trace propagation remains deferred |
 | JSON Schema 2020-12 | Partial legacy validation only | Full composition, reference, resource, and timeout coverage is deferred |
 
 The protocol profile is selected with `VANGUARD_MCP_PROTOCOL_PROFILE` or the
@@ -64,7 +64,7 @@ Full support for the 2026-07-28 specification belongs in a later compatibility r
 
 - derived identity/session keys for stateless requests
 - `server/discover` inspection and capability caching
-- cache-aware capability and metadata drift logic for `ttlMs` and `cacheScope`
+- cache-aware capability and metadata drift logic beyond the current safe envelope defaults for `ttlMs` and `cacheScope`
 - W3C trace context propagation from `_meta` into audit/SIEM fields
 - Tasks extension policy model for task handles, updates, cancellation, and task output
 - MCP Apps inspection for server-rendered UI templates and UI-initiated JSON-RPC actions

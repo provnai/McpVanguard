@@ -15,6 +15,7 @@ from core.protocol_compat import (
     MCP_2026_PROTOCOL_VERSION,
     ProtocolProfile,
     build_server_discover_result,
+    normalize_stateless_result_response,
     resolve_protocol_profile,
     routing_header_issues,
     stateless_request_issues,
@@ -152,6 +153,59 @@ def test_server_discover_result_is_complete_and_versioned():
 def test_server_discover_result_rejects_incomplete_identity():
     with pytest.raises(ValueError, match="server_info.name"):
         build_server_discover_result(server_info={"name": "McpVanguard"})
+
+
+def test_stateless_result_normalization_adds_safe_required_envelope():
+    response, changed = normalize_stateless_result_response(
+        {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}},
+        request_method="tools/list",
+    )
+
+    assert changed is True
+    assert response["result"]["resultType"] == "complete"
+    assert response["result"]["ttlMs"] == 0
+    assert response["result"]["cacheScope"] == "private"
+
+
+def test_stateless_result_normalization_preserves_valid_upstream_hints():
+    response, changed = normalize_stateless_result_response(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "resultType": "complete",
+                "ttlMs": 5000,
+                "cacheScope": "public",
+            },
+        },
+        request_method="resources/read",
+    )
+
+    assert changed is False
+    assert response["result"]["ttlMs"] == 5000
+    assert response["result"]["cacheScope"] == "public"
+
+
+def test_stateless_result_normalization_does_not_add_cache_hints_to_input_required():
+    response, changed = normalize_stateless_result_response(
+        {"jsonrpc": "2.0", "id": 1, "result": {"resultType": "input_required"}},
+        request_method="tools/list",
+    )
+
+    assert changed is False
+    assert "ttlMs" not in response["result"]
+    assert "cacheScope" not in response["result"]
+
+
+def test_stateless_result_normalization_adds_result_type_to_other_results():
+    response, changed = normalize_stateless_result_response(
+        {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}},
+        request_method=None,
+    )
+
+    assert changed is True
+    assert response["result"]["resultType"] == "complete"
+    assert "ttlMs" not in response["result"]
 
 
 @pytest.mark.parametrize("method", ["ping", "logging/setLevel"])
