@@ -267,7 +267,10 @@ async def test_degrade_mode_forces_semantic_per_session_without_mutating_config(
 
     engine = RiskEngine.get_instance()
     engine._states.clear()
-    engine.record_event("degrade-a", proxy._server_id, "BEHAVIORAL_BLOCK")
+    # Start just above the degrade threshold instead of relying on two events
+    # landing at exactly 40.0 after platform-specific monotonic-clock decay.
+    state = engine.get_state("degrade-a", proxy._server_id)
+    state.score = 61.0
     engine.record_event("degrade-a", proxy._server_id, "BEHAVIORAL_BLOCK")
 
     await proxy._pump_agent_to_server()
