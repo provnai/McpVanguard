@@ -12,9 +12,12 @@ import yaml
 
 from core.preflight import run_preflight
 from core.protocol_compat import (
+    MCP_2026_PROTOCOL_VERSION,
     ProtocolProfile,
+    build_server_discover_result,
     resolve_protocol_profile,
     routing_header_issues,
+    stateless_request_issues,
     unsupported_method_response,
     unsupported_protocol_reason,
 )
@@ -68,6 +71,59 @@ def test_reserved_stateless_profile_never_falls_back_to_legacy():
         "tools/call",
     )
     assert reason and "not implemented" in reason
+
+
+def test_stateless_request_requires_protocol_metadata_and_headers():
+    issues = stateless_request_issues(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "read"},
+        },
+        method_headers=(),
+        name_headers=(),
+    )
+    assert any("params._meta" in issue for issue in issues)
+    assert any("protocolVersion" in issue for issue in issues)
+    assert any("clientCapabilities" in issue for issue in issues)
+    assert any("Mcp-Method" in issue for issue in issues)
+    assert any("Mcp-Name" in issue for issue in issues)
+
+
+def test_stateless_request_accepts_required_metadata_and_headers():
+    issues = stateless_request_issues(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "read",
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": MCP_2026_PROTOCOL_VERSION,
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                },
+            },
+        },
+        method_headers=("tools/call",),
+        name_headers=("read",),
+    )
+    assert issues == []
+
+
+def test_server_discover_result_is_complete_and_versioned():
+    result = build_server_discover_result(
+        capabilities={"tools": {"listChanged": True}},
+        server_info={"name": "McpVanguard", "version": "2.2.0"},
+    )
+    assert result["resultType"] == "complete"
+    assert result["protocolVersions"] == [MCP_2026_PROTOCOL_VERSION]
+    assert result["serverInfo"]["name"] == "McpVanguard"
+
+
+def test_server_discover_result_rejects_incomplete_identity():
+    with pytest.raises(ValueError, match="server_info.name"):
+        build_server_discover_result(server_info={"name": "McpVanguard"})
 
 
 @pytest.mark.parametrize("method", ["ping", "logging/setLevel"])

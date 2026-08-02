@@ -9,10 +9,16 @@ not silently fall back to the legacy stateful runtime.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 
 PROTOCOL_PROFILE_ENV = "VANGUARD_MCP_PROTOCOL_PROFILE"
+MCP_2026_PROTOCOL_VERSION = "2026-07-28"
+MCP_2026_SERVER_DISCOVER_METHOD = "server/discover"
+MCP_2026_REQUIRED_REQUEST_META = (
+    "io.modelcontextprotocol/protocolVersion",
+    "io.modelcontextprotocol/clientCapabilities",
+)
 
 
 class ProtocolProfile(str, Enum):
@@ -112,6 +118,84 @@ def unsupported_protocol_reason(profile: str, method: str) -> str | None:
             "profile; the request was not forwarded."
         )
     return None
+
+
+def stateless_request_issues(
+    payload: Mapping[str, Any],
+    *,
+    method_headers: Sequence[str] = (),
+    name_headers: Sequence[str] = (),
+) -> list[str]:
+    """Validate the request contract required by the 2026 stateless profile.
+
+    This is deliberately transport-independent. The caller still decides when
+    the stateless runtime is enabled; until then the profile remains fail-closed.
+    """
+
+    issues: list[str] = []
+    method = payload.get("method")
+    if not isinstance(method, str) or not method:
+        issues.append("MCP stateless requests require a non-empty method.")
+
+    params = payload.get("params")
+    if params is not None and not isinstance(params, Mapping):
+        issues.append("MCP request params must be an object when present.")
+
+    meta = params.get("_meta") if isinstance(params, Mapping) else None
+    if not isinstance(meta, Mapping):
+        issues.append("MCP stateless requests require params._meta.")
+        meta = {}
+
+    protocol_version = meta.get("io.modelcontextprotocol/protocolVersion")
+    if protocol_version != MCP_2026_PROTOCOL_VERSION:
+        issues.append(
+            "params._meta.io.modelcontextprotocol/protocolVersion must be "
+            f"{MCP_2026_PROTOCOL_VERSION!r}."
+        )
+
+    capabilities = meta.get("io.modelcontextprotocol/clientCapabilities")
+    if not isinstance(capabilities, Mapping):
+        issues.append(
+            "params._meta.io.modelcontextprotocol/clientCapabilities must be an object."
+        )
+
+    issues.extend(
+        routing_header_issues(
+            profile=ProtocolProfile.MCP_2026_07_28_STATELESS.value,
+            body_method=method if isinstance(method, str) else "",
+            body_tool_name=(
+                params.get("name", "")
+                if isinstance(params, Mapping) and isinstance(params.get("name", ""), str)
+                else ""
+            ),
+            method_headers=method_headers,
+            name_headers=name_headers,
+        )
+    )
+    return issues
+
+
+def build_server_discover_result(
+    *,
+    protocol_versions: Sequence[str] = (MCP_2026_PROTOCOL_VERSION,),
+    capabilities: Mapping[str, Any] | None = None,
+    server_info: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the canonical successful ``server/discover`` result envelope."""
+
+    versions = list(dict.fromkeys(protocol_versions))
+    if not versions:
+        raise ValueError("server/discover requires at least one protocol version.")
+    if not isinstance(capabilities, Mapping):
+        capabilities = {}
+    if not isinstance(server_info, Mapping) or not server_info.get("name") or not server_info.get("version"):
+        raise ValueError("server/discover requires server_info.name and server_info.version.")
+    return {
+        "resultType": "complete",
+        "protocolVersions": versions,
+        "capabilities": dict(capabilities),
+        "serverInfo": dict(server_info),
+    }
 
 
 def unsupported_method_response(request_id: object, reason: str) -> dict:
