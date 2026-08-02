@@ -16,6 +16,7 @@ from core.protocol_compat import (
     ProtocolProfile,
     build_server_discover_result,
     normalize_stateless_result_response,
+    extract_stateless_trace_context,
     resolve_protocol_profile,
     routing_header_issues,
     stateless_request_issues,
@@ -136,6 +137,40 @@ def test_stateless_request_rejects_missing_protocol_header():
         method_headers=("tools/list",),
     )
     assert any("Mcp-Protocol-Version" in issue for issue in issues)
+
+
+def test_stateless_trace_context_is_validated_and_baggage_is_hashed():
+    payload = {
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MCP_2026_PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "traceparent": "00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01",
+                "tracestate": "vendor=value",
+                "baggage": "tenant=private-value",
+            }
+        }
+    }
+
+    trace_context = extract_stateless_trace_context(payload)
+    assert trace_context["traceparent"].startswith("00-")
+    assert trace_context["tracestate"] == "vendor=value"
+    assert trace_context["baggage_present"] is True
+    assert "private-value" not in str(trace_context)
+    assert len(trace_context["baggage_sha256"]) == 64
+
+
+def test_stateless_trace_context_rejects_invalid_traceparent():
+    issues = stateless_request_issues(
+        {
+            "params": {
+                "_meta": {
+                    "traceparent": "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+                }
+            }
+        }
+    )
+    assert any("traceparent" in issue for issue in issues)
 
 
 def test_server_discover_result_is_complete_and_versioned():

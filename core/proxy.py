@@ -54,7 +54,10 @@ from core import receipts
 from core.risk import RiskEngine, EnforcementLevel
 from core.policy import compose_verdict, maybe_deliver_review, PolicyAction
 from core.tool_capabilities import capability_values, infer_tool_capabilities
-from core.protocol_compat import normalize_stateless_result_response
+from core.protocol_compat import (
+    extract_stateless_trace_context,
+    normalize_stateless_result_response,
+)
 
 from core.auth import TOOL_SCOPE_MAPPING
 
@@ -376,6 +379,8 @@ class VanguardProxy:
         self._pending_tool_lists: set[Any] = set()
         self._pending_initializations: set[Any] = set()
         self._pending_methods: dict[str, str] = {}
+        self._pending_trace_context: dict[str, dict[str, Any] | None] = {}
+        self._active_trace_context: dict[str, Any] | None = None
         self._expected_capability_manifest: Optional[dict[str, Any]] = None
         self._observed_capability_manifest: dict[str, Any] = {"version": 1, "initialize": None, "tools": None}
         self._semantic_forced: bool = False
@@ -423,6 +428,7 @@ class VanguardProxy:
             "effective_policy_action": effective_policy_action,
             "event_outcome": self._audit_outcome(effective_policy_action),
             "event_severity": self._audit_severity(effective_policy_action),
+            "trace_context": self._active_trace_context,
         }
         event_kwargs.update(self._current_risk_context())
         event_kwargs.update(kwargs)
@@ -1262,6 +1268,12 @@ class VanguardProxy:
                 await self._write_to_agent(json.dumps(invalid_response))
                 continue
 
+            self._active_trace_context = (
+                extract_stateless_trace_context(raw_message)
+                if self.config.protocol_profile == "mcp_2026_07_28_stateless"
+                else None
+            )
+
             method = raw_message.get("method", "")
             if not isinstance(method, str):
                 method = ""
@@ -1558,6 +1570,7 @@ class VanguardProxy:
                     and request_id is not None
                 ):
                     self._pending_methods[str(request_id)] = method
+                    self._pending_trace_context[str(request_id)] = self._active_trace_context
                 await self._write_to_server(forward_data)
             else:
                 self._stats["blocked"] += 1
@@ -1643,6 +1656,7 @@ class VanguardProxy:
 
             # 3. Enrich tool listing responses with safety hints
             try:
+                self._active_trace_context = None
                 line_str = line.decode("utf-8", errors="replace")
                 resp_json = json.loads(line_str)
                 resp_id = resp_json.get("id")
@@ -1652,6 +1666,7 @@ class VanguardProxy:
 
                 if self.config.protocol_profile == "mcp_2026_07_28_stateless" and resp_id is not None:
                     response_method = self._pending_methods.pop(str(resp_id), None)
+                    self._active_trace_context = self._pending_trace_context.pop(str(resp_id), None)
 
                 if response_method is None and resp_id in self._pending_initializations:
                     response_method = "initialize"

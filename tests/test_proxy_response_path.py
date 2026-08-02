@@ -180,6 +180,51 @@ async def test_legacy_profile_does_not_add_2026_result_envelope_fields():
 
 
 @pytest.mark.asyncio
+async def test_stateless_proxy_correlates_redacted_trace_context_by_request_id():
+    class Reader:
+        def __init__(self, payload):
+            self.lines = [payload, b""]
+
+        async def readline(self):
+            return self.lines.pop(0)
+
+    config = ProxyConfig()
+    config.protocol_profile = "mcp_2026_07_28_stateless"
+    request = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": "trace-1",
+            "method": "tools/list",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                    "traceparent": "00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01",
+                    "baggage": "tenant=private-value",
+                }
+            },
+        }
+    ).encode()
+    proxy = VanguardProxy(
+        server_command=["dummy"],
+        config=config,
+        agent_reader=Reader(request),
+        agent_writer=AsyncMock(),
+    )
+    proxy._session = SessionState(session_id="trace-session")
+    proxy._write_to_server = AsyncMock()
+    proxy._inspect_message = AsyncMock(return_value=InspectionResult.allow())
+
+    await proxy._pump_agent_to_server()
+
+    assert proxy._pending_methods["trace-1"] == "tools/list"
+    trace_context = proxy._pending_trace_context["trace-1"]
+    assert trace_context["traceparent"].startswith("00-")
+    assert trace_context["baggage_present"] is True
+    assert "private-value" not in str(trace_context)
+
+
+@pytest.mark.asyncio
 async def test_capability_drift_blocks_initialize_response(tmp_path):
     config = ProxyConfig()
     config.capability_manifest_policy = "block"

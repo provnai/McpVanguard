@@ -164,6 +164,7 @@ class AuditEvent(BaseModel):
     risk_score: Optional[float] = None
     risk_enforcement: Optional[str] = None
     latency_ms: Optional[float] = None
+    trace_context: Optional[dict[str, Any]] = None
     blocked_reason: Optional[str] = None
     policy_explanation: Optional[dict[str, Any]] = None
     tool_capabilities: list[str] = Field(default_factory=list)
@@ -171,6 +172,10 @@ class AuditEvent(BaseModel):
 
     def to_log_line(self, format: str = "text") -> str:
         if format == "json":
+            # Keep legacy JSON audit output unchanged when no stateless trace
+            # context is present; the field is additive only when populated.
+            if self.trace_context is None:
+                return self.model_dump_json(exclude={"trace_context"})
             return self.model_dump_json()
         
         from datetime import datetime

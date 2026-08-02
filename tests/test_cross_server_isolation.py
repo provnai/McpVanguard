@@ -263,6 +263,7 @@ def test_audit_event_default_risk_fields_remain_present_in_json_log():
     assert "risk_enforcement" in data
     assert data["risk_score"] is None
     assert data["risk_enforcement"] is None
+    assert "trace_context" not in data
 
 
 def test_audit_event_policy_explanation_in_json_log():
@@ -287,6 +288,24 @@ def test_audit_event_policy_explanation_in_json_log():
     assert data["policy_explanation"]["schema_version"] == "policy_explanation_v1"
     assert data["policy_explanation"]["primary_rule_id"] == "VANGUARD-SAFEZONE-001"
     assert data["policy_explanation"]["upstream_called"] is False
+
+
+def test_audit_event_trace_context_is_structured_and_redacted():
+    import json
+
+    event = AuditEvent(
+        session_id="aabbccdd-1234-5678-90ab-cdef01234567",
+        direction="agent->server",
+        action="ALLOW",
+        trace_context={
+            "traceparent": "00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01",
+            "baggage_present": True,
+            "baggage_sha256": "a" * 64,
+        },
+    )
+    data = json.loads(event.to_log_line(format="json"))
+    assert data["trace_context"]["baggage_present"] is True
+    assert "baggage" not in data["trace_context"]
 
 
 # ---------------------------------------------------------------------------

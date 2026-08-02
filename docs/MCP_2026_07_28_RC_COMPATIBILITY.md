@@ -22,7 +22,7 @@ itself enable the stateless profile.
 | `legacy_stateful` protocol profile | Implemented and default | Preserves the current 2.1.x behavior |
 | `mcp_2026_07_28_stateless` protocol profile | Opt-in transport slice | Ordinary stateless JSON-RPC and local `server/discover` are implemented and tested; Tasks, subscriptions, MRTR, and other extensions remain fail-closed |
 | `Mcp-Method` / `Mcp-Name` | Opt-in stateless enforcement | Conflicts and body/header mismatches are rejected; required routing metadata is enforced in the stateless profile |
-| Request `_meta` | Phase 0 security coverage | L0/L1 inspect it; full RC identity, trace, and capability semantics are not shipped |
+| Request `_meta` | Stateless trace and security coverage | L0/L1 inspect it; protocol identity is validated, and W3C trace context is carried to redacted audit fields; full RC capability semantics are not shipped |
 | 2026-only methods | Fail closed | Unsupported methods are rejected before upstream forwarding |
 | `server/discover` | Opt-in local response | Gateway identity is returned; upstream capability inspection/caching is deferred |
 | Tasks, MRTR, `subscriptions/listen` | Unsupported | No silent forwarding or compatibility claim |
@@ -65,7 +65,7 @@ Full support for the 2026-07-28 specification belongs in a later compatibility r
 - derived identity/session keys for stateless requests
 - `server/discover` inspection and capability caching
 - cache-aware capability and metadata drift logic beyond the current safe envelope defaults for `ttlMs` and `cacheScope`
-- W3C trace context propagation from `_meta` into audit/SIEM fields
+- richer W3C trace context propagation and downstream OpenTelemetry export beyond the redacted audit/SIEM fields
 - Tasks extension policy model for task handles, updates, cancellation, and task output
 - MCP Apps inspection for server-rendered UI templates and UI-initiated JSON-RPC actions
 - JSON Schema 2020-12 hardening for `$ref`, `$defs`, `oneOf`, `anyOf`, `allOf`, conditionals, schema depth, and validation time

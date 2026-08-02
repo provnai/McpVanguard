@@ -8,6 +8,8 @@ not silently fall back to the legacy stateful runtime.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
@@ -29,6 +31,10 @@ MCP_2026_CACHEABLE_METHODS = frozenset(
         "resources/templates/list",
     }
 )
+MCP_2026_TRACE_CONTEXT_KEYS = ("traceparent", "tracestate", "baggage")
+_TRACEPARENT_RE = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$")
+_MAX_TRACESTATE_LENGTH = 512
+_MAX_BAGGAGE_LENGTH = 8192
 
 
 class ProtocolProfile(str, Enum):
@@ -193,7 +199,79 @@ def stateless_request_issues(
             name_headers=name_headers,
         )
     )
+
+    issues.extend(stateless_trace_context_issues(payload))
     return issues
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+
+
+def stateless_trace_context_issues(payload: Mapping[str, Any]) -> list[str]:
+    """Validate the official W3C trace fields carried in request ``_meta``."""
+
+    params = payload.get("params")
+    meta = params.get("_meta") if isinstance(params, Mapping) else None
+    if not isinstance(meta, Mapping):
+        return []
+
+    issues: list[str] = []
+    traceparent = meta.get("traceparent")
+    if traceparent is not None:
+        if not isinstance(traceparent, str):
+            issues.append("_meta.traceparent must be a string when present.")
+        else:
+            match = _TRACEPARENT_RE.fullmatch(traceparent)
+            if (
+                not match
+                or traceparent.startswith("ff-")
+                or set(match.group(1)) == {"0"}
+                or set(match.group(2)) == {"0"}
+            ):
+                issues.append("_meta.traceparent is not a valid W3C traceparent value.")
+
+    tracestate = meta.get("tracestate")
+    if tracestate is not None:
+        if not isinstance(tracestate, str):
+            issues.append("_meta.tracestate must be a string when present.")
+        elif len(tracestate) > _MAX_TRACESTATE_LENGTH or _has_control_chars(tracestate):
+            issues.append("_meta.tracestate exceeds the bounded trace-state format.")
+
+    baggage = meta.get("baggage")
+    if baggage is not None:
+        if not isinstance(baggage, str):
+            issues.append("_meta.baggage must be a string when present.")
+        elif len(baggage) > _MAX_BAGGAGE_LENGTH or _has_control_chars(baggage):
+            issues.append("_meta.baggage exceeds the bounded baggage format.")
+    return issues
+
+
+def extract_stateless_trace_context(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return safe audit fields for valid stateless trace context.
+
+    Raw baggage is intentionally never returned because it may contain
+    application-specific or sensitive values. Its digest supports correlation
+    without turning audit logs into a baggage exfiltration surface.
+    """
+
+    if stateless_trace_context_issues(payload):
+        return None
+    params = payload.get("params")
+    meta = params.get("_meta") if isinstance(params, Mapping) else None
+    if not isinstance(meta, Mapping):
+        return None
+
+    trace_context: dict[str, Any] = {}
+    for key in MCP_2026_TRACE_CONTEXT_KEYS[:2]:
+        value = meta.get(key)
+        if isinstance(value, str):
+            trace_context[key] = value
+    baggage = meta.get("baggage")
+    if isinstance(baggage, str):
+        trace_context["baggage_present"] = True
+        trace_context["baggage_sha256"] = hashlib.sha256(baggage.encode("utf-8")).hexdigest()
+    return trace_context or None
 
 
 def build_server_discover_result(
