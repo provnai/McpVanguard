@@ -24,7 +24,7 @@ itself enable the stateless profile.
 | `Mcp-Method` / `Mcp-Name` | Opt-in stateless enforcement | Conflicts and body/header mismatches are rejected; required routing metadata is enforced in the stateless profile |
 | Request `_meta` | Stateless trace and security coverage | L0/L1 inspect it; protocol identity is validated, and W3C trace context is carried to redacted audit fields; full RC capability semantics are not shipped |
 | 2026-only methods | Fail closed | Unsupported methods are rejected before upstream forwarding |
-| `server/discover` | Opt-in local response | Gateway identity is returned; upstream capability inspection/caching is deferred |
+| `server/discover` | Opt-in local response | Gateway identity and safe zero-TTL/private cache hints are returned; upstream capability inspection remains deferred |
 | Tasks, MRTR, `subscriptions/listen` | Unsupported | No silent forwarding or compatibility claim |
 | `resultType`, `ttlMs`, `cacheScope` | Opt-in envelope normalization | Stateless responses receive `resultType=complete`; list/read responses default to `ttlMs=0`, `cacheScope=private` when upstream hints are absent; trace propagation remains deferred |
 | JSON Schema 2020-12 | Partial legacy validation only | Full composition, reference, resource, and timeout coverage is deferred |

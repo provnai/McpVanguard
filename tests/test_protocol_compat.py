@@ -180,6 +180,8 @@ def test_server_discover_result_is_complete_and_versioned():
         instructions="Use this gateway for governed MCP access.",
     )
     assert result["resultType"] == "complete"
+    assert result["ttlMs"] == 0
+    assert result["cacheScope"] == "private"
     assert result["supportedVersions"] == [MCP_2026_PROTOCOL_VERSION]
     assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "McpVanguard"
     assert result["instructions"].startswith("Use this gateway")
@@ -188,6 +190,22 @@ def test_server_discover_result_is_complete_and_versioned():
 def test_server_discover_result_rejects_incomplete_identity():
     with pytest.raises(ValueError, match="server_info.name"):
         build_server_discover_result(server_info={"name": "McpVanguard"})
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"ttl_ms": -1},
+        {"ttl_ms": True},
+        {"cache_scope": "shared"},
+    ],
+)
+def test_server_discover_result_rejects_invalid_cache_hints(kwargs):
+    with pytest.raises(ValueError, match="(ttl_ms|cache_scope)"):
+        build_server_discover_result(
+            server_info={"name": "McpVanguard", "version": "2.2.0"},
+            **kwargs,
+        )
 
 
 def test_stateless_result_normalization_adds_safe_required_envelope():

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moved the OSS dependency line to MCP SDK v2 and removed the unused FastMCP dependency that constrained resolution to MCP SDK v1.
 - Added stateless-only response envelope normalization for the required `resultType` field and safe zero-TTL/private cache hints on list/read responses when upstream servers omit them; valid upstream hints are preserved.
 - Added stateless W3C trace-context handling for `traceparent`, `tracestate`, and `baggage`; raw baggage is never written to audit logs and is represented by presence plus a SHA-256 digest.
+- Added required safe cache hints to the local stateless `server/discover` response; discovery defaults to `ttlMs=0` and `cacheScope=private` unless explicitly configured by a caller.
 - Kept the default `legacy_stateful` profile unchanged; Tasks, subscriptions, MRTR, cache/trace semantics, and full 2026 conformance remain release-gated.
 
 ### Verification

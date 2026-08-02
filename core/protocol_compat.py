@@ -280,6 +280,8 @@ def build_server_discover_result(
     capabilities: Mapping[str, Any] | None = None,
     server_info: Mapping[str, Any] | None = None,
     instructions: str | None = None,
+    ttl_ms: int = 0,
+    cache_scope: str = "private",
 ) -> dict[str, Any]:
     """Build the canonical successful ``server/discover`` result envelope."""
 
@@ -290,8 +292,14 @@ def build_server_discover_result(
         capabilities = {}
     if not isinstance(server_info, Mapping) or not server_info.get("name") or not server_info.get("version"):
         raise ValueError("server/discover requires server_info.name and server_info.version.")
+    if not isinstance(ttl_ms, int) or isinstance(ttl_ms, bool) or ttl_ms < 0:
+        raise ValueError("server/discover ttl_ms must be a non-negative integer.")
+    if cache_scope not in {"private", "public"}:
+        raise ValueError("server/discover cache_scope must be 'private' or 'public'.")
     return {
         "resultType": "complete",
+        "ttlMs": ttl_ms,
+        "cacheScope": cache_scope,
         "supportedVersions": versions,
         "capabilities": dict(capabilities),
         "_meta": {MCP_2026_SERVER_INFO_META_KEY: dict(server_info)},

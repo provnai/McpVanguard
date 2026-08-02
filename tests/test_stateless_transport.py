@@ -210,6 +210,8 @@ async def test_stateless_profile_serves_server_discover_without_upstream(monkeyp
     response = b"".join(item.get("body", b"") for item in ctx_messages)
     decoded = json.loads(response)
     assert decoded["result"]["resultType"] == "complete"
+    assert decoded["result"]["ttlMs"] == 0
+    assert decoded["result"]["cacheScope"] == "private"
     assert decoded["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "McpVanguard"
 
 
