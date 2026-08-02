@@ -7,6 +7,11 @@ current OSS compatibility baseline for the `2.1.x` line and separates shipped
 legacy behavior, Phase 0 safeguards, and deliberately unsupported future
 behavior.
 
+The current release line deliberately pins the MCP Python SDK to `<2` because
+the gateway transport integration is still built around the v1 session API.
+The SDK v2 migration is a required prerequisite for the full stateless runtime,
+not an optional dependency refresh.
+
 ## Status Matrix
 
 | Area | Current status | Boundary |
