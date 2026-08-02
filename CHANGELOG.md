@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added stateless-only response envelope normalization for the required `resultType` field and safe zero-TTL/private cache hints on list/read responses when upstream servers omit them; valid upstream hints are preserved.
 - Added stateless W3C trace-context handling for `traceparent`, `tracestate`, and `baggage`; raw baggage is never written to audit logs and is represented by presence plus a SHA-256 digest.
 - Added required safe cache hints to the local stateless `server/discover` response; discovery defaults to `ttlMs=0` and `cacheScope=private` unless explicitly configured by a caller.
+- Added bounded JSON Schema 2020-12 inspection for tool metadata; external references are never resolved, and schema byte, node, and depth limits fail closed before metadata exposure.
 - Kept the default `legacy_stateful` profile unchanged; Tasks, subscriptions, MRTR, cache/trace semantics, and full 2026 conformance remain release-gated.
 
 ### Verification

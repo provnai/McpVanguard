@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 from core.models import InspectionResult, RuleMatch
 from core import safe_regex
+from core.schema_inspection import inspect_tool_input_schema
 
 # ReDoS guard: match each pattern in a thread with a hard timeout.
 # Fail-closed: timeout → BLOCK (consistent with rules_engine.py).
@@ -127,6 +128,9 @@ def inspect_tool_list_payload(payload: dict[str, Any]) -> InspectionResult | Non
     strings: list[tuple[str, str]] = []
     for tool in tools:
         if isinstance(tool, dict):
+            schema_result = _inspect_tool_schema(tool)
+            if schema_result is not None:
+                return schema_result
             strings.extend(_iter_tool_metadata_strings(tool))
 
     if not strings:
@@ -136,10 +140,39 @@ def inspect_tool_list_payload(payload: dict[str, Any]) -> InspectionResult | Non
 
 
 def inspect_tool_metadata(tool: dict[str, Any]) -> InspectionResult | None:
+    schema_result = _inspect_tool_schema(tool)
+    if schema_result is not None:
+        return schema_result
     strings = list(_iter_tool_metadata_strings(tool))
     if not strings:
         return None
     return _inspect_strings(strings)
+
+
+def _inspect_tool_schema(tool: dict[str, Any]) -> InspectionResult | None:
+    if "inputSchema" not in tool:
+        return None
+    result = inspect_tool_input_schema(tool.get("inputSchema"))
+    if result.valid:
+        return None
+    issue = result.issues[0] if result.issues else "bounded schema inspection failed"
+    return InspectionResult(
+        allowed=False,
+        action="BLOCK",
+        layer_triggered=1,
+        rule_matches=[
+            RuleMatch(
+                rule_id="META-SCHEMA",
+                rule_name="Schema Inspection",
+                severity="HIGH",
+                action="BLOCK",
+                matched_field="result.tools[].inputSchema",
+                matched_value=issue[:200],
+                message="Tool input schema failed bounded JSON Schema 2020-12 inspection.",
+            )
+        ],
+        block_reason="Tool input schema failed bounded JSON Schema 2020-12 inspection.",
+    )
 
 
 def filter_poisoned_tools(tools: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], InspectionResult]]]:
