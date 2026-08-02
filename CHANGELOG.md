@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### MCP 2026-07-28 Compatibility
+
+- Added an opt-in stateless Streamable HTTP transport profile with a fresh proxy lifecycle per request, no `Mcp-Session-Id`, and required 2026 protocol/routing metadata.
+- Added a local `server/discover` response with `resultType=complete` and the standard server identity metadata envelope.
+- Made the raw stream bridge compatible with both SDK v1's Pydantic `JSONRPCMessage` model and SDK v2's union representation.
+- Kept the default `legacy_stateful` profile and SDK `<2` dependency pin unchanged; Tasks, subscriptions, MRTR, cache/trace semantics, and full SDK-v2 migration remain release-gated.
+
+### Verification
+
+- Pinned SDK suite: `560 passed, 3 skipped`.
+- Focused protocol/transport suite: `27 passed, 1 skipped` under the pinned SDK.
+- The same focused suite: `28 passed` in an isolated SDK-v2 environment, including real HTTP transport coverage.
+
 ## [2.1.3] - 2026-06-19 (Replay-Informed Boundary Hardening Patch)
 
 ### Security and Runtime Hardening

@@ -108,11 +108,11 @@ def unsupported_protocol_reason(profile: str, method: str) -> str | None:
     """Return a fail-closed reason for an unsupported profile or method."""
 
     normalized_profile = resolve_protocol_profile(profile)
-    if normalized_profile == ProtocolProfile.MCP_2026_07_28_STATELESS.value:
-        return (
-            "The MCP 2026-07-28 stateless profile is reserved but not implemented; "
-            "the request was not forwarded."
-        )
+    if (
+        normalized_profile == ProtocolProfile.MCP_2026_07_28_STATELESS.value
+        and method == MCP_2026_SERVER_DISCOVER_METHOD
+    ):
+        return None
     if method in UNSUPPORTED_2026_METHODS:
         return (
             f"MCP method {method!r} is not implemented by the active compatibility "
@@ -126,6 +126,7 @@ def stateless_request_issues(
     *,
     method_headers: Sequence[str] = (),
     name_headers: Sequence[str] = (),
+    protocol_headers: Sequence[str] = (),
 ) -> list[str]:
     """Validate the request contract required by the 2026 stateless profile.
 
@@ -152,6 +153,16 @@ def stateless_request_issues(
         issues.append(
             "params._meta.io.modelcontextprotocol/protocolVersion must be "
             f"{MCP_2026_PROTOCOL_VERSION!r}."
+        )
+
+    unique_protocol_headers = set(protocol_headers)
+    if len(unique_protocol_headers) > 1:
+        issues.append("Mcp-Protocol-Version contains conflicting duplicate values.")
+    protocol_header = protocol_headers[0] if protocol_headers else ""
+    if protocol_header != MCP_2026_PROTOCOL_VERSION:
+        issues.append(
+            "Mcp-Protocol-Version must be "
+            f"{MCP_2026_PROTOCOL_VERSION!r} in the stateless MCP profile."
         )
 
     capabilities = meta.get("io.modelcontextprotocol/clientCapabilities")

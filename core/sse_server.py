@@ -35,9 +35,13 @@ from core.rules_engine import RulesEngine
 from core import fleet
 from mcp.types import INVALID_REQUEST, ErrorData, JSONRPCError
 from core.protocol_compat import (
+    MCP_2026_PROTOCOL_VERSION,
+    MCP_2026_SERVER_DISCOVER_METHOD,
     ProtocolProfile,
+    build_server_discover_result,
     resolve_protocol_profile,
     routing_header_issues,
+    stateless_request_issues,
     unsupported_protocol_reason,
 )
 
@@ -685,13 +689,25 @@ async def _validate_mcp_routing_headers(
     if unsupported_reason:
         return False, 501, unsupported_reason, replay_receive
 
-    issues = routing_header_issues(
-        profile=profile,
-        body_method=body_method,
-        body_tool_name=body_name,
-        method_headers=_header_values(scope, "mcp-method"),
-        name_headers=_header_values(scope, "mcp-name"),
-    )
+    method_headers = _header_values(scope, "mcp-method")
+    name_headers = _header_values(scope, "mcp-name")
+    if profile == ProtocolProfile.MCP_2026_07_28_STATELESS.value:
+        if _header_values(scope, "mcp-session-id"):
+            return False, 400, "Mcp-Session-Id is forbidden in the stateless MCP profile.", replay_receive
+        issues = stateless_request_issues(
+            payload,
+            method_headers=method_headers,
+            name_headers=name_headers,
+            protocol_headers=_header_values(scope, "mcp-protocol-version"),
+        )
+    else:
+        issues = routing_header_issues(
+            profile=profile,
+            body_method=body_method,
+            body_tool_name=body_name,
+            method_headers=method_headers,
+            name_headers=name_headers,
+        )
     if issues:
         return False, 400, "MCP routing header validation failed: " + " ".join(issues), replay_receive
 
@@ -802,8 +818,18 @@ class StreamWrapper:
                 try:
                     obj = json.loads(raw_str)
                     from mcp.types import JSONRPCMessage
-                    # Proper MCP SDK serialization
-                    msg_obj = SessionMessage(message=JSONRPCMessage.model_validate(obj))
+
+                    # SDK v1 exposes JSONRPCMessage as a Pydantic model while
+                    # SDK v2 exposes it as a union. Keep the bridge typed in
+                    # both versions instead of falling back to a raw string.
+                    validator = getattr(JSONRPCMessage, "model_validate", None)
+                    if validator is not None:
+                        message = validator(obj)
+                    else:
+                        from pydantic import TypeAdapter
+
+                        message = TypeAdapter(JSONRPCMessage).validate_python(obj)
+                    msg_obj = SessionMessage(message=message)
                     await self.write_stream.send(msg_obj)
                 except Exception:
                     # Fallback for non-JSON or other errors
@@ -842,16 +868,19 @@ class VanguardStreamableSessionManager:
         *,
         enforce_bindings: bool = True,
         request_config: Optional[dict[str, Any]] = None,
+        stateless: bool = False,
     ):
         self.server_command = server_command
         self.config = config
         self.enforce_bindings = enforce_bindings
+        self.stateless = stateless
         self.request_config = request_config or _get_sse_config()
         self._sessions: dict[str, StreamableHTTPServerTransport] = {}
         self._tasks: dict[str, asyncio.Task] = {}
         self._bindings: dict[str, StreamableSessionBinding] = {}
         self._principals: dict[str, Optional[AuthPrincipal]] = {}
         self._lock = asyncio.Lock()
+        self._stateless_tasks: set[asyncio.Task] = set()
         self.max_sessions = int(os.getenv("VANGUARD_MAX_STREAMABLE_SESSIONS", "100"))
 
     async def shutdown(self) -> None:
@@ -875,7 +904,17 @@ class VanguardStreamableSessionManager:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+        stateless_tasks = list(self._stateless_tasks)
+        for task in stateless_tasks:
+            task.cancel()
+        if stateless_tasks:
+            await asyncio.gather(*stateless_tasks, return_exceptions=True)
+
     async def handle_request(self, scope, receive, send) -> None:
+        if self.stateless:
+            await self._handle_stateless_request(scope, receive, send)
+            return
+
         request_headers = _scope_headers(scope)
         requested_session_id = request_headers.get(MCP_SESSION_ID_HEADER.encode("ascii"), b"").decode("utf-8", errors="replace") or None
         method = scope.get("method", "GET").upper()
@@ -909,6 +948,39 @@ class VanguardStreamableSessionManager:
 
         if method == "DELETE" and transport.mcp_session_id:
             await self._drop_session(transport.mcp_session_id)
+
+    async def _handle_stateless_request(self, scope, receive, send) -> None:
+        """Process one request with a fresh transport and proxy lifecycle.
+
+        This path is intentionally not selected by the default runtime yet. It
+        exists as an isolated migration seam so SDK-v2 behavior can be proven
+        without weakening the legacy session boundary.
+        """
+        transport = StreamableHTTPServerTransport(
+            mcp_session_id=None,
+            is_json_response_enabled=True,
+        )
+        ready = asyncio.Event()
+        principal = self._scope_principal(scope)
+        task = asyncio.create_task(self._run_session(transport, ready, principal))
+        self._stateless_tasks.add(task)
+        ready_waiter = asyncio.create_task(ready.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {task, ready_waiter},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if task in done and not ready.is_set():
+                task.result()
+            await transport.handle_request(scope, receive, send)
+        finally:
+            ready_waiter.cancel()
+            await asyncio.gather(ready_waiter, return_exceptions=True)
+            await transport.terminate()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            self._stateless_tasks.discard(task)
 
     async def _create_session(self, scope) -> StreamableHTTPServerTransport:
         async with self._lock:
@@ -1248,6 +1320,40 @@ async def handle_mcp(scope, receive, send, ctx: ServerContext):
         await _send_error(send, status, message)
         return
 
+    if (
+        protocol_profile == ProtocolProfile.MCP_2026_07_28_STATELESS.value
+        and scope.get("method", "").upper() == "POST"
+    ):
+        body, messages, too_large = await _buffer_receive_body(
+            receive, int(ctx.cfg.get("MAX_BODY_BYTES", 2_000_000))
+        )
+        if not too_large:
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                payload = None
+            if isinstance(payload, dict) and payload.get("method") == MCP_2026_SERVER_DISCOVER_METHOD:
+                from core import __version__
+
+                result = build_server_discover_result(
+                    supported_versions=(MCP_2026_PROTOCOL_VERSION,),
+                    capabilities={},
+                    server_info={"name": "McpVanguard", "version": __version__},
+                    instructions="Use this gateway for governed MCP access.",
+                )
+                response = {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [[b"content-type", b"application/json"]],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps(response, separators=(",", ":")).encode("utf-8"),
+                })
+                return
+        receive = _replay_receive(messages, receive)
+
     if ctx.streamable_manager is None:
         await _send_error(send, 500, "Streamable HTTP transport is not initialized.")
         return
@@ -1333,6 +1439,11 @@ async def run_sse_server(
 
     cfg = _get_sse_config()
     profile = getattr(config, "profile", "balanced") if config is not None else "balanced"
+    protocol_profile = getattr(
+        config,
+        "protocol_profile",
+        ProtocolProfile.LEGACY_STATEFUL.value,
+    )
     hosted_notes = _apply_hosted_profile_defaults(cfg, profile)
     ok, startup_error = _validate_hosted_startup(host, cfg, profile)
     if not ok:
@@ -1370,6 +1481,7 @@ async def run_sse_server(
         config=config,
         enforce_bindings=cfg["BIND_STREAMABLE_SESSIONS"],
         request_config=cfg,
+        stateless=protocol_profile == ProtocolProfile.MCP_2026_07_28_STATELESS.value,
     )
     
     ctx = ServerContext(

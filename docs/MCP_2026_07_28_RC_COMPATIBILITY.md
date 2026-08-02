@@ -7,10 +7,10 @@ current OSS compatibility baseline for the `2.1.x` line and separates shipped
 legacy behavior, Phase 0 safeguards, and deliberately unsupported future
 behavior.
 
-The current release line deliberately pins the MCP Python SDK to `<2` because
-the gateway transport integration is still built around the v1 session API.
-The SDK v2 migration is a required prerequisite for the full stateless runtime,
-not an optional dependency refresh.
+The current release line deliberately pins the MCP Python SDK to `<2` for the
+default legacy stateful gateway path. An opt-in stateless transport seam is now
+tested against SDK v2, but the dependency pin remains until the legacy path and
+the full extension surface have completed migration.
 
 ## Status Matrix
 
@@ -20,18 +20,20 @@ not an optional dependency refresh.
 | SSE / HTTP+SSE gateway | Implemented for existing clients | Legacy transport; not a claim of new-spec transport compliance |
 | Stateful Streamable HTTP | Implemented | Uses `Mcp-Session-Id` and session binding |
 | `legacy_stateful` protocol profile | Implemented and default | Preserves the current 2.1.x behavior |
-| `mcp_2026_07_28_stateless` protocol profile | Reserved and fail-closed | No stateless runtime is implemented in this release |
-| `Mcp-Method` / `Mcp-Name` | Phase 0 partial | Conflicts and body/header mismatches are rejected; required-header stateless operation is not shipped |
+| `mcp_2026_07_28_stateless` protocol profile | Opt-in transport slice | Ordinary stateless JSON-RPC and local `server/discover` are implemented and tested; Tasks, subscriptions, MRTR, and other extensions remain fail-closed |
+| `Mcp-Method` / `Mcp-Name` | Opt-in stateless enforcement | Conflicts and body/header mismatches are rejected; required routing metadata is enforced in the stateless profile |
 | Request `_meta` | Phase 0 security coverage | L0/L1 inspect it; full RC identity, trace, and capability semantics are not shipped |
 | 2026-only methods | Fail closed | Unsupported methods are rejected before upstream forwarding |
-| `server/discover`, Tasks, MRTR, `subscriptions/listen` | Unsupported | No silent forwarding or compatibility claim |
+| `server/discover` | Opt-in local response | Gateway identity is returned; upstream capability inspection/caching is deferred |
+| Tasks, MRTR, `subscriptions/listen` | Unsupported | No silent forwarding or compatibility claim |
 | `ttlMs`, `cacheScope`, trace context | Unsupported | No cache or trace propagation contract is shipped |
 | JSON Schema 2020-12 | Partial legacy validation only | Full composition, reference, resource, and timeout coverage is deferred |
 
 The protocol profile is selected with `VANGUARD_MCP_PROTOCOL_PROFILE` or the
 CLI option `--protocol-profile`. The default is `legacy_stateful`. Selecting
-`mcp_2026_07_28_stateless` is intentionally fail-closed rather than silently
-falling back to stateful behavior.
+`mcp_2026_07_28_stateless` selects a fresh transport/proxy lifecycle per
+request, forbids `Mcp-Session-Id`, requires the 2026 request metadata and
+routing headers, and does not fall back to the legacy session manager.
 
 ## Current Release Posture
 
@@ -56,11 +58,11 @@ The specification moves more protocol/client context into request `_meta`. McpVa
 
 This prevents `_meta` from becoming a bypass lane for encoded paths, scorer-targeting instructions, metadata poisoning, or dangerous values that later influence execution.
 
-## Planned `v2.2.x` Compatibility Track
+## Remaining `v2.2.x` Compatibility Track
 
 Full support for the 2026-07-28 specification belongs in a later compatibility release. Planned areas:
 
-- stateless Streamable HTTP request handling
+- complete SDK-v2 migration of the legacy stateful path and dependency line
 - derived identity/session keys for stateless requests
 - `server/discover` inspection and capability caching
 - cache-aware capability and metadata drift logic for `ttlMs` and `cacheScope`
@@ -69,6 +71,11 @@ Full support for the 2026-07-28 specification belongs in a later compatibility r
 - MCP Apps inspection for server-rendered UI templates and UI-initiated JSON-RPC actions
 - JSON Schema 2020-12 hardening for `$ref`, `$defs`, `oneOf`, `anyOf`, `allOf`, conditionals, schema depth, and validation time
 - conformance and benchmark coverage for the final specification
+
+The stateless transport slice is deliberately not a full-spec claim. It is a
+release-gated implementation seam: the default remains `legacy_stateful`, and
+the stateless profile must remain covered by the SDK-v2 HTTP test matrix before
+any deployment enables it.
 
 ## Safe Public Wording
 

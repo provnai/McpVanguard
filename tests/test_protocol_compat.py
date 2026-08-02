@@ -65,12 +65,19 @@ def test_unsupported_2026_method_is_fail_closed(method):
     assert response["error"]["data"]["rule"] == "VANGUARD-MCP-PROTOCOL-UNSUPPORTED"
 
 
-def test_reserved_stateless_profile_never_falls_back_to_legacy():
+def test_stateless_profile_allows_runtime_methods_without_legacy_fallback():
     reason = unsupported_protocol_reason(
         ProtocolProfile.MCP_2026_07_28_STATELESS.value,
         "tools/call",
     )
-    assert reason and "not implemented" in reason
+    assert reason is None
+
+
+def test_stateless_profile_handles_server_discover_at_the_boundary():
+    assert unsupported_protocol_reason(
+        ProtocolProfile.MCP_2026_07_28_STATELESS.value,
+        "server/discover",
+    ) is None
 
 
 def test_stateless_request_requires_protocol_metadata_and_headers():
@@ -107,8 +114,27 @@ def test_stateless_request_accepts_required_metadata_and_headers():
         },
         method_headers=("tools/call",),
         name_headers=("read",),
+        protocol_headers=(MCP_2026_PROTOCOL_VERSION,),
     )
     assert issues == []
+
+
+def test_stateless_request_rejects_missing_protocol_header():
+    issues = stateless_request_issues(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": MCP_2026_PROTOCOL_VERSION,
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                },
+            },
+        },
+        method_headers=("tools/list",),
+    )
+    assert any("Mcp-Protocol-Version" in issue for issue in issues)
 
 
 def test_server_discover_result_is_complete_and_versioned():
