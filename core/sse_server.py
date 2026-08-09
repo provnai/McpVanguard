@@ -1398,22 +1398,42 @@ async def handle_mcp(scope, receive, send, ctx: ServerContext):
 
 async def health_check_handler(request):
     """Return deep health data through Starlette's request endpoint contract."""
-    
+
     from core.behavioral import check_redis_health
     from core.semantic import check_semantic_health
     from core import __version__
-    redis_ok = await check_redis_health()
-    semantic_ok = await check_semantic_health()
-    
+
+    # The effective ProxyConfig is attached by run_sse_server. Direct handler
+    # tests and third-party ASGI callers may omit it, so retain the historical
+    # enabled-by-default health behavior as a compatibility fallback.
+    app = request.scope.get("app")
+    runtime_config = getattr(getattr(app, "state", None), "vanguard_config", None)
+    semantic_enabled = getattr(runtime_config, "semantic_enabled", True)
+    behavioral_enabled = getattr(runtime_config, "behavioral_enabled", True)
+
+    redis_ok = await check_redis_health() if behavioral_enabled else True
+    semantic_ok = await check_semantic_health() if semantic_enabled else True
+
     status = "ok" if redis_ok and semantic_ok else "degraded"
-    
+
     health_data = {
         "status": status,
         "version": __version__,
         "layers": {
-            "l1_rules": "ok", 
-            "l2_semantic": "ok" if semantic_ok else "unreachable",
-            "l3_behavioral": "ok" if redis_ok else "redis_disconnected"
+            "l1_rules": "ok",
+            "l2_semantic": (
+                "disabled" if not semantic_enabled else
+                "ok" if semantic_ok else "unreachable"
+            ),
+            "l3_behavioral": (
+                "disabled" if not behavioral_enabled else
+                "ok" if redis_ok else "redis_disconnected"
+            ),
+        },
+        "layer_enabled": {
+            "l1_rules": True,
+            "l2_semantic": semantic_enabled,
+            "l3_behavioral": behavioral_enabled,
         },
         "timestamp": time.time()
     }
@@ -1520,6 +1540,7 @@ async def run_sse_server(
             Route("/health", endpoint=health_check_handler, methods=["GET"]),
         ]
     )
+    app.state.vanguard_config = config
 
     import uvicorn
     config_uv = uvicorn.Config(

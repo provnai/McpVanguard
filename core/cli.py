@@ -83,6 +83,22 @@ def _resolve_option_or_env(option_value: str, option_default: str, env_name: str
     return option_value
 
 
+def _apply_explicit_layer_flags(
+    semantic: Optional[bool],
+    behavioral: Optional[bool],
+) -> None:
+    """Make explicit CLI layer flags visible during profile resolution.
+
+    ``ProxyConfig`` resolves profile defaults from the environment. Applying
+    explicit values before constructing it ensures ``--no-semantic`` and
+    ``--no-behavioral`` override a profile that otherwise enables a layer.
+    """
+    if semantic is not None:
+        os.environ["VANGUARD_SEMANTIC_ENABLED"] = "true" if semantic else "false"
+    if behavioral is not None:
+        os.environ["VANGUARD_BEHAVIORAL_ENABLED"] = "true" if behavioral else "false"
+
+
 def _validate_repo_slug(repo: str) -> str:
     if not REPO_SLUG_RE.fullmatch(repo):
         raise ValueError("Repository must be a GitHub slug like 'owner/repo'.")
@@ -255,6 +271,7 @@ def start(
         os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
     if protocol_profile is not None:
         os.environ["VANGUARD_MCP_PROTOCOL_PROFILE"] = protocol_profile.strip().lower()
+    _apply_explicit_layer_flags(semantic, behavioral)
 
     # Load config from options + environment
     resolved_rules_dir = _resolve_option_or_env(rules_dir, "rules", "VANGUARD_RULES_DIR")
@@ -398,6 +415,7 @@ def sse(
         os.environ["VANGUARD_PROFILE"] = profile.strip().lower()
     if protocol_profile is not None:
         os.environ["VANGUARD_MCP_PROTOCOL_PROFILE"] = protocol_profile.strip().lower()
+    _apply_explicit_layer_flags(semantic, behavioral)
 
     # Load config
     resolved_rules_dir = _resolve_option_or_env(rules_dir, "rules", "VANGUARD_RULES_DIR")

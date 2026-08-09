@@ -205,6 +205,64 @@ def test_vanguard_start_semantic_flag_does_not_crash(monkeypatch):
     mock_run_proxy.assert_called_once()
 
 
+def test_vanguard_start_explicit_layer_disables_override_profile(monkeypatch):
+    monkeypatch.delenv("VANGUARD_SEMANTIC_ENABLED", raising=False)
+    monkeypatch.delenv("VANGUARD_BEHAVIORAL_ENABLED", raising=False)
+    monkeypatch.setenv("VANGUARD_PROFILE", "strict")
+
+    with patch("core.cli.run_proxy") as mock_run_proxy:
+        result = runner.invoke(
+            app,
+            [
+                "start",
+                "--server",
+                "echo hello",
+                "--no-semantic",
+                "--no-behavioral",
+            ],
+        )
+
+    assert result.exit_code == 0
+    config = mock_run_proxy.call_args.kwargs["config"]
+    assert config.semantic_enabled is False
+    assert config.behavioral_enabled is False
+    assert os.environ["VANGUARD_SEMANTIC_ENABLED"] == "false"
+    assert os.environ["VANGUARD_BEHAVIORAL_ENABLED"] == "false"
+
+
+def test_vanguard_sse_explicit_layer_disables_override_profile(monkeypatch):
+    monkeypatch.delenv("VANGUARD_SEMANTIC_ENABLED", raising=False)
+    monkeypatch.delenv("VANGUARD_BEHAVIORAL_ENABLED", raising=False)
+    monkeypatch.setenv("VANGUARD_PROFILE", "strict")
+
+    async def fake_run_sse_server(*, config, **kwargs):
+        return config
+
+    with patch("asyncio.run") as mock_asyncio_run, patch(
+        "core.sse_server.run_sse_server", new=fake_run_sse_server
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "sse",
+                "--server",
+                "echo hello",
+                "--no-semantic",
+                "--no-behavioral",
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_asyncio_run.assert_called_once()
+    coroutine = mock_asyncio_run.call_args.args[0]
+    config = coroutine.cr_frame.f_locals["config"]
+    assert config.semantic_enabled is False
+    assert config.behavioral_enabled is False
+    assert os.environ["VANGUARD_SEMANTIC_ENABLED"] == "false"
+    assert os.environ["VANGUARD_BEHAVIORAL_ENABLED"] == "false"
+    coroutine.close()
+
+
 def test_vanguard_start_management_tools_flag_enables_surface():
     with patch("core.cli.run_proxy") as mock_run_proxy:
         result = runner.invoke(app, ["start", "--server", "echo hello", "--management-tools"])
