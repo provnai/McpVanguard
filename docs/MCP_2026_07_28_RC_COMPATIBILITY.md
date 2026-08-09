@@ -3,9 +3,9 @@
 The MCP 2026-07-28 specification introduces a large protocol update: a stateless protocol core, routing headers, heavier use of request `_meta`, `server/discover`, first-class extensions, Tasks, MCP Apps, authorization hardening, cache hints, trace context, and full JSON Schema 2020-12 for tool schemas.
 
 McpVanguard does not claim full MCP 2026-07-28 support. This document is the
-current OSS compatibility baseline for the `2.1.x` line and separates shipped
-legacy behavior, Phase 0 safeguards, and deliberately unsupported future
-behavior.
+current OSS compatibility baseline for the `2.2.x` line and separates shipped
+legacy behavior, the opt-in stateless transport baseline, and deliberately
+unsupported future behavior.
 
 The current release line uses the MCP Python SDK v2 for both the default legacy
 stateful gateway path and the opt-in stateless transport path. The legacy
@@ -19,8 +19,8 @@ itself enable the stateless profile.
 | stdio gateway | Implemented | Existing MCP deployments; legacy stateful behavior |
 | SSE / HTTP+SSE gateway | Implemented for existing clients | Legacy transport; not a claim of new-spec transport compliance |
 | Stateful Streamable HTTP | Implemented | Uses `Mcp-Session-Id` and session binding |
-| `legacy_stateful` protocol profile | Implemented and default | Preserves the current 2.1.x behavior |
-| `mcp_2026_07_28_stateless` protocol profile | Opt-in transport slice | Ordinary stateless JSON-RPC and local `server/discover` are implemented and tested; Tasks, subscriptions, MRTR, and other extensions remain fail-closed |
+| `legacy_stateful` protocol profile | Implemented and default | Preserves the established stateful behavior |
+| `mcp_2026_07_28_stateless` protocol profile | Implemented opt-in baseline | Ordinary stateless JSON-RPC, `tools/call`, and local `server/discover` are implemented and tested; Tasks, subscriptions, MRTR, and other extensions remain fail-closed |
 | `Mcp-Method` / `Mcp-Name` | Opt-in stateless enforcement | Conflicts and body/header mismatches are rejected; required routing metadata is enforced in the stateless profile |
 | Request `_meta` | Stateless trace and security coverage | L0/L1 inspect it; protocol identity is validated, and W3C trace context is carried to redacted audit fields; full RC capability semantics are not shipped |
 | 2026-only methods | Fail closed | Unsupported methods are rejected before upstream forwarding |
@@ -58,7 +58,7 @@ The specification moves more protocol/client context into request `_meta`. McpVa
 
 This prevents `_meta` from becoming a bypass lane for encoded paths, scorer-targeting instructions, metadata poisoning, or dangerous values that later influence execution.
 
-## Remaining `v2.2.x` Compatibility Track
+## Remaining Full-Support Compatibility Track
 
 Full support for the 2026-07-28 specification belongs in a later compatibility release. Planned areas:
 
@@ -71,7 +71,7 @@ Full support for the 2026-07-28 specification belongs in a later compatibility r
 - call-time JSON Schema validation and richer schema diagnostics beyond bounded metadata inspection, including safe local `$ref`/`$defs` handling, composition semantics, and validation-time limits
 - conformance and benchmark coverage for the final specification
 
-The stateless transport slice is deliberately not a full-spec claim. It is a
+The stateless baseline is deliberately not a full-spec claim. It is an opt-in
 release-gated implementation seam: the default remains `legacy_stateful`, and
 the stateless profile must remain covered by the SDK-v2 HTTP test matrix before
 any deployment enables it.
@@ -81,7 +81,7 @@ any deployment enables it.
 Use:
 
 ```text
-McpVanguard provides a documented MCP 2026-07-28 compatibility baseline and includes additive routing-header and `_meta` inspection safeguards in the `2.1.x` line.
+McpVanguard provides a documented MCP 2026-07-28 compatibility baseline in the `2.2.x` line, including an opt-in stateless transport profile and additive routing-header and `_meta` inspection safeguards.
 ```
 
 Avoid:

@@ -102,7 +102,7 @@ If you operate a hosted template or shared gateway, set `VANGUARD_ALLOWED_SERVER
 
 For private-network MCP servers reached through Anthropic MCP tunnels, the recommended placement is tunnel -> McpVanguard -> private MCP server. Tunnels reduce network exposure. McpVanguard enforces the execution boundary.
 
-McpVanguard is also tracking the MCP 2026-07-28 release candidate. The `2.1.x` line includes additive `Mcp-Method` / `Mcp-Name` consistency checks when those headers are present, plus explicit `_meta` inspection coverage. See [docs/MCP_2026_07_28_RC_COMPATIBILITY.md](docs/MCP_2026_07_28_RC_COMPATIBILITY.md).
+McpVanguard provides a documented MCP 2026-07-28 compatibility baseline in the `2.2.x` line. The baseline includes an opt-in stateless transport profile, additive `Mcp-Method` / `Mcp-Name` consistency checks, and explicit `_meta` inspection coverage. It is not a claim of full Tasks, MCP Apps, subscriptions, MRTR, or final-spec conformance. See [docs/MCP_2026_07_28_RC_COMPATIBILITY.md](docs/MCP_2026_07_28_RC_COMPATIBILITY.md).
 
 Deploy on Railway:
 
@@ -235,7 +235,7 @@ This should be described as server integrity, baseline verification, and trust v
 
 ## Project Status
 
-- `2.1.x` is the current runtime hardening patch line for layered enforcement
+- `2.2.x` is the current runtime hardening and MCP 2026-07-28 compatibility-baseline line
 - layered enforcement path (`L0 -> L1 -> L1.5 -> L2 -> L3 -> Policy Composer`) is implemented and covered by local and CI verification
 - product profiles (`monitor` / `balanced` / `strict`) are the supported deployment modes for this release line
 - broader research-only features (GPU attestation, hardware-rooted provenance, zero-FP claims) are intentionally outside the core OSS release scope

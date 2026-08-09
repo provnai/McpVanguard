@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-09 (MCP 2026-07-28 Stateless Compatibility Baseline)
+
 ### MCP 2026-07-28 Compatibility
+
+- Corrected the hosted `/health` route to use Starlette's request-handler contract; degraded dependency state now returns the documented JSON `503` response instead of an ASGI signature error.
+- Added an end-to-end stateless `tools/call` regression proving required routing metadata, no session header, upstream forwarding, and normalized response handling.
 
 - Added an opt-in stateless Streamable HTTP transport profile with a fresh proxy lifecycle per request, no `Mcp-Session-Id`, and required 2026 protocol/routing metadata.
 - Added a local `server/discover` response with `resultType=complete` and the standard server identity metadata envelope.
@@ -21,9 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verification
 
-- Pinned SDK suite: `560 passed, 3 skipped`.
-- Focused protocol/transport suite: `27 passed, 1 skipped` under the pinned SDK.
-- The same focused suite: `28 passed` in an isolated SDK-v2 environment, including real HTTP transport coverage.
+- Full pinned Linux/SDK-v2 suite: `582 passed`.
+- Focused Windows health/stateless suite: `4 passed, 2 skipped` because that local environment does not have SDK v2 installed.
+- Focused pinned Linux protocol/transport suite: `99 passed` with stateless HTTP transport coverage executing.
+- Package version and runtime `core.__version__` are `2.2.0`; no hosted deployment or default-profile change is included in this release batch.
 
 ## [2.1.3] - 2026-06-19 (Replay-Informed Boundary Hardening Patch)
 

@@ -1396,15 +1396,12 @@ async def handle_mcp(scope, receive, send, ctx: ServerContext):
                 _active_connections[client_ip] -= 1
                 _total_active_connections -= 1
 
-async def health_check_handler(scope, receive, send):
-    """Deep health check for Railway/Cloud readiness."""
-    assert scope["type"] == "http"
+async def health_check_handler(request):
+    """Return deep health data through Starlette's request endpoint contract."""
     
     from core.behavioral import check_redis_health
     from core.semantic import check_semantic_health
     from core import __version__
-    import starlette.responses
-    
     redis_ok = await check_redis_health()
     semantic_ok = await check_semantic_health()
     
@@ -1421,12 +1418,12 @@ async def health_check_handler(scope, receive, send):
         "timestamp": time.time()
     }
     
-    response = starlette.responses.Response(
-        json.dumps(health_data), 
+    from starlette.responses import JSONResponse
+
+    return JSONResponse(
+        health_data,
         status_code=200 if status == "ok" else 503,
-        media_type="application/json"
     )
-    await response(scope, receive, send)
 
 async def run_sse_server(
     server_command: list[str],

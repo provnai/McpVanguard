@@ -38,6 +38,17 @@ def _server_command() -> list[str]:
                 }
                 sys.stdout.write(json.dumps(response) + "\\n")
                 sys.stdout.flush()
+            elif message.get("method") == "tools/call":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": message.get("id"),
+                    "result": {
+                        "content": [{"type": "text", "text": "phase1-ok"}],
+                        "isError": False,
+                    },
+                }
+                sys.stdout.write(json.dumps(response) + "\\n")
+                sys.stdout.flush()
         """
     )
     return [sys.executable, "-u", "-c", script]
@@ -270,6 +281,70 @@ async def test_stateless_profile_works_through_http_with_sdk_v2(monkeypatch):
         assert payload["result"]["resultType"] == "complete"
         assert payload["result"]["ttlMs"] == 0
         assert payload["result"]["cacheScope"] == "private"
+    finally:
+        server_task.cancel()
+        await asyncio.gather(server_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _modern_sdk_available(), reason="requires MCP SDK v2")
+async def test_stateless_profile_forwards_tool_call_without_session(monkeypatch):
+    monkeypatch.setenv("VANGUARD_SSE_RATE_LIMIT", "100.0")
+    from core import sse_server
+
+    sse_server._rate_limiters.clear()
+    sse_server._active_connections.clear()
+    sse_server._total_active_connections = 0
+
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    config = ProxyConfig()
+    config.semantic_enabled = False
+    config.protocol_profile = "mcp_2026_07_28_stateless"
+    server_task = asyncio.create_task(
+        run_sse_server(
+            server_command=_server_command(),
+            host="127.0.0.1",
+            port=port,
+            config=config,
+        )
+    )
+    await asyncio.sleep(1.5)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                f"http://127.0.0.1:{port}/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "sdk-v2-tool-call",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "read_only_echo",
+                        "arguments": {},
+                        "_meta": {
+                            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                            "io.modelcontextprotocol/clientCapabilities": {},
+                        },
+                    },
+                },
+                headers={
+                    "Accept": "application/json",
+                    "Mcp-Protocol-Version": "2026-07-28",
+                    "Mcp-Method": "tools/call",
+                    "Mcp-Name": "read_only_echo",
+                },
+            )
+
+        assert response.status_code == 200
+        assert "mcp-session-id" not in response.headers
+        payload = response.json()
+        assert payload["id"] == "sdk-v2-tool-call"
+        assert payload["result"]["content"][0]["text"] == "phase1-ok"
+        assert payload["result"]["isError"] is False
     finally:
         server_task.cancel()
         await asyncio.gather(server_task, return_exceptions=True)
