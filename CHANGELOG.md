@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-08-10 (Layer Configuration and Health Contract Patch)
+
+### Runtime Fixes
+
+- Fixed explicit `--no-semantic`, `--no-behavioral`, and related layer flags so
+  they reach the effective session configuration instead of being overridden by
+  profile defaults.
+- Made `/health` layer-aware: disabled optional layers are reported as disabled
+  and are not treated as unreachable dependencies.
+
+### Verification
+
+- Full local suite: `582 passed, 3 skipped`.
+- Fresh legacy SSE and opt-in stateless container acceptance passed with a
+  disposable protocol-complete upstream.
+- No default-profile change, hosted deployment, or external service change is
+  included in this patch release.
+
 ## [2.2.0] - 2026-08-09 (MCP 2026-07-28 Stateless Compatibility Baseline)
 
 ### MCP 2026-07-28 Compatibility

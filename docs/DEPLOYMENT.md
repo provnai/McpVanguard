@@ -1,7 +1,7 @@
 # McpVanguard - Deployment Guide
-**Release target**: `2.1.x` runtime hardening patch line.
+**Release target**: `2.2.x` runtime hardening patch line.
 
-After the GitHub release and PyPI publication are complete, this document applies to the published `2.1.x` line.
+After the GitHub release and PyPI publication are complete, this document applies to the published `2.2.x` line.
 
 McpVanguard is a security gateway that sits between your AI agents (LangChain, CrewAI, Claude Desktop) and your MCP servers.
 
@@ -180,7 +180,7 @@ Current Redis-backed L3 state is suitable for shared behavioral visibility, but 
 
 For private-network MCP servers exposed through Anthropic MCP tunnels, route the tunnel to McpVanguard first and then forward to the private upstream MCP server. Tunnels reduce network exposure. McpVanguard enforces the execution boundary. See [ANTHROPIC_MCP_TUNNELS.md](ANTHROPIC_MCP_TUNNELS.md).
 
-McpVanguard is tracking the MCP 2026-07-28 release candidate. The current `2.1.x` line includes additive routing-header consistency checks when `Mcp-Method` / `Mcp-Name` are present and treats request `_meta` as security-relevant input. See [MCP_2026_07_28_RC_COMPATIBILITY.md](MCP_2026_07_28_RC_COMPATIBILITY.md).
+McpVanguard is tracking the MCP 2026-07-28 release candidate. The current `2.2.x` line includes additive routing-header consistency checks when `Mcp-Method` / `Mcp-Name` are present and treats request `_meta` as security-relevant input. See [MCP_2026_07_28_RC_COMPATIBILITY.md](MCP_2026_07_28_RC_COMPATIBILITY.md).
 
 ## 2. L2 Semantic Scalability (Cloud LLM Integration)
 
