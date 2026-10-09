@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-10-09 (Installed-Package Verification Patch)
+
+### Fixes
+
+- Preserve valid JSON in `gpu-harden` and `gpu-thresholds --json-output` by
+  bypassing terminal wrapping and markup processing.
+- Migrate the bundled synthetic demo to the declared MCP SDK v2 callback API
+  and model field names, with explicit tool input-schema validation.
+- Align Python, Node bridge, extension manifest, and lockfile package versions.
+
+### Verification
+
+- Add `python -m core.demo_verify` for credential-free, raw-versus-guarded stdio
+  checks against an in-memory upstream, with temporary demo-only safe zones.
+- Add JSON-width/markup regressions and SDK demo construction, schema, and
+  handshake checks. Verification checks remain active under Python optimization.
+- Exercise installed wheels outside the source checkout in CI, including JSON
+  parsing and MCP SDK lower-bound/current-resolution demo checks.
+- No default policy, hosted deployment, authority activation, or production
+  certification is included in this maintenance release.
+
 ## [2.2.1] - 2026-08-10 (Layer Configuration and Health Contract Patch)
 
 ### Runtime Fixes

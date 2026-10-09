@@ -49,6 +49,13 @@ Use one raw path and one guarded path against the same MCP server.
 
 This gives you a fast signal that policy is active and enforcement behaves as expected.
 
+For a credential-free, synthetic check in 2.2.2, run `python -m core.demo_verify`.
+It checks a benign read and two blocked calls against the bundled in-memory
+upstream, using explicit demo-only safe zones. See
+[self-service evaluation](docs/SELF_SERVICE_EVALUATION.md) for installation,
+expected output, and the separate real-workflow evaluation. Earlier releases do
+not include this verifier.
+
 ## Use Cases
 
 - protect local desktop or developer-machine MCP servers without rewriting them

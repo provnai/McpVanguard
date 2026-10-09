@@ -1450,7 +1450,7 @@ def gpu_harden(
     summary = report["summary"]
     quality = report["quality"]
     if json_output:
-        console.print(json.dumps({
+        typer.echo(json.dumps({
             "summary": summary,
             "quality": quality,
             "breakdowns": report["breakdowns"],
@@ -1536,7 +1536,7 @@ def gpu_thresholds(
 
     report = threshold_sweep_report("tests/benchmarks/gpu_semantic_threshold_cases.yaml")
     if json_output:
-        console.print(json.dumps(report, indent=2, sort_keys=True, default=lambda o: o.__dict__))
+        typer.echo(json.dumps(report, indent=2, sort_keys=True, default=lambda o: o.__dict__))
         return
 
     console.print(Panel.fit(
