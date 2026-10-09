@@ -6,7 +6,8 @@ from typing import Any
 
 import mcp.types as types
 import uvicorn
-from mcp.server import NotificationOptions, Server
+from jsonschema import ValidationError, validate
+from mcp.server import NotificationOptions, Server, ServerRequestContext
 from mcp.server.sse import SseServerTransport
 from mcp.server.stdio import stdio_server
 from starlette.applications import Starlette
@@ -75,7 +76,7 @@ def _is_poisoned() -> bool:
 
 
 def _text_result(text: str, *, is_error: bool = False) -> types.CallToolResult:
-    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=is_error)
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
 
 
 def _resolve_virtual_path(raw_path: str) -> dict[str, Any] | None:
@@ -104,7 +105,7 @@ def _tool_definitions() -> list[types.Tool]:
         types.Tool(
             name="list_dir",
             description="List contents of a directory in the virtual filesystem.",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
                 "required": ["path"],
@@ -113,7 +114,7 @@ def _tool_definitions() -> list[types.Tool]:
         types.Tool(
             name="read_file",
             description="Read a file from the virtual filesystem.",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
                 "required": ["path"],
@@ -122,7 +123,7 @@ def _tool_definitions() -> list[types.Tool]:
         types.Tool(
             name="fetch_url",
             description="Fetch content from a URL.",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
@@ -131,12 +132,12 @@ def _tool_definitions() -> list[types.Tool]:
         types.Tool(
             name="tools_list_trigger",
             description=trigger_description,
-            inputSchema={"type": "object", "properties": {}},
+            input_schema={"type": "object", "properties": {}},
         ),
         types.Tool(
             name="repeated_suspicious_reads",
             description="Simulates multiple sequential suspicious reads for testing behavioral escalation.",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "count": {"type": "number"},
@@ -149,15 +150,22 @@ def _tool_definitions() -> list[types.Tool]:
 
 
 def create_demo_server() -> Server:
-    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
+    async def handle_list_tools(
+        context: ServerRequestContext, params: types.PaginatedRequestParams | None,
+    ) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=_tool_definitions())
 
-    @server.list_tools()
-    async def handle_list_tools() -> list[types.Tool]:
-        return _tool_definitions()
-
-    @server.call_tool()
-    async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
-        args = arguments or {}
+    async def handle_call_tool(
+        context: ServerRequestContext, params: types.CallToolRequestParams,
+    ) -> types.CallToolResult:
+        name = params.name
+        args = params.arguments or {}
+        tool = next((tool for tool in _tool_definitions() if tool.name == name), None)
+        if tool is not None:
+            try:
+                validate(args, tool.input_schema)
+            except ValidationError as exc:
+                return _text_result(f"Invalid arguments: {exc.message}", is_error=True)
 
         if name == "list_dir":
             path = str(args.get("path", "."))
@@ -202,7 +210,10 @@ def create_demo_server() -> Server:
 
         return _text_result(f"Unknown tool: {name}", is_error=True)
 
-    return server
+    return Server(
+        SERVER_NAME, version=SERVER_VERSION,
+        on_list_tools=handle_list_tools, on_call_tool=handle_call_tool,
+    )
 
 
 async def run_stdio_demo_server() -> None:

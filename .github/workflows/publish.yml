@@ -40,7 +40,19 @@ jobs:
           . .release-smoke-venv/bin/activate
           pip install --upgrade pip
           pip install dist/*.whl
+          cd "$(mktemp -d)"
           vanguard --help
+          vanguard benchmark-run --json-output > benchmark.json
+          vanguard gpu-harden --json-output > hardening.json
+          vanguard gpu-thresholds --json-output > thresholds.json
+          python -c "import json; [json.load(open(p)) for p in ('benchmark.json', 'hardening.json', 'thresholds.json')]"
+          python -m core.demo_verify > demo.json
+          python -c "import json; r=json.load(open('demo.json')); assert all(s['passed'] for s in r['sessions'])"
+          python -O -m core.demo_verify > demo-optimized.json
+          python -c "import json; r=json.load(open('demo-optimized.json')); assert all(s['passed'] for s in r['sessions'])"
+          pip install "mcp==2.0.0"
+          python -m core.demo_verify > demo-sdk-floor.json
+          python -c "import json; r=json.load(open('demo-sdk-floor.json')); assert all(s['passed'] for s in r['sessions'])"
 
       - name: Store distributions
         uses: actions/upload-artifact@v7
