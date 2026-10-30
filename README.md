@@ -56,6 +56,17 @@ upstream, using explicit demo-only safe zones. See
 expected output, and the separate real-workflow evaluation. Earlier releases do
 not include this verifier.
 
+### Filesystem Evaluation Kit (Source Only)
+
+The separate [filesystem evaluation kit](docs/FILESYSTEM_WALKTHROUGH.md) compares
+native filesystem roots with gateway policy against the official server 2.1.0.
+It targets Windows, CPython 3.12.14, Node 24.22.1, npm 10.9.4, and McpVanguard 2.2.2.
+Its external stdio observations and synthetic fixture hashes do not instrument
+the official handler or prove arbitrary downstream non-effects. Windows junction
+and TOCTOU limitations remain. This source integration is not a runtime/PyPI
+release. It passed internal tests and clean-extraction runs on the documented
+Windows toolchains; it has not received an independent practitioner review.
+
 ## Use Cases
 
 - protect local desktop or developer-machine MCP servers without rewriting them

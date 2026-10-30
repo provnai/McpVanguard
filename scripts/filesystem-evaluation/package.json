@@ -1,0 +1,11 @@
+{
+  "name": "mcpvanguard-filesystem-evaluation",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "2.1.0"
+  }
+}
