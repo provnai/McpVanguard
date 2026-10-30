@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Filesystem Evaluation Kit (Source Only)
+
+- Add a separately labeled Windows evaluation kit comparing broad native roots,
+  narrow native roots, and gateway policy against the unchanged official
+  filesystem server 2.1.0 and installed McpVanguard 2.2.2.
+- Pin the integration environment to CPython 3.12.14, Node 24.22.1 and npm 10.9.4;
+  include hash-locked Python and npm dependencies and a disposable launcher.
+- Add external stdio probe evidence, bounded harness I/O, initialization checks,
+  and focused failure regressions. Document junction/TOCTOU and evidence limits.
+- Record internal verification separately from independent validation, which has
+  not been performed. This source addition changes neither the product
+  runtime/version nor the PyPI release.
+
 ## [2.2.2] - 2026-10-09 (Installed-Package Verification Patch)
 
 ### Fixes
