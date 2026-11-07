@@ -1,0 +1,106 @@
+name: Filesystem Permission Regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/mcpvanguard-filesystem-ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: filesystem-evaluation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  filesystem-evaluation:
+    name: Windows filesystem permission regression
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up CPython
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12.14"
+          architecture: x64
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
+
+      - name: Run pinned filesystem evaluation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportDir = Join-Path $env:RUNNER_TEMP 'mcpvanguard-filesystem-evaluation'
+          New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+          $reportPath = Join-Path $reportDir 'report.json'
+          $logPath = Join-Path $reportDir 'run.log'
+          $transcriptStarted = $false
+          $exitCode = 0
+
+          try {
+            Start-Transcript -Path $logPath -Force | Out-Null
+            $transcriptStarted = $true
+
+            $installRoot = Join-Path $env:RUNNER_TEMP 'mcpvanguard-npm'
+            New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+            npm.cmd install --prefix $installRoot --no-save --ignore-scripts --no-audit --no-fund --registry https://registry.npmjs.org/ npm@10.9.4
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not install npm 10.9.4 (exit $LASTEXITCODE)"
+            }
+            $npmRoot = Join-Path $installRoot 'node_modules\npm'
+            $npmCli = Join-Path $npmRoot 'bin\npm-cli.js'
+            $metadata = Get-Content -LiteralPath (Join-Path $npmRoot 'package.json') -Raw | ConvertFrom-Json
+            if ($metadata.name -ne 'npm' -or $metadata.version -ne '10.9.4' -or -not (Test-Path -LiteralPath $npmCli -PathType Leaf)) {
+              throw 'The installed npm CLI does not match the required 10.9.4 package.'
+            }
+
+            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+            $nodeExe = (Get-Command node.exe -ErrorAction Stop).Source
+            $reportLines = & .\scripts\run_filesystem_walkthrough.ps1 `
+              -PythonExe $pythonExe `
+              -NodeExe $nodeExe `
+              -NpmCli $npmCli
+            $reportJson = $reportLines -join [Environment]::NewLine
+            $report = $reportJson | ConvertFrom-Json
+            Set-Content -LiteralPath $reportPath -Value $reportJson -Encoding utf8
+            if ($report.passed -ne $true) {
+              throw 'The filesystem evaluation report did not record passed: true.'
+            }
+          }
+          catch {
+            Write-Host "Filesystem evaluation failed: $($_.Exception.Message)"
+            if (-not (Test-Path -LiteralPath $reportPath)) {
+              $failureReport = [ordered]@{
+                passed = $false
+                error = $_.Exception.Message
+              } | ConvertTo-Json -Compress
+              Set-Content -LiteralPath $reportPath -Value $failureReport -Encoding utf8
+            }
+            $exitCode = 1
+          }
+          finally {
+            if ($transcriptStarted) {
+              Stop-Transcript | Out-Null
+            }
+          }
+
+          exit $exitCode
+
+      - name: Upload evaluation report and log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: filesystem-evaluation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mcpvanguard-filesystem-evaluation/
+          if-no-files-found: warn
+          retention-days: 14
