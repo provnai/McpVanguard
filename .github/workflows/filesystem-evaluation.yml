@@ -62,6 +62,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Avoid profile-path 8.3 aliases when policy prefixes and Node request paths are compared.
+          $env:TEMP = $env:RUNNER_TEMP
+          $env:TMP = $env:RUNNER_TEMP
           $reportDir = Join-Path $env:RUNNER_TEMP 'mcpvanguard-filesystem-evaluation'
           New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
           $reportPath = Join-Path $reportDir 'report.json'
