@@ -25,11 +25,33 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up CPython
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.12.14"
-          architecture: x64
+      - name: Install pinned CPython
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonRoot = Join-Path $env:RUNNER_TEMP 'cpython-3.12.14'
+          $archivePath = Join-Path $env:RUNNER_TEMP 'cpython-3.12.14-windows-x86_64.tar.gz'
+          $archiveUrl = 'https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.12.14%2B20260814-x86_64-pc-windows-msvc-install_only.tar.gz'
+          $expectedHash = '7330282b47cd43a66b702d39078d2e5a88e580cee351d82f95045f21f5ee042a'
+          Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
+          $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "CPython archive SHA-256 mismatch: $actualHash"
+          }
+          New-Item -ItemType Directory -Force -Path $pythonRoot | Out-Null
+          & tar.exe -xzf $archivePath -C $pythonRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not extract CPython archive (exit $LASTEXITCODE)"
+          }
+          $pythonExe = Join-Path $pythonRoot 'python\python.exe'
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "CPython executable was not found at $pythonExe"
+          }
+          $pythonVersion = (& $pythonExe --version 2>&1 | Out-String).Trim()
+          if ($pythonVersion -ne 'Python 3.12.14') {
+            throw "Unexpected CPython version: $pythonVersion"
+          }
+          "MCPVANGUARD_PYTHON_EXE=$pythonExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -64,7 +86,7 @@ jobs:
               throw 'The installed npm CLI does not match the required 10.9.4 package.'
             }
 
-            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+            $pythonExe = $env:MCPVANGUARD_PYTHON_EXE
             $nodeExe = (Get-Command node.exe -ErrorAction Stop).Source
             $reportLines = & .\scripts\run_filesystem_walkthrough.ps1 `
               -PythonExe $pythonExe `
@@ -95,6 +117,21 @@ jobs:
           }
 
           exit $exitCode
+
+      - name: Ensure a report exists for early failures
+        if: always()
+        shell: pwsh
+        run: |
+          $reportDir = Join-Path $env:RUNNER_TEMP 'mcpvanguard-filesystem-evaluation'
+          New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+          $reportPath = Join-Path $reportDir 'report.json'
+          if (-not (Test-Path -LiteralPath $reportPath)) {
+            $failureReport = [ordered]@{
+              passed = $false
+              error = 'Evaluation did not produce a report; inspect preceding workflow logs.'
+            } | ConvertTo-Json -Compress
+            Set-Content -LiteralPath $reportPath -Value $failureReport -Encoding utf8
+          }
 
       - name: Upload evaluation report and log
         if: always()
